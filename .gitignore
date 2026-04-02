@@ -1,0 +1,65 @@
+
+# Python ignore patterns
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+env/
+venv/
+.venv/
+*.env
+.DS_Store
+.env
+*.egg-info/
+.ruff_cache
+uploads/
+chromadb/
+poetry.lock
+.vscode/
+
+# Deploy runtime files (should not be tracked)
+deploy/logs/
+deploy/pids.txt
+
+# Test data
+scripts/test_data/
+
+# Cache folders
+cache/
+
+# Model weights and binary files (use Git LFS instead)
+app/deepface_weights/
+app/photoholmes/weights/
+*.pth
+*.pt
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+*.whl
+*.so
+*.dylib
+*.dll
+
+# Spacy models (downloaded separately)
+app/spacy_models/
+
+# Model files (downloaded separately)
+app/models/
+
+# FinBERT weights (downloaded separately)
+app/finbert_weights/
+app/nltk_data/
+
+# Doctr weights (downloaded separately)
+app/doctr_weights/
+
+# GLiNER2 weights (downloaded separately)
+app/gliner2_weights/
+
+# Wheels directory
+wheels/
+
+# Large database dumps
+schema/*.sql
+!schema/schema.sql

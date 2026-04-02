@@ -1,0 +1,1867 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="NI6 Neutral Intelligence Service 6. Algorithmic Consistency. Verifiable Neutrality.">
+    <title>NI6 Neutral Intelligence Service 6</title>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <!-- AOS Library -->
+    <link href="https://unpkg.com/aos@next/dist/aos.css" rel="stylesheet">
+
+    <!-- Highlight.js -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="nav" data-aos="fade-down">
+        <div class="container nav-container">
+            <div class="logo">NI6</div>
+            <div class="nav-links">
+                <a href="#philosophy">Philosophy</a>
+                <a href="#flow">Registration Flow</a>
+                <a href="#architecture">Architecture</a>
+                <a href="#technology">Technology</a>
+                <a href="#osint">OSINT</a>
+                <a href="#identity">Identity</a>
+                <a href="#demo">Demo</a>
+                <a href="#quickstart">Quick Start</a>
+                <a href="#superlexicon">Superlexicon</a>
+                <a href="https://github.com/your-org/ni6" class="btn-github">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+                    </svg>
+                    GitHub
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="container hero-container">
+            <div class="hero-content" data-aos="fade-down" data-aos-duration="1000">
+                
+                <h1 class="hero-title">
+                    <span class="gradient-text">NI6</span>
+                    <span class="hero-subtitle">Neutral Intelligence Service 6</span>
+                </h1>
+                <p class="hero-tagline" id="typewriter"></p>
+                <p class="hero-description">
+                    Algorithmic KYC that performs verification without exposing personal information to humans.
+                    Secure hand gesture based secret share storage and recovery eliminates third parties completely.
+                </p>
+                <div class="hero-actions">
+                    <a href="#quickstart" class="btn btn-primary">Get Started</a>
+                    <a href="https://github.com/your-org/ni6" class="btn btn-secondary">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+                        </svg>
+                        View on GitHub
+                    </a>
+                </div>
+            </div>
+            <div class="hero-visual" data-aos="fade-up" data-aos-duration="1200" data-aos-delay="200">
+                <div class="floating-card">
+                    <div class="card-header">
+                        <div class="card-dots">
+                            <span></span><span></span><span></span>
+                        </div>
+                        <span class="card-title">Verification Result</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="metric">
+                            <span class="metric-label">Face Match</span>
+                            <span class="metric-value success">92.3%</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Authenticity</span>
+                            <span class="metric-value success">85.7%</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Risk Score</span>
+                            <span class="metric-value neutral">81/100</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Decision</span>
+                            <span class="metric-badge success">APPROVED</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="hero-bg">
+            <div class="grid"></div>
+        </div>
+    </section>
+
+    <!-- Value Proposition -->
+    <section class="value-prop">
+        <div class="container">
+            <div class="section-header" data-aos="fade-up">
+                <h2>Why NI6?</h2>
+                <p>Decentralized custody meets algorithmic neutrality</p>
+            </div>
+            <div class="cards-grid">
+                <div class="card" data-aos="fade-up" data-aos-delay="100">
+                    <div class="card-icon">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+                        </svg>
+                    </div>
+                    <h3>Decentralized Custody</h3>
+                    <p>Shamir Secret Sharing (2 of 3 threshold) eliminates single points of failure. No trusted third party required.</p>
+                </div>
+                <div class="card" data-aos="fade-up" data-aos-delay="200">
+                    <div class="card-icon">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="M12 16v-4M12 8h.01"/>
+                        </svg>
+                    </div>
+                    <h3>Algorithmic Neutrality</h3>
+                    <p>Deterministic algorithms apply identical criteria to every applicant. Full audit trails for compliance.</p>
+                </div>
+                <div class="card" data-aos="fade-up" data-aos-delay="300">
+                    <div class="card-icon">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                        </svg>
+                    </div>
+                    <h3>Zero API Costs</h3>
+                    <p>Self-contained OSINT with locally maintained databases. No per-query fees for sanctions, PEP, or negative news.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Problem Section -->
+    <section class="problem" id="philosophy">
+        <div class="container">
+            <div class="section-header" data-aos="fade-up">
+                <h2>Your Data and Assets Travel Far Beyond Who You Trust</h2>
+                <p>KYC providers and custodians create invisible security risks for both your personal information and your digital assets</p>
+            </div>
+
+            <!-- Data Flow Visualization -->
+            <div class="data-flow-warning" data-aos="fade-up" data-aos-delay="100">
+                <div class="warning-header">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                        <line x1="12" y1="9" x2="12" y2="13"/>
+                        <line x1="12" y1="17" x2="12.01" y2="17"/>
+                    </svg>
+                    <h3>The Invisible Chain of Trust</h3>
+                </div>
+                <div class="flow-chain">
+                    <div class="chain-step">
+                        <span class="chain-icon">👤</span>
+                        <span class="chain-text">You</span>
+                    </div>
+                    <div class="chain-arrow">→</div>
+                    <div class="chain-step primary">
+                        <span class="chain-icon">🏢</span>
+                        <span class="chain-text">Platform You Trust</span>
+                    </div>
+                    <div class="chain-arrow">→</div>
+                    <div class="chain-step danger">
+                        <span class="chain-icon">🔓</span>
+                        <span class="chain-text">KYC Provider + Custodian</span>
+                    </div>
+                    <div class="chain-arrow">→</div>
+                    <div class="chain-step danger">
+                        <span class="chain-icon">💾</span>
+                        <span class="chain-text">Their Sub-processors</span>
+                    </div>
+                </div>
+                <p class="warning-text">Your passport, selfie, ID card, personal details, AND private keys controlling your digital assets are stored on servers you have never heard of, governed by policies you have never seen.</p>
+            </div>
+
+            <!-- Problem Items -->
+            <div class="problem-list">
+                <div class="problem-item danger" data-aos="fade-right">
+                    <div class="problem-icon">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+                            <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
+                            <line x1="12" y1="22.08" x2="12" y2="12"/>
+                        </svg>
+                    </div>
+                    <div class="problem-content">
+                        <h3>KYC Providers Have Your Full PII</h3>
+                        <p>When you verify on any platform, your documents go to Jumio, Onfido, Stripe Identity, or similar providers. They store your passport scans, selfies, and extracted personal data. One breach at <strong>their</strong> end compromises <strong>your</strong> identity forever. Your private information is no longer private.</p>
+                    </div>
+                </div>
+
+                <div class="problem-item danger" data-aos="fade-left">
+                    <div class="problem-icon">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="2" y="7" width="20" height="14" rx="2" ry="2"/>
+                            <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>
+                        </svg>
+                    </div>
+                    <div class="problem-content">
+                        <h3>Custodians Control Your Digital Assets</h3>
+                        <p>Nearly every exchange uses custodians like Fireblocks, Coinbase Custody, or BitGo. You do not own your assets, the custodian does. When policies get misconfigured or the custodian is compromised, your digital assets disappear. Not your keys, not your coins.</p>
+                    </div>
+                </div>
+
+                <div class="problem-item hack" data-aos="fade-right">
+                    <div class="problem-icon">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+                        </svg>
+                    </div>
+                    <div class="problem-content">
+                        <h3>ByBit Custodian Hack (October 2024)</h3>
+                        <p>Fireblocks enabled custodian lost $1.5B+ in crypto. The attack exploited a misconfigured policy between the platform and custodian, not a direct breach of ByBit. Users who thought they had secure custody found their funds gone due to third party configuration error.</p>
+                    </div>
+                </div>
+
+                <div class="problem-item hack" data-aos="fade-left">
+                    <div class="problem-icon">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                            <path d="M8 11h8M8 15h8"/>
+                        </svg>
+                    </div>
+                    <div class="problem-content">
+                        <h3>WazirX Collapse (July 2024)</h3>
+                        <p>$230M+ lost after a custodial wallet breach. WazirX used Liminal Custody, yet another third party in the chain. The attack exploited multisig wallet configuration vulnerabilities. Users funds were stolen through no fault of their own.</p>
+                    </div>
+                </div>
+
+                <div class="problem-item" data-aos="fade-right">
+                    <div class="problem-icon">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <line x1="12" y1="8" x2="12" y2="16"/>
+                            <line x1="8" y1="12" x2="16" y2="12"/>
+                        </svg>
+                    </div>
+                    <div class="problem-content">
+                        <h3>The Sub-Processing Chain Never Ends</h3>
+                        <p>KYC providers and custodians themselves use cloud services (AWS, GCP), ML APIs, support contractors, and data analytics firms. Your personal information and private keys propagate through an expanding attack surface. Every link is a potential breach point for both your identity and your digital assets.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- The NI6 Difference -->
+            <div class="ni6-difference" data-aos="fade-up" data-aos-delay="300">
+                <h3>The NI6 Approach: Zero Third Party Exposure to Your Data or Assets</h3>
+                <div class="difference-grid">
+                    <div class="difference-item">
+                        <div class="diff-icon success">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="20 6 9 17 4 12"/>
+                            </svg>
+                        </div>
+                        <div class="diff-content">
+                            <h4>PII Stays on Your Device</h4>
+                            <p>Extracted data is encrypted to <strong>your</strong> public key. KYC providers never see it.</p>
+                        </div>
+                    </div>
+                    <div class="difference-item">
+                        <div class="diff-icon success">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="20 6 9 17 4 12"/>
+                            </svg>
+                        </div>
+                        <div class="diff-content">
+                            <h4>You Own Your Digital Assets</h4>
+                            <p>Your private keys are distributed using Shamir sharing. No custodian can freeze or seize your assets. Not your keys, not your coins becomes a reality with NI6.</p>
+                        </div>
+                    </div>
+                    <div class="difference-item">
+                        <div class="diff-icon success">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="20 6 9 17 4 12"/>
+                            </svg>
+                        </div>
+                        <div class="diff-content">
+                            <h4>Gesture Based Recovery</h4>
+                            <p>Recover your shares using video selfie with hand gestures. No SMS, no custodians, no social recovery guardians needed.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Registration Flow Section -->
+    <section class="registration-flow" id="flow">
+        <div class="container">
+            <div class="section-header" data-aos="fade-up">
+                <h2>Registration Flow</h2>
+                <p>How client apps interact with NI6, PII stays encrypted, algorithms decide</p>
+            </div>
+            <div class="flow-diagram" data-aos="zoom-in" data-aos-duration="1000">
+                <svg viewBox="0 0 900 500" class="flow-svg">
+                    <!-- Background -->
+                    <rect width="900" height="500" fill="#0a0a0f"/>
+
+                    <!-- Grid pattern -->
+                    <defs>
+                        <pattern id="flowGrid" width="20" height="20" patternUnits="userSpaceOnUse">
+                            <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#1a1a2e" stroke-width="0.5"/>
+                        </pattern>
+                        <linearGradient id="greenGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" style="stop-color:#00d4aa;stop-opacity:0.2"/>
+                            <stop offset="100%" style="stop-color:#00d4aa;stop-opacity:0.05"/>
+                        </linearGradient>
+                    </defs>
+                    <rect width="900" height="500" fill="url(#flowGrid)"/>
+
+                    <!-- Title -->
+                    <text x="450" y="35" text-anchor="middle" fill="#ffffff" font-family="Inter" font-size="16" font-weight="600">Client Side Registration: Privacy by Design</text>
+
+                    <!-- Client App Box -->
+                    <g class="flow-box client-app" transform="translate(50, 60)">
+                        <rect width="140" height="380" rx="12" fill="#1a1a2e" stroke="#00d4aa" stroke-width="2"/>
+                        <text x="70" y="30" text-anchor="middle" fill="#00d4aa" font-family="Inter" font-size="14" font-weight="600">Client App</text>
+                        <text x="70" y="50" text-anchor="middle" fill="#888888" font-family="Inter" font-size="11">(User's Device)</text>
+
+                        <!-- Client: Generate Keys -->
+                        <g transform="translate(15, 80)">
+                            <rect width="110" height="50" rx="6" fill="#00d4aa" opacity="0.15"/>
+                            <text x="55" y="20" text-anchor="middle" fill="#00d4aa" font-family="Inter" font-size="10" font-weight="600">1. Generate</text>
+                            <text x="55" y="35" text-anchor="middle" fill="#00d4aa" font-family="Inter" font-size="9">SECP256k1 KeyPair</text>
+                        </g>
+
+                        <!-- Client: Capture Documents -->
+                        <g transform="translate(15, 150)">
+                            <rect width="110" height="50" rx="6" fill="#00d4aa" opacity="0.15"/>
+                            <text x="55" y="20" text-anchor="middle" fill="#00d4aa" font-family="Inter" font-size="10" font-weight="600">3. Capture</text>
+                            <text x="55" y="35" text-anchor="middle" fill="#00d4aa" font-family="Inter" font-size="9">Document + Selfie</text>
+                        </g>
+
+                        <!-- Client: Receive Encrypted Data -->
+                        <g transform="translate(15, 270)">
+                            <rect width="110" height="80" rx="6" fill="#00d4aa" opacity="0.2"/>
+                            <text x="55" y="20" text-anchor="middle" fill="#00d4aa" font-family="Inter" font-size="10" font-weight="600">7. Receive</text>
+                            <text x="55" y="35" text-anchor="middle" fill="#00d4aa" font-family="Inter" font-size="9">ENCRYPTED</text>
+                            <text x="55" y="50" text-anchor="middle" fill="#00d4aa" font-family="Inter" font-size="9">Extracted Data</text>
+                            <text x="55" y="68" text-anchor="middle" fill="#6366f1" font-family="Inter" font-size="8">(Only user can decrypt)</text>
+                        </g>
+                    </g>
+
+                    <!-- NI6 Server Box -->
+                    <g class="flow-box server" transform="translate(380, 60)">
+                        <rect width="200" height="380" rx="12" fill="#1a1a2e" stroke="#6366f1" stroke-width="2"/>
+                        <text x="100" y="30" text-anchor="middle" fill="#6366f1" font-family="Inter" font-size="14" font-weight="600">NI6 Servers</text>
+                        <text x="100" y="50" text-anchor="middle" fill="#888888" font-family="Inter" font-size="11">(Algorithmic Processing)</text>
+
+                        <!-- NI6: OTP Request -->
+                        <g transform="translate(15, 80)">
+                            <rect width="170" height="50" rx="6" fill="#6366f1" opacity="0.15"/>
+                            <text x="85" y="20" text-anchor="middle" fill="#6366f1" font-family="Inter" font-size="10" font-weight="600">2. Request OTP</text>
+                            <text x="85" y="35" text-anchor="middle" fill="#888888" font-family="Inter" font-size="9">ECDSA signature required</text>
+                        </g>
+
+                        <!-- NI6: Process Documents -->
+                        <g transform="translate(15, 150)">
+                            <rect width="170" height="90" rx="6" fill="#6366f1" opacity="0.15"/>
+                            <text x="85" y="20" text-anchor="middle" fill="#6366f1" font-family="Inter" font-size="10" font-weight="600">4. Process Documents</text>
+                            <text x="85" y="38" text-anchor="middle" fill="#888888" font-family="Inter" font-size="8">• OCR & Extraction</text>
+                            <text x="85" y="52" text-anchor="middle" fill="#888888" font-family="Inter" font-size="8">• Face Verification</text>
+                            <text x="85" y="66" text-anchor="middle" fill="#888888" font-family="Inter" font-size="8">• Forgery Detection</text>
+                            <text x="85" y="80" text-anchor="middle" fill="#888888" font-family="Inter" font-size="8">• OSINT Screening</text>
+                        </g>
+
+                        <!-- NI6: Return Results -->
+                        <g transform="translate(15, 270)">
+                            <rect width="170" height="80" rx="6" fill="#6366f1" opacity="0.15"/>
+                            <text x="85" y="20" text-anchor="middle" fill="#6366f1" font-family="Inter" font-size="10" font-weight="600">6. Return Two Things:</text>
+                            <text x="85" y="40" text-anchor="middle" fill="#00d4aa" font-family="Inter" font-size="9">A) KYC Decision (approve or reject)</text>
+                            <text x="85" y="60" text-anchor="middle" fill="#ec4899" font-family="Inter" font-size="9">B) ENCRYPTED extracted data</text>
+                            <text x="85" y="75" text-anchor="middle" fill="#888888" font-family="Inter" font-size="7">(encrypted with user's public key)</text>
+                        </g>
+                    </g>
+
+                    <!-- Your Service Backend Box -->
+                    <g class="flow-box business-server" transform="translate(710, 60)">
+                        <rect width="140" height="380" rx="12" fill="#1a1a2e" stroke="#8b5cf6" stroke-width="2"/>
+                        <text x="70" y="30" text-anchor="middle" fill="#8b5cf6" font-family="Inter" font-size="14" font-weight="600">Your Service</text>
+                        <text x="70" y="50" text-anchor="middle" fill="#888888" font-family="Inter" font-size="11">(Service Backend)</text>
+
+                        <!-- Your Service: Decision Only -->
+                        <g transform="translate(15, 270)">
+                            <rect width="110" height="80" rx="6" fill="#8b5cf6" opacity="0.15"/>
+                            <text x="55" y="25" text-anchor="middle" fill="#8b5cf6" font-family="Inter" font-size="10" font-weight="600">5. Receives</text>
+                            <text x="55" y="45" text-anchor="middle" fill="#8b5cf6" font-family="Inter" font-size="9">KYC Decision</text>
+                            <text x="55" y="65" text-anchor="middle" fill="#888888" font-family="Inter" font-size="8">(NO PII!)</text>
+                            <text x="55" y="78" text-anchor="middle" fill="#22c55e" font-family="Inter" font-size="8">Just: APPROVED</text>
+                        </g>
+                    </g>
+
+                    <!-- Data Flow Arrows -->
+                    <!-- Arrow 1: Client -> NI6 (OTP Request) -->
+                    <g>
+                        <path d="M 190 105 L 380 105" stroke="#00d4aa" stroke-width="2" marker-end="url(#arrowGreen)" class="flow-arrow"/>
+                        <text x="285" y="95" text-anchor="middle" fill="#00d4aa" font-family="Inter" font-size="9">POST /api/otp/</text>
+                    </g>
+
+                    <!-- Arrow 2: NI6 -> Client (OTP Response) -->
+                    <g>
+                        <path d="M 380 120 L 190 120" stroke="#6366f1" stroke-width="2" stroke-dasharray="4,4" marker-end="url(#arrowPurple)" class="flow-arrow"/>
+                        <text x="285" y="138" text-anchor="middle" fill="#6366f1" font-family="Inter" font-size="9">Encrypted OTP</text>
+                    </g>
+
+                    <!-- Arrow 3: Client -> NI6 (Submit Document) -->
+                    <g>
+                        <path d="M 190 175 L 380 175" stroke="#00d4aa" stroke-width="2" marker-end="url(#arrowGreen)" class="flow-arrow"/>
+                        <text x="285" y="165" text-anchor="middle" fill="#00d4aa" font-family="Inter" font-size="9">POST /api/jobs/analyze-async</text>
+                    </g>
+
+                    <!-- Arrow 4: NI6 -> Your Service Backend (Decision) -->
+                    <g>
+                        <path d="M 580 310 L 710 310" stroke="#6366f1" stroke-width="2" marker-end="url(#arrowPurple)" class="flow-arrow"/>
+                        <text x="645" y="300" text-anchor="middle" fill="#6366f1" font-family="Inter" font-size="9">KYC Result</text>
+                        <text x="645" y="325" text-anchor="middle" fill="#888888" font-family="Inter" font-size="8">{decision: "APPROVED"}</text>
+                    </g>
+
+                    <!-- Arrow 5: NI6 -> Client (Encrypted Data) -->
+                    <g>
+                        <path d="M 380 330 L 190 330" stroke="#ec4899" stroke-width="2" stroke-dasharray="4,4" marker-end="url(#arrowPink)" class="flow-arrow"/>
+                        <text x="285" y="350" text-anchor="middle" fill="#ec4899" font-family="Inter" font-size="9">ECIES Encrypted Data</text>
+                        <text x="285" y="365" text-anchor="middle" fill="#888888" font-family="Inter" font-size="8">{name, dob, address...}</text>
+                    </g>
+
+                    <!-- Arrow Markers -->
+                    <defs>
+                        <marker id="arrowGreen" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                            <polygon points="0 0, 10 3, 0 6" fill="#00d4aa"/>
+                        </marker>
+                        <marker id="arrowPurple" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                            <polygon points="0 0, 10 3, 0 6" fill="#6366f1"/>
+                        </marker>
+                        <marker id="arrowPink" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                            <polygon points="0 0, 10 3, 0 6" fill="#ec4899"/>
+                        </marker>
+                    </defs>
+
+                    <!-- Privacy Notice -->
+                    <g transform="translate(50, 460)">
+                        <rect width="800" height="30" rx="6" fill="url(#greenGradient)" stroke="#00d4aa" stroke-width="1"/>
+                        <text x="400" y="20" text-anchor="middle" fill="#00d4aa" font-family="Inter" font-size="11" font-weight="600">PRIVACY GUARANTEE: Your server NEVER sees user PII. Only the client app receives encrypted extracted data.</text>
+                    </g>
+                </svg>
+            </div>
+
+            <!-- Flow Steps Detail -->
+            <div class="flow-steps" data-aos="fade-up" data-aos-delay="200">
+                <div class="flow-step">
+                    <div class="step-number">1</div>
+                    <h4>Generate KeyPair</h4>
+                    <p>Client app generates SECP256k1 keypair. Private key never leaves device.</p>
+                </div>
+                <div class="flow-step">
+                    <div class="step-number">2</div>
+                    <h4>Request OTP</h4>
+                    <p>Client requests OTP using ECDSA signature. Response encrypted with client's public key.</p>
+                </div>
+                <div class="flow-step">
+                    <div class="step-number">3</div>
+                    <h4>Capture & Submit</h4>
+                    <p>Document image, selfie/video submitted with signed request to NI6.</p>
+                </div>
+                <div class="flow-step">
+                    <div class="step-number">4</div>
+                    <h4>Algorithmic Processing</h4>
+                    <p>NI6 runs OCR, face verification, forgery detection, OSINT screening, no human sees PII.</p>
+                </div>
+                <div class="flow-step">
+                    <div class="step-number">5</div>
+                    <h4>Decision to Your Service Backend</h4>
+                    <p>Your service backend receives ONLY the KYC decision (APPROVED or REJECTED), zero PII.</p>
+                </div>
+                <div class="flow-step">
+                    <div class="step-number">6</div>
+                    <h4>Encrypted Data to Client</h4>
+                    <p>Extracted data returned ECIES-encrypted to client. Only user can decrypt.</p>
+                </div>
+                <div class="flow-step">
+                    <div class="step-number">7</div>
+                    <h4>Client Decrypts</h4>
+                    <p>Client app decrypts extracted data with private key for local use/storage.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Architecture Section -->
+    <section class="architecture" id="architecture">
+        <div class="container">
+            <div class="section-header" data-aos="fade-up">
+                <h2>Distributed Architecture</h2>
+                <p>Two critical purposes: distributed secret storage AND fault tolerance</p>
+            </div>
+
+            <!-- Purpose 1: Secret Sharing -->
+            <div class="architecture-purpose" data-aos="fade-up" data-aos-delay="100">
+                <h3><span class="purpose-number">1</span> Distributed Secret Storage</h3>
+                <p>Shamir's Secret Sharing (2 of 3 threshold) ensures no single server ever has the complete private key.</p>
+            </div>
+
+            <div class="architecture-diagram" data-aos="zoom-in" data-aos-duration="1000">
+                <svg viewBox="0 0 800 400" class="arch-svg">
+                    <!-- Background -->
+                    <rect width="800" height="400" fill="#0a0a0f"/>
+
+                    <!-- Grid pattern -->
+                    <defs>
+                        <pattern id="smallGrid" width="20" height="20" patternUnits="userSpaceOnUse">
+                            <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#1a1a2e" stroke-width="0.5"/>
+                        </pattern>
+                    </defs>
+                    <rect width="800" height="400" fill="url(#smallGrid)"/>
+
+                    <!-- Title -->
+                    <text x="400" y="30" text-anchor="middle" fill="#888888" font-family="Inter" font-size="12">PURPOSE 1: SECRET SHARING</text>
+
+                    <!-- Client Device -->
+                    <g class="node client" transform="translate(50, 150)">
+                        <rect x="0" y="0" width="120" height="100" rx="8" fill="#1a1a2e" stroke="#00d4aa" stroke-width="2"/>
+                        <text x="60" y="45" text-anchor="middle" fill="#ffffff" font-family="Inter" font-size="14" font-weight="600">Client</text>
+                        <text x="60" y="65" text-anchor="middle" fill="#888888" font-family="Inter" font-size="11">Device</text>
+                        <text x="60" y="85" text-anchor="middle" fill="#00d4aa" font-family="Inter" font-size="10">Private Key</text>
+                    </g>
+
+                    <!-- Split animation path -->
+                    <path d="M 170 200 L 230 200" stroke="#00d4aa" stroke-width="2" stroke-dasharray="5,5" class="flow-line"/>
+
+                    <!-- Split Circle -->
+                    <circle cx="200" cy="200" r="25" fill="#1a1a2e" stroke="#00d4aa" stroke-width="2" class="pulse-circle"/>
+                    <text x="200" y="205" text-anchor="middle" fill="#00d4aa" font-family="Inter" font-size="10">SPLIT</text>
+
+                    <!-- Server 1 -->
+                    <g class="node server" transform="translate(270, 50)">
+                        <rect x="0" y="0" width="100" height="80" rx="8" fill="#1a1a2e" stroke="#6366f1" stroke-width="2"/>
+                        <text x="50" y="35" text-anchor="middle" fill="#ffffff" font-family="Inter" font-size="12" font-weight="600">Server 1</text>
+                        <text x="50" y="55" text-anchor="middle" fill="#6366f1" font-family="Inter" font-size="10">Share 0</text>
+                    </g>
+
+                    <!-- Server 2 -->
+                    <g class="node server" transform="translate(270, 160)">
+                        <rect x="0" y="0" width="100" height="80" rx="8" fill="#1a1a2e" stroke="#8b5cf6" stroke-width="2"/>
+                        <text x="50" y="35" text-anchor="middle" fill="#ffffff" font-family="Inter" font-size="12" font-weight="600">Server 2</text>
+                        <text x="50" y="55" text-anchor="middle" fill="#8b5cf6" font-family="Inter" font-size="10">Share 1</text>
+                    </g>
+
+                    <!-- Server 3 -->
+                    <g class="node server" transform="translate(270, 270)">
+                        <rect x="0" y="0" width="100" height="80" rx="8" fill="#1a1a2e" stroke="#ec4899" stroke-width="2"/>
+                        <text x="50" y="35" text-anchor="middle" fill="#ffffff" font-family="Inter" font-size="12" font-weight="600">Server 3</text>
+                        <text x="50" y="55" text-anchor="middle" fill="#ec4899" font-family="Inter" font-size="10">Share 2</text>
+                    </g>
+
+                    <!-- Connection lines to servers -->
+                    <path d="M 225 200 L 270 90" stroke="#6366f1" stroke-width="1.5" stroke-dasharray="4,4" class="flow-line"/>
+                    <path d="M 225 200 L 270 200" stroke="#8b5cf6" stroke-width="1.5" stroke-dasharray="4,4" class="flow-line"/>
+                    <path d="M 225 200 L 270 310" stroke="#ec4899" stroke-width="1.5" stroke-dasharray="4,4" class="flow-line"/>
+
+                    <!-- Any 2 label -->
+                    <rect x="420" y="175" width="120" height="50" rx="25" fill="#00d4aa" opacity="0.2"/>
+                    <text x="480" y="205" text-anchor="middle" fill="#00d4aa" font-family="Inter" font-size="11" font-weight="600">Any 2 shares</text>
+                    <text x="480" y="220" text-anchor="middle" fill="#00d4aa" font-family="Inter" font-size="10">reconstruct secret</text>
+
+                    <!-- Recovered Client -->
+                    <g class="node client" transform="translate(580, 150)">
+                        <rect x="0" y="0" width="120" height="100" rx="8" fill="#1a1a2e" stroke="#00d4aa" stroke-width="2"/>
+                        <text x="60" y="45" text-anchor="middle" fill="#ffffff" font-family="Inter" font-size="14" font-weight="600">Client</text>
+                        <text x="60" y="65" text-anchor="middle" fill="#888888" font-family="Inter" font-size="11">Device</text>
+                        <text x="60" y="85" text-anchor="middle" fill="#00d4aa" font-family="Inter" font-size="10">Key Recovered</text>
+                    </g>
+
+                    <!-- Arrow to recovered -->
+                    <path d="M 540 200 L 580 200" stroke="#00d4aa" stroke-width="2" marker-end="url(#arrowhead)" class="flow-line"/>
+
+                    <!-- Arrow marker -->
+                    <defs>
+                        <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                            <polygon points="0 0, 10 3, 0 6" fill="#00d4aa"/>
+                        </marker>
+                    </defs>
+                </svg>
+                <div class="architecture-caption">
+                    <p><strong>Shamir Secret Sharing (2 of 3 threshold)</strong></p>
+                    <ul>
+                        <li>Client splits secret into 3 shares</li>
+                        <li>Each share sent to independent server</li>
+                        <li><strong>No single server has complete secret</strong></li>
+                        <li>Any 2 shares can reconstruct the original</li>
+                        <li>Loss of 1 server = no data loss</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Purpose 2: Fault Tolerance -->
+            <div class="architecture-purpose" data-aos="fade-up" data-aos-delay="200" style="margin-top: 40px;">
+                <h3><span class="purpose-number">2</span> Fault Tolerance & High Availability</h3>
+                <p>Instances can accept jobs on behalf of each other. When a down instance recovers, it processes queued jobs without client resubmission.</p>
+            </div>
+
+            <div class="fault-tolerance-diagram" data-aos="zoom-in" data-aos-duration="1000">
+                <svg viewBox="0 0 800 400" class="arch-svg">
+                    <!-- Background -->
+                    <rect width="800" height="400" fill="#0a0a0f"/>
+
+                    <!-- Grid pattern -->
+                    <rect width="800" height="400" fill="url(#smallGrid)"/>
+
+                    <!-- Title -->
+                    <text x="400" y="30" text-anchor="middle" fill="#888888" font-family="Inter" font-size="12">PURPOSE 2: FAULT TOLERANCE</text>
+
+                    <!-- Client -->
+                    <g class="node client" transform="translate(50, 150)">
+                        <rect x="0" y="0" width="120" height="100" rx="8" fill="#1a1a2e" stroke="#00d4aa" stroke-width="2"/>
+                        <text x="60" y="45" text-anchor="middle" fill="#ffffff" font-family="Inter" font-size="14" font-weight="600">Client</text>
+                        <text x="60" y="65" text-anchor="middle" fill="#888888" font-family="Inter" font-size="11">Device</text>
+                        <text x="60" y="85" text-anchor="middle" fill="#00d4aa" font-family="Inter" font-size="10">Submits job</text>
+                    </g>
+
+                    <!-- Arrow from Client -->
+                    <path d="M 170 200 L 250 200" stroke="#00d4aa" stroke-width="2" stroke-dasharray="5,5" class="flow-line"/>
+
+                    <!-- Split Circle -->
+                    <circle cx="210" cy="200" r="25" fill="#1a1a2e" stroke="#00d4aa" stroke-width="2" class="pulse-circle"/>
+                    <text x="210" y="205" text-anchor="middle" fill="#00d4aa" font-family="Inter" font-size="9">ROUTE</text>
+
+                    <!-- Server 1 (Online, accepting S2 jobs) -->
+                    <g class="node server" transform="translate(270, 50)">
+                        <rect x="0" y="0" width="100" height="80" rx="8" fill="rgba(34, 197, 94, 0.1)" stroke="#22c55e" stroke-width="2"/>
+                        <text x="50" y="30" text-anchor="middle" fill="#ffffff" font-family="Inter" font-size="12" font-weight="600">Server 1</text>
+                        <text x="50" y="48" text-anchor="middle" fill="#22c55e" font-family="Inter" font-size="9">● ONLINE</text>
+                        <text x="50" y="65" text-anchor="middle" fill="#6366f1" font-family="Inter" font-size="9">Share 0</text>
+                    </g>
+
+                    <!-- Server 2 (Offline) -->
+                    <g class="node server offline" transform="translate(270, 160)">
+                        <rect x="0" y="0" width="100" height="80" rx="8" fill="#1a1a2e" stroke="#ef4444" stroke-width="2" stroke-dasharray="6,4"/>
+                        <text x="50" y="30" text-anchor="middle" fill="#ffffff" font-family="Inter" font-size="12" font-weight="600">Server 2</text>
+                        <text x="50" y="48" text-anchor="middle" fill="#ef4444" font-family="Inter" font-size="9">● OFFLINE</text>
+                        <text x="50" y="65" text-anchor="middle" fill="#8b5cf6" font-family="Inter" font-size="9">Share 1</text>
+                    </g>
+
+                    <!-- Server 3 (Online) -->
+                    <g class="node server" transform="translate(270, 270)">
+                        <rect x="0" y="0" width="100" height="80" rx="8" fill="#1a1a2e" stroke="#22c55e" stroke-width="2"/>
+                        <text x="50" y="30" text-anchor="middle" fill="#ffffff" font-family="Inter" font-size="12" font-weight="600">Server 3</text>
+                        <text x="50" y="48" text-anchor="middle" fill="#22c55e" font-family="Inter" font-size="9">● ONLINE</text>
+                        <text x="50" y="65" text-anchor="middle" fill="#ec4899" font-family="Inter" font-size="9">Share 2</text>
+                    </g>
+
+                    <!-- Connection lines - 2 arrows to Server 1 -->
+                    <!-- Arrow 1: S1's own job -->
+                    <path d="M 235 185 L 270 90" stroke="#22c55e" stroke-width="2" marker-end="url(#arrowGreen)" class="flow-line"/>
+                    <!-- Arrow 2: S2's job (routed to S1) -->
+                    <path d="M 235 200 L 270 100" stroke="#ef4444" stroke-width="2" stroke-dasharray="4,4" marker-end="url(#arrowRed)" class="flow-line"/>
+                    <!-- Arrow 3: S3's own job -->
+                    <path d="M 235 215 L 270 310" stroke="#22c55e" stroke-width="1.5" stroke-dasharray="4,4" class="flow-line"/>
+
+                    <!-- Job labels -->
+                    <text x="295" y="120" text-anchor="middle" fill="#22c55e" font-family="Inter" font-size="7">S1 job</text>
+                    <text x="295" y="135" text-anchor="middle" fill="#ef4444" font-family="Inter" font-size="7">S2 job →</text>
+
+                    <!-- Queue indicator for S1 -->
+                    <g transform="translate(385, 70)">
+                        <rect x="0" y="0" width="60" height="30" rx="4" fill="#6366f1" opacity="0.2" stroke="#6366f1" stroke-width="1" stroke-dasharray="2,2"/>
+                        <text x="30" y="12" text-anchor="middle" fill="#6366f1" font-family="Inter" font-size="7">Queue</text>
+                        <text x="30" y="24" text-anchor="middle" fill="#888888" font-family="Inter" font-size="6">[S2 waiting]</text>
+                    </g>
+
+                    <!-- Arrow marker definitions -->
+                    <defs>
+                        <marker id="arrowGreen" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                            <polygon points="0 0, 10 3, 0 6" fill="#22c55e"/>
+                        </marker>
+                        <marker id="arrowRed" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                            <polygon points="0 0, 10 3, 0 6" fill="#ef4444"/>
+                        </marker>
+                        <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                            <polygon points="0 0, 10 3, 0 6" fill="#00d4aa"/>
+                        </marker>
+                    </defs>
+
+                    <!-- Recovery section -->
+                    <g transform="translate(500, 50)">
+                        <rect x="0" y="0" width="260" height="100" rx="8" fill="rgba(34, 197, 94, 0.05)" stroke="#22c55e" stroke-width="1" stroke-dasharray="4,4"/>
+                        <text x="130" y="20" text-anchor="middle" fill="#22c55e" font-family="Inter" font-size="11" font-weight="600">When S2 Recovers:</text>
+                        <text x="20" y="45" fill="#888888" font-family="Inter" font-size="9">1. S2 comes back online</text>
+                        <text x="20" y="62" fill="#888888" font-family="Inter" font-size="9">2. Reads queued jobs from S1 & S3</text>
+                        <text x="20" y="79" fill="#888888" font-family="Inter" font-size="9">3. Processes normally</text>
+                        <text x="20" y="96" fill="#00d4aa" font-family="Inter" font-size="9" font-weight="600">→ No client retry needed!</text>
+                    </g>
+                </svg>
+                <div class="architecture-caption">
+                    <p><strong>Fault Tolerance & High Availability</strong></p>
+                    <ul>
+                        <li><strong>Instances monitor each other's health</strong> via RethinkDB real-time sync</li>
+                        <li><strong>Jobs are queued</strong> for any instance that is down</li>
+                        <li><strong>No client retry needed</strong>, queued jobs process automatically on recovery</li>
+                        <li><strong>24/7 availability</strong>, system functions with any 2 of 3 instances</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Combined Benefits -->
+            <div class="combined-benefits" data-aos="fade-up" data-aos-delay="300">
+                <h3>Combined: Security + Reliability</h3>
+                <div class="benefits-grid">
+                    <div class="benefit-card">
+                        <div class="benefit-icon">🔐</div>
+                        <h4>No Single Point of Compromise</h4>
+                        <p>Breaching one server reveals nothing useful, only a partial share</p>
+                    </div>
+                    <div class="benefit-card">
+                        <div class="benefit-icon">⚡</div>
+                        <h4>No Single Point of Failure</h4>
+                        <p>Losing one server does not stop the system, other instances continue operating</p>
+                    </div>
+                    <div class="benefit-card">
+                        <div class="benefit-icon">🔄</div>
+                        <h4>Zero Downtime Recovery</h4>
+                        <p>Down instances catch up automatically, clients never need to resubmit</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Comparison Table -->
+    <section class="comparison">
+        <div class="container">
+            <div class="section-header" data-aos="fade-up">
+                <h2>Traditional Approach vs NI6</h2>
+                <p>Why eliminating third party exposure matters</p>
+            </div>
+            <div class="comparison-table" data-aos="fade-up" data-aos-delay="200">
+                <div class="table-header">
+                    <div class="col">Security Risk</div>
+                    <div class="col">Traditional KYC & Custody</div>
+                    <div class="col highlight">NI6 Solution</div>
+                </div>
+                <div class="table-row">
+                    <div class="col">PII Storage</div>
+                    <div class="col">KYC providers store all documents and extracted data on their servers</div>
+                    <div class="col highlight">Extracted data encrypted to users device, NI6 never stores PII</div>
+                </div>
+                <div class="table-row">
+                    <div class="col">Custodial Risk</div>
+                    <div class="col">Keys held by Fireblocks, Coinbase Custody, or similar third parties</div>
+                    <div class="col highlight">2 of 3 Shamir sharing, no single point of failure</div>
+                </div>
+                <div class="table-row">
+                    <div class="col">Policy Vulnerabilities</div>
+                    <div class="col">Misconfigured platform-custodian policies caused ByBit/WazirX losses</div>
+                    <div class="col highlight">Algorithmic decisions, no human override paths to exploit</div>
+                </div>
+                <div class="table-row">
+                    <div class="col">Sub-Processing Chain</div>
+                    <div class="col">Your data flows through cloud providers, ML APIs, support contractors</div>
+                    <div class="col highlight">Deterministic algorithms, no human eyes on PII, ever</div>
+                </div>
+                <div class="table-row">
+                    <div class="col">Breach Impact</div>
+                    <div class="col">One KYC provider breach leaks millions of identities permanently</div>
+                    <div class="col highlight">Even if NI6 is breached, only encrypted blobs useless to attackers</div>
+                </div>
+                <div class="table-row">
+                    <div class="col">Your Service Backend Liability</div>
+                    <div class="col">Your service backend stores user PII, GDPR or HIPAA compliance burden</div>
+                    <div class="col highlight">Your service backend receives only approve or reject, zero PII liability</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Technology Stack -->
+    <section class="technology" id="technology">
+        <div class="container">
+            <div class="section-header" data-aos="fade-up">
+                <h2>Technology Stack</h2>
+                <p>Built with proven, open-source technologies</p>
+            </div>
+            <div class="tech-grid">
+                <div class="tech-category" data-aos="fade-up" data-aos-delay="100">
+                    <h3>Cryptography</h3>
+                    <div class="tech-items">
+                        <div class="tech-item">SECP256k1</div>
+                        <div class="tech-item">Shamir's Secret Sharing</div>
+                        <div class="tech-item">ECIES + AES-256-GCM</div>
+                        <div class="tech-item">NaCl SecretBox</div>
+                    </div>
+                </div>
+                <div class="tech-category" data-aos="fade-up" data-aos-delay="200">
+                    <h3>Computer Vision</h3>
+                    <div class="tech-items">
+                        <div class="tech-item">Facenet512</div>
+                        <div class="tech-item">RetinaFace</div>
+                        <div class="tech-item">MediaPipe Hands</div>
+                        <div class="tech-item">ELA Analysis</div>
+                        <div class="tech-item">Noise Inconsistency</div>
+                        <div class="tech-item">Error Level Analysis</div>
+                        <div class="tech-item">Shadow Detection</div>
+                        <div class="tech-item">JPEG Ghosts</div>
+                        <div class="tech-item">Metadata Analysis</div>
+                        <div class="tech-item">DeepFace Anti Spoof</div>
+                    </div>
+                </div>
+                <div class="tech-category" data-aos="fade-up" data-aos-delay="300">
+                    <h3>OCR & NLP</h3>
+                    <div class="tech-items">
+                        <div class="tech-item">DoTR OCR</div>
+                        <div class="tech-item">VADER</div>
+                        <div class="tech-item">FinBERT</div>
+                        <div class="tech-item">spaCy NER</div>
+                    </div>
+                </div>
+                <div class="tech-category" data-aos="fade-up" data-aos-delay="400">
+                    <h3>Infrastructure</h3>
+                    <div class="tech-items">
+                        <div class="tech-item">MariaDB</div>
+                        <div class="tech-item">RethinkDB</div>
+                        <div class="tech-item">RQ (Redis Queue)</div>
+                        <div class="tech-item">Python asyncio</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Video Selfie Feature Section -->
+    <section class="video-selfie-feature">
+        <div class="container">
+            <div class="section-header" data-aos="fade-up">
+                <h2>The Key Recovery Problem</h2>
+                <p>First in the world gesture based video selfie authentication for practical key recovery</p>
+            </div>
+
+            <!-- The Problem -->
+            <div class="recovery-problem" data-aos="fade-up" data-aos-delay="100">
+                <h3>How Do You Recover Lost Keys Without Trusted Third Parties?</h3>
+                <p>Your authentication happens via private and public keypairs derived from a randomly generated secret. This secret is stored securely client side behind biometrically secured local storage.</p>
+                <p class="problem-statement">But what happens when your device is lost or the application is uninstalled and local storage is purged?</p>
+            </div>
+
+            <!-- Traditional Solutions Problems -->
+            <div class="traditional-problems" data-aos="fade-up" data-aos-delay="200">
+                <h3>Traditional Recovery Approaches Have Critical Flaws</h3>
+                <div class="problems-grid">
+                    <div class="problem-card">
+                        <div class="problem-icon warning">🏦</div>
+                        <h4>Custodial Recovery</h4>
+                        <p>Trust Fireblocks, Coinbase Custody, or similar third parties. Creates the exact security risks NI6 was built to eliminate.</p>
+                    </div>
+                    <div class="problem-card">
+                        <div class="problem-icon warning">👥</div>
+                        <h4>Social Recovery</h4>
+                        <p>Manual process requiring friends or family to approve recovery. Slow, relies on others, creates social pressure.</p>
+                    </div>
+                    <div class="problem-card">
+                        <div class="problem-icon warning">📸</div>
+                        <h4>Static Selfie</h4>
+                        <p>Automated recovery using a single selfie image. Better than custodial but has spoofing risks with deepfakes.</p>
+                    </div>
+                    <div class="problem-card">
+                        <div class="problem-icon warning">💬</div>
+                        <h4>SMS or Email OTP</h4>
+                        <p>Vulnerable to SIM swapping, SS7 attacks, and account takeovers. Not acceptable for cryptographic key recovery.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- The NI6 Solution -->
+            <div class="ni6-solution" data-aos="fade-up" data-aos-delay="300">
+                <div class="solution-badge">
+                    <span class="badge-icon">🌍</span>
+                    <span class="badge-text">World First</span>
+                </div>
+                <h3>Gesture Based Video Selfie Authentication</h3>
+                <p>NI6 invented the first practical key recovery system that combines Shamir Secret Sharing for distributed storage with gesture based video selfie authentication for recovery requests. No third parties. No manual processes. No SMS vulnerabilities.</p>
+            </div>
+
+            <!-- How It Works -->
+            <div class="recovery-flow" data-aos="fade-up" data-aos-delay="400">
+                <h3>The Two Part Solution</h3>
+                <div class="flow-parts">
+                    <div class="flow-part">
+                        <div class="part-number">1</div>
+                        <h4>Distributed Storage</h4>
+                        <p>Shamir Secret Sharing (2 of 3) splits your secret across independent servers. No single server has your complete key. But how do you prove you should get those shares back?</p>
+                    </div>
+                    <div class="flow-divider">→</div>
+                    <div class="flow-part featured">
+                        <div class="part-number">2</div>
+                        <h4>Gesture Based Recovery</h4>
+                        <p>Record a video selfie showing specific hand gestures at precise times. MediaPipe detects 21 hand landmarks. The gesture sequence serves as your OTP. Practically unhackable.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Hand Gesture Animation -->
+            <div class="gesture-animation" data-aos="zoom-in" data-aos-delay="500">
+                <svg viewBox="0 0 900 500" class="gesture-svg">
+                    <!-- Background -->
+                    <rect width="900" height="500" fill="#0a0a0f"/>
+                    <rect width="900" height="500" fill="url(#gestureGrid)"/>
+
+                    <!-- Grid pattern definition -->
+                    <defs>
+                        <pattern id="gestureGrid" width="20" height="20" patternUnits="userSpaceOnUse">
+                            <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#1a1a2e" stroke-width="0.5"/>
+                        </pattern>
+                    </defs>
+
+                    <!-- Title -->
+                    <text x="450" y="40" text-anchor="middle" fill="#ffffff" font-family="Inter" font-size="18" font-weight="600">How Gesture Based Recovery Works</text>
+
+                    <!-- Timeline -->
+                    <g transform="translate(50, 80)">
+                        <!-- Stage 1: Recording -->
+                        <g class="stage stage-1" transform="translate(0, 0)">
+                            <rect x="0" y="0" width="200" height="300" rx="12" fill="#1a1a2e" stroke="#6366f1" stroke-width="2"/>
+                            <text x="100" y="30" text-anchor="middle" fill="#6366f1" font-family="Inter" font-size="14" font-weight="600">1. Record Recovery Video</text>
+
+                            <!-- Animated Gesture Images with background -->
+                            <g class="gesture-anim">
+                                <g class="gesture-group-1">
+                                    <rect x="25" y="70" width="150" height="150" fill="#1a1a2e" rx="8"/>
+                                    <image class="gesture-img-1" href="assets/images/gesture_1.png" x="25" y="70" width="150" height="150" preserveAspectRatio="xMidYMid meet"/>
+                                </g>
+                                <g class="gesture-group-2">
+                                    <rect x="25" y="70" width="150" height="150" fill="#1a1a2e" rx="8"/>
+                                    <image class="gesture-img-2" href="assets/images/gesture_2.png" x="25" y="70" width="150" height="150" preserveAspectRatio="xMidYMid meet"/>
+                                </g>
+                                <g class="gesture-group-3">
+                                    <rect x="25" y="70" width="150" height="150" fill="#1a1a2e" rx="8"/>
+                                    <image class="gesture-img-3" href="assets/images/gesture_3.png" x="25" y="70" width="150" height="150" preserveAspectRatio="xMidYMid meet"/>
+                                </g>
+                                <g class="gesture-group-4">
+                                    <rect x="25" y="70" width="150" height="150" fill="#1a1a2e" rx="8"/>
+                                    <image class="gesture-img-4" href="assets/images/gesture_4.png" x="25" y="70" width="150" height="150" preserveAspectRatio="xMidYMid meet"/>
+                                </g>
+
+                                <g class="gesture-group-0">
+                                    <rect x="25" y="70" width="150" height="150" fill="#1a1a2e" rx="8"/>
+                                    <image class="gesture-img-0" href="assets/images/gesture_1.png" x="25" y="70" width="150" height="150" preserveAspectRatio="xMidYMid meet"/>
+                                </g>
+                            </g>
+
+                            <!-- OTP Display -->
+                            <g transform="translate(20, 140)">
+                                <text x="80" y="100" text-anchor="middle" fill="#22c55e" font-family="Inter" font-size="22" font-weight="700" letter-spacing="6">1-2-3-4</text>
+                            </g>
+
+                            <text x="100" y="265" text-anchor="middle" fill="#888888" font-family="Inter" font-size="10">Show 4 digits at specific times</text>
+                            <text x="100" y="282" text-anchor="middle" fill="#888888" font-family="Inter" font-size="9">4.5s, 8.5s, 12.5s, 16.5s</text>
+                        </g>
+
+                        <!-- Arrow -->
+                        <path d="M 200 150 L 240 150" stroke="#00d4aa" stroke-width="2" marker-end="url(#arrowWhite)" class="flow-line"/>
+
+                        <!-- Stage 2: Detection -->
+                        <g class="stage stage-2" transform="translate(250, 0)">
+                            <rect x="0" y="0" width="200" height="300" rx="12" fill="#1a1a2e" stroke="#8b5cf6" stroke-width="2"/>
+                            <text x="100" y="30" text-anchor="middle" fill="#8b5cf6" font-family="Inter" font-size="14" font-weight="600">2. MediaPipe Detects</text>
+
+                            <!-- Hand landmark visualization -->
+                            <g transform="translate(50, 70)">
+                                <!-- Hand outline -->
+                                <ellipse cx="50" cy="60" rx="40" ry="50" fill="none" stroke="#8b5cf6" stroke-width="1.5" stroke-dasharray="4,4"/>
+
+                                <!-- 21 landmark points -->
+                                <circle cx="50" cy="30" r="3" fill="#8b5cf6"/>
+                                <circle cx="50" cy="20" r="3" fill="#8b5cf6"/>
+                                <circle cx="50" cy="10" r="3" fill="#8b5cf6"/>
+
+                                <circle cx="35" cy="35" r="3" fill="#8b5cf6"/>
+                                <circle cx="30" cy="25" r="3" fill="#8b5cf6"/>
+                                <circle cx="28" cy="15" r="3" fill="#8b5cf6"/>
+
+                                <circle cx="65" cy="35" r="3" fill="#8b5cf6"/>
+                                <circle cx="70" cy="25" r="3" fill="#8b5cf6"/>
+                                <circle cx="72" cy="15" r="3" fill="#8b5cf6"/>
+
+                                <!-- More landmarks -->
+                                <circle cx="40" cy="50" r="3" fill="#8b5cf6"/>
+                                <circle cx="35" cy="45" r="3" fill="#8b5cf6"/>
+                                <circle cx="60" cy="50" r="3" fill="#8b5cf6"/>
+                                <circle cx="65" cy="45" r="3" fill="#8b5cf6"/>
+
+                                <circle cx="50" cy="50" r="3" fill="#00d4aa"/>
+                                <circle cx="50" cy="70" r="3" fill="#8b5cf6"/>
+                                <circle cx="50" cy="85" r="3" fill="#8b5cf6"/>
+                                <circle cx="40" cy="90" r="3" fill="#8b5cf6"/>
+                                <circle cx="60" cy="90" r="3" fill="#8b5cf6"/>
+                            </g>
+
+                            <text x="100" y="170" text-anchor="middle" fill="#00d4aa" font-family="Inter" font-size="11" font-weight="600">21 Landmark Points</text>
+                            <text x="100" y="190" text-anchor="middle" fill="#888888" font-family="Inter" font-size="10">Per finger joint</text>
+
+                            <!-- Detection info -->
+                            <g transform="translate(20, 210)">
+                                <rect x="0" y="0" width="160" height="70" rx="8" fill="rgba(139, 92, 246, 0.1)"/>
+                                <text x="80" y="20" text-anchor="middle" fill="#8b5cf6" font-family="Inter" font-size="10" font-weight="600">Frame Accurate Sampling</text>
+                                <text x="80" y="40" text-anchor="middle" fill="#888888" font-family="Inter" font-size="9">Extracts gesture at</text>
+                                <text x="80" y="55" text-anchor="middle" fill="#888888" font-family="Inter" font-size="9">exact timestamps</text>
+                            </g>
+                        </g>
+
+                        <!-- Arrow -->
+                        <path d="M 450 150 L 490 150" stroke="#00d4aa" stroke-width="2" marker-end="url(#arrowWhite)" class="flow-line"/>
+
+                        <!-- Stage 3: Verification -->
+                        <g class="stage stage-3" transform="translate(500, 0)">
+                            <rect x="0" y="0" width="200" height="300" rx="12" fill="#1a1a2e" stroke="#00d4aa" stroke-width="2"/>
+                            <text x="100" y="30" text-anchor="middle" fill="#00d4aa" font-family="Inter" font-size="14" font-weight="600">3. Shares Returned</text>
+
+                            <!-- Success animation -->
+                            <g transform="translate(50, 60)">
+                                <circle cx="50" cy="50" r="40" fill="rgba(34, 197, 94, 0.1)"/>
+                                <circle cx="50" cy="50" r="30" fill="rgba(34, 197, 94, 0.15)"/>
+                                <path d="M 35 50 L 45 60 L 65 40" fill="none" stroke="#22c55e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                            </g>
+
+                            <!-- Benefits -->
+                            <g transform="translate(20, 200)">
+                                <rect x="0" y="0" width="160" height="80" rx="8" fill="rgba(0, 212, 170, 0.05)"/>
+                                <text x="80" y="20" text-anchor="middle" fill="#00d4aa" font-family="Inter" font-size="10" font-weight="600">Secret Recovered</text>
+                                <text x="80" y="40" text-anchor="middle" fill="#888888" font-family="Inter" font-size="8">✓ No third parties</text>
+                                <text x="80" y="52" text-anchor="middle" fill="#888888" font-family="Inter" font-size="8">✓ No SMS needed</text>
+                                <text x="80" y="64" text-anchor="middle" fill="#888888" font-family="Inter" font-size="8">✓ Fully automated</text>
+                            </g>
+                        </g>
+                    </g>
+
+                    <!-- Arrow marker -->
+                    <defs>
+                        <marker id="arrowWhite" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                            <polygon points="0 0, 10 3, 0 6" fill="#00d4aa"/>
+                        </marker>
+                    </defs>
+                </svg>
+            </div>
+
+            <!-- Why Superior -->
+            <div class="gesture-benefits" data-aos="fade-up" data-aos-delay="600">
+                <h3>Why Gesture Based Video is Superior to Static Selfie</h3>
+                <div class="benefits-cards">
+                    <div class="gesture-benefit">
+                        <div class="benefit-number">01</div>
+                        <h4>Deepfake Resistant</h4>
+                        <p>AI generated videos cannot match natural hand gesture dynamics and timing</p>
+                    </div>
+                    <div class="gesture-benefit">
+                        <div class="benefit-number">02</div>
+                        <h4>Anti Replay Attack</h4>
+                        <p>Each video is unique with time based gesture sequence, cannot be reused</p>
+                    </div>
+                    <div class="gesture-benefit">
+                        <div class="benefit-number">03</div>
+                        <h4>No Third Parties</h4>
+                        <p>No custodians, no social recovery guardians, just cryptographic proof</p>
+                    </div>
+                    <div class="gesture-benefit">
+                        <div class="benefit-number">04</div>
+                        <h4>Fully Automated</h4>
+                        <p>No manual approval processes, recovery completes in seconds</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- World First Badge -->
+            <div class="world-first" data-aos="fade-up" data-aos-delay="700">
+                <div class="world-first-content">
+                    <div class="world-first-icon">🏆</div>
+                    <div class="world-first-text">
+                        <h4>First in the World</h4>
+                        <p>NI6 is the first system to combine distributed secret storage with gesture based video selfie authentication for practical key recovery. No other solution offers this level of security without trusted third parties.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- OSINT Background Screening Section -->
+    <section class="osint-screening" id="osint">
+        <div class="container">
+            <!-- Section Header -->
+            <div class="section-header" data-aos="fade-up">
+                <h2>OSINT Background Screening</h2>
+                <p>Zero API Costs. Self-Contained. Algorithmically Neutral.</p>
+            </div>
+
+            <!-- How It Works Overview -->
+            <div class="osint-overview" data-aos="fade-up" data-aos-delay="100">
+                <h3>4-Phase Screening Pipeline</h3>
+                <p>Algorithmic background checks without expensive external APIs. Self-contained databases and open-source models deliver enterprise-grade screening at zero marginal cost.</p>
+            </div>
+
+            <!-- Phase Cards -->
+            <div class="osint-phases">
+                <!-- Phase 1: Face-Verified Search -->
+                <div class="osint-phase" data-aos="fade-right">
+                    <div class="phase-icon">🔍</div>
+                    <div class="phase-content">
+                        <h4>Face-Verified Image Search</h4>
+                        <p>DuckDuckGo image search + DeepFace facial recognition (Facenet512). Searches for "{name} photo", "{name} profile", "{name} {country}". Downloads up to 10 images and extracts face embeddings using RetinaFace. Only analyzes articles with verified photo matches (cosine similarity ≥ 0.85). Eliminates false positives from common names. 24-hour caching with exponential backoff.</p>
+                    </div>
+                </div>
+
+                <!-- Phase 2: Negative News -->
+                <div class="osint-phase" data-aos="fade-left">
+                    <div class="phase-icon">📰</div>
+                    <div class="phase-content">
+                        <h4>NLP-Enhanced News Analysis</h4>
+                        <p>DuckDuckGo web search with multiple query variations. Trafilatura extracts article content (7 rotating User-Agents, rate limiting). VADER sentiment filters positive results (compound < -0.3). FinBERT classifies financial crimes: fraud, corruption, money_laundering. Event type detection: conviction (≥0.7), investigation (≥0.5), allegation (≥0.4), cleared. spaCy NER ensures relevance.</p>
+                    </div>
+                </div>
+
+                <!-- Phase 3: PEP & Sanctions -->
+                <div class="osint-phase" data-aos="fade-right">
+                    <div class="phase-icon">🗂️</div>
+                    <div class="phase-content">
+                        <h4>PEP & Sanctions Database</h4>
+                        <p>Self-contained OSSPEP database with 100K+ entries synced from OFAC, EU, UN lists. Fuzzy name matching using Jaccard similarity + Coverage score. Binary confidence: 99% (Name+Country+DOB), 66% (Name+Country), 33% (Name only). Handles "First Last" and "Last, First" formats. ISO 2-letter country codes with 60+ variations. DOB range support (YYYY-MM-DD, YYYY-MM, YYYY). Filters by status (current/former).</p>
+                    </div>
+                </div>
+
+                <!-- Phase 4: Risk Scoring -->
+                <div class="osint-phase featured" data-aos="zoom-in">
+                    <div class="phase-icon">⚖️</div>
+                    <div class="phase-content">
+                        <h4>Binary PASS/FAIL Decision</h4>
+                        <p>Clear thresholds for compliance. FAIL if sanctions confidence ≥ 65%, PEP confidence ≥ 65%, or negative news score ≥ 50. No continuous scoring—uses binary decision model. Full audit trail with evidence URLs, face match percentages, and classification confidence scores. Deterministic and reproducible.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Data Flow Diagram -->
+            <div class="architecture-diagram" data-aos="zoom-in" data-aos-duration="1000">
+                <svg viewBox="0 0 900 700" class="arch-svg">
+                    <!-- Background -->
+                    <rect width="900" height="700" fill="#0a0a0f"/>
+
+                    <!-- Grid pattern -->
+                    <defs>
+                        <pattern id="osintGrid" width="20" height="20" patternUnits="userSpaceOnUse">
+                            <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#1a1a2e" stroke-width="0.5"/>
+                        </pattern>
+                        <linearGradient id="phase1Gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" style="stop-color:#00d4aa;stop-opacity:0.1"/>
+                            <stop offset="100%" style="stop-color:#00d4aa;stop-opacity:0.05"/>
+                        </linearGradient>
+                        <linearGradient id="phase2Gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" style="stop-color:#6366f1;stop-opacity:0.1"/>
+                            <stop offset="100%" style="stop-color:#6366f1;stop-opacity:0.05"/>
+                        </linearGradient>
+                        <linearGradient id="phase3Gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" style="stop-color:#8b5cf6;stop-opacity:0.1"/>
+                            <stop offset="100%" style="stop-color:#8b5cf6;stop-opacity:0.05"/>
+                        </linearGradient>
+                        <linearGradient id="phase4Gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" style="stop-color:#22c55e;stop-opacity:0.1"/>
+                            <stop offset="100%" style="stop-color:#22c55e;stop-opacity:0.05"/>
+                        </linearGradient>
+                    </defs>
+                    <rect width="900" height="700" fill="url(#osintGrid)"/>
+
+                    <!-- Title -->
+                    <text x="450" y="35" text-anchor="middle" fill="#ffffff" font-family="Inter" font-size="18" font-weight="600">OSINT Screening Pipeline</text>
+
+                    <!-- Input -->
+                    <g transform="translate(50, 60)">
+                        <rect width="800" height="50" rx="8" fill="#1a1a2e" stroke="#888888" stroke-width="2"/>
+                        <text x="400" y="22" text-anchor="middle" fill="#ffffff" font-family="Inter" font-size="13" font-weight="600">Input</text>
+                        <text x="400" y="40" text-anchor="middle" fill="#888888" font-family="Inter" font-size="11">Name, DOB, Country, user_identity_id (optional)</text>
+                    </g>
+
+                    <!-- Arrow to Phase 1 -->
+                    <path d="M 450 110 L 450 140" stroke="#00d4aa" stroke-width="2" marker-end="url(#osintArrow)" class="flow-line"/>
+
+                    <!-- Phase 1: Face-Verified Image Search -->
+                    <g transform="translate(100, 150)">
+                        <rect width="700" height="100" rx="12" fill="url(#phase1Gradient)" stroke="#00d4aa" stroke-width="2"/>
+                        <text x="350" y="25" text-anchor="middle" fill="#00d4aa" font-family="Inter" font-size="14" font-weight="600">Phase 1: Face-Verified Image Search</text>
+                        <text x="350" y="45" text-anchor="middle" fill="#888888" font-family="Inter" font-size="10">(if user_identity_id provided)</text>
+
+                        <!-- Steps -->
+                        <g transform="translate(30, 60)">
+                            <text x="0" y="12" fill="#888888" font-family="Inter" font-size="10">• DuckDuckGo Images: "{name} photo", "{name} profile", "{name} {country}"</text>
+                            <text x="0" y="28" fill="#888888" font-family="Inter" font-size="10">• Download up to 10 images (configurable via OSINT_FACE_VERIFIED_MAX_IMAGES)</text>
+                            <text x="0" y="44" fill="#888888" font-family="Inter" font-size="10">• DeepFace Facenet512 + RetinaFace → face embeddings</text>
+                            <text x="380" y="12" fill="#888888" font-family="Inter" font-size="10">• Cosine similarity threshold: 0.85</text>
+                            <text x="380" y="28" fill="#888888" font-family="Inter" font-size="10">• Source classification: social media, company, news, forum</text>
+                            <text x="380" y="44" fill="#888888" font-family="Inter" font-size="10">• 60-second timeout, 24-hour caching, 2-second rate limit</text>
+                        </g>
+                    </g>
+
+                    <!-- Arrow to Phase 2 -->
+                    <path d="M 450 250 L 450 280" stroke="#6366f1" stroke-width="2" marker-end="url(#osintArrow)" class="flow-line"/>
+
+                    <!-- Phase 2: NLP News Analysis -->
+                    <g transform="translate(100, 290)">
+                        <rect width="700" height="120" rx="12" fill="url(#phase2Gradient)" stroke="#6366f1" stroke-width="2"/>
+                        <text x="350" y="25" text-anchor="middle" fill="#6366f1" font-family="Inter" font-size="14" font-weight="600">Phase 2: NLP News Analysis</text>
+
+                        <!-- Steps -->
+                        <g transform="translate(30, 45)">
+                            <text x="0" y="12" fill="#888888" font-family="Inter" font-size="10">• DuckDuckGo web search with multiple query variations</text>
+                            <text x="0" y="28" fill="#888888" font-family="Inter" font-size="10">• VADER sentiment screening (compound &lt; -0.3 = negative)</text>
+                            <text x="0" y="44" fill="#888888" font-family="Inter" font-size="10">• Relevance filtering: name in title/first 200 chars, fuzzy matching ≥ 0.5</text>
+                            <text x="380" y="12" fill="#888888" font-family="Inter" font-size="10">• Trafilatura extraction (7 User-Agents, rate limiting)</text>
+                            <text x="380" y="28" fill="#888888" font-family="Inter" font-size="10">• FinBERT: fraud, corruption, money_laundering</text>
+                            <text x="380" y="44" fill="#888888" font-family="Inter" font-size="10">• Event types: conviction (≥0.7), investigation (≥0.5), allegation (≥0.4)</text>
+                            <text x="190" y="72" text-anchor="middle" fill="#22c55e" font-family="Inter" font-size="9">Anti-bot: User-Agent rotation, 2-5s delays, 3 retries with exponential backoff</text>
+                        </g>
+                    </g>
+
+                    <!-- Arrow to Phase 3 -->
+                    <path d="M 450 410 L 450 440" stroke="#8b5cf6" stroke-width="2" marker-end="url(#osintArrow)" class="flow-line"/>
+
+                    <!-- Phase 3: PEP & Sanctions Database -->
+                    <g transform="translate(100, 450)">
+                        <rect width="700" height="100" rx="12" fill="url(#phase3Gradient)" stroke="#8b5cf6" stroke-width="2"/>
+                        <text x="350" y="25" text-anchor="middle" fill="#8b5cf6" font-family="Inter" font-size="14" font-weight="600">Phase 3: PEP &amp; Sanctions Database</text>
+
+                        <!-- Steps -->
+                        <g transform="translate(30, 45)">
+                            <text x="0" y="12" fill="#888888" font-family="Inter" font-size="10">• OSSPEP local database (pep_entries, crime_entries tables)</text>
+                            <text x="0" y="28" fill="#888888" font-family="Inter" font-size="10">• Name tokenization: accent removal, title stripping, normalization</text>
+                            <text x="0" y="44" fill="#888888" font-family="Inter" font-size="10">• Binary confidence: 99% (Name+Country+DOB), 66% (Name+Country), 33% (Name)</text>
+                            <text x="380" y="12" fill="#888888" font-family="Inter" font-size="10">• Fuzzy matching: Jaccard similarity + Coverage score</text>
+                            <text x="380" y="28" fill="#888888" font-family="Inter" font-size="10">• 60+ country name variations (USA/United States/America)</text>
+                            <text x="380" y="44" fill="#888888" font-family="Inter" font-size="10">• DOB ranges: YYYY-MM-DD, YYYY-MM, YYYY, "1980 to 1985"</text>
+                        </g>
+                    </g>
+
+                    <!-- Arrow to Phase 4 -->
+                    <path d="M 450 550 L 450 580" stroke="#22c55e" stroke-width="2" marker-end="url(#osintArrow)" class="flow-line"/>
+
+                    <!-- Phase 4: Risk Calculation -->
+                    <g transform="translate(100, 590)">
+                        <rect width="700" height="80" rx="12" fill="url(#phase4Gradient)" stroke="#22c55e" stroke-width="2"/>
+                        <text x="350" y="25" text-anchor="middle" fill="#22c55e" font-family="Inter" font-size="14" font-weight="600">Phase 4: Binary PASS/FAIL Decision</text>
+
+                        <!-- Rules -->
+                        <g transform="translate(50, 45)">
+                            <text x="0" y="12" fill="#ef4444" font-family="Inter" font-size="10" font-weight="600">FAIL if:</text>
+                            <text x="50" y="12" fill="#888888" font-family="Inter" font-size="10">sanctions ≥ 65%</text>
+                            <text x="180" y="12" fill="#888888" font-family="Inter" font-size="10">|</text>
+                            <text x="200" y="12" fill="#888888" font-family="Inter" font-size="10">PEP ≥ 65%</text>
+                            <text x="310" y="12" fill="#888888" font-family="Inter" font-size="10">|</text>
+                            <text x="330" y="12" fill="#888888" font-family="Inter" font-size="10">negative news ≥ 50</text>
+                            <text x="50" y="32" fill="#22c55e" font-family="Inter" font-size="10" font-weight="600">Otherwise: PASS</text>
+                            <text x="200" y="32" fill="#00d4aa" font-family="Inter" font-size="10">Full audit trail with evidence</text>
+                        </g>
+                    </g>
+
+                    <!-- Arrow marker -->
+                    <defs>
+                        <marker id="osintArrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                            <polygon points="0 0, 10 3, 0 6" fill="#00d4aa"/>
+                        </marker>
+                    </defs>
+
+                    <!-- Output label -->
+                    <g transform="translate(50, 680)">
+                        <text x="400" y="12" text-anchor="middle" fill="#22c55e" font-family="Inter" font-size="11" font-weight="600">Output: PASS/FAIL + Detailed Evidence (URLs, face match %, classification scores)</text>
+                    </g>
+                </svg>
+            </div>
+
+            <!-- Feature Highlights -->
+            <div class="osint-features" data-aos="fade-up" data-aos-delay="200">
+                <div class="osint-feature-card" data-aos="fade-up" data-aos-delay="100">
+                    <h4>Eliminates False Positives</h4>
+                    <p>Face verification ensures we analyze the right person, not just same-name individuals. Cosine similarity threshold of 0.85 filters out unrelated photos.</p>
+                </div>
+                <div class="osint-feature-card" data-aos="fade-up" data-aos-delay="200">
+                    <h4>Self-Contained Databases</h4>
+                    <p>No per-query fees. OSSPEP synced from OFAC, EU, UN. 100K+ entries maintained locally. Full control over data freshness and accuracy.</p>
+                </div>
+                <div class="osint-feature-card" data-aos="fade-up" data-aos-delay="300">
+                    <h4>NLP-Enhanced Analysis</h4>
+                    <p>FinBERT + VADER + spaCy. Distinguishes conviction from allegation. Full audit trails with classification confidence and evidence URLs.</p>
+                </div>
+            </div>
+
+            <!-- Binary Model Note -->
+            <div class="architecture-purpose" data-aos="fade-up" data-aos-delay="300">
+                <h3><span class="purpose-number">★</span> Binary PASS/FAIL Model</h3>
+                <p>NI6 uses clear thresholds for compliance decisions. No ambiguous "medium risk" scores. FAIL if any threshold is exceeded: sanctions ≥ 65%, PEP ≥ 65%, or negative news ≥ 50. This binary approach ensures consistent, auditable decisions.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Identity Verification Section -->
+    <section class="identity-verification" id="identity">
+        <div class="container">
+            <!-- Section Header -->
+            <div class="section-header" data-aos="fade-up">
+                <h2>Identity Verification</h2>
+                <p>Proof-of-Life + Proof-of-Identity + Proof-of-Address. Algorithmic verification without human review.</p>
+            </div>
+
+            <!-- Overview -->
+            <div class="verification-overview" data-aos="fade-up" data-aos-delay="100">
+                <h3>Three-Layer Verification System</h3>
+                <p>NI6 performs comprehensive identity verification through three complementary layers: proof-of-life ensures the person is real and present, proof-of-identity validates that documents belong to the same person and are current, and proof-of-address verifies the residential address from the bank statement.</p>
+            </div>
+
+            <!-- Verification Layers -->
+            <div class="verification-layers">
+                <!-- Layer 1: Proof-of-Life -->
+                <div class="verification-layer" data-aos="fade-right">
+                    <div class="layer-header">
+                        <div class="layer-number">1</div>
+                        <h4>Proof-of-Life Verification</h4>
+                    </div>
+                    <div class="layer-content">
+                        <div class="layer-icon">👤</div>
+                        <div class="layer-details">
+                            <h5>Video Selfie Authentication</h5>
+                            <p>Ensures the applicant is a real, live person physically present during verification—preventing deepfakes, photos of photos, and replay attacks.</p>
+                            <ul class="feature-list">
+                                <li><strong>Hand Gesture Detection:</strong> MediaPipe tracks 21 hand landmarks per finger. Applicant displays specific gestures at exact timestamps (e.g., show "4" fingers at 4.5s, "3" fingers at 8.5s).</li>
+                                <li><strong>Liveness Detection:</strong> DeepFace anti-spoofing models detect presentation attacks (printed photos, masks, screen replays).</li>
+                                <li><strong>Temporal Consistency:</strong> Video analysis ensures natural motion and timing—AI-generated videos cannot match real human dynamics.</li>
+                                <li><strong>Anti-Replay:</strong> Each video is unique. Time-based gesture sequences cannot be reused or recorded for later submission.</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Layer 2: Proof-of-Identity -->
+                <div class="verification-layer" data-aos="fade-left">
+                    <div class="layer-header">
+                        <div class="layer-number">2</div>
+                        <h4>Proof-of-Identity Verification</h4>
+                    </div>
+                    <div class="layer-content">
+                        <div class="layer-icon">📄</div>
+                        <div class="layer-details">
+                            <h5>Document Cross-Validation</h5>
+                            <p>Validates that all documents belong to the same person and are legally valid for identity verification.</p>
+                            <ul class="feature-list">
+                                <li><strong>Face Matching:</strong> Passport photo face embedding compared with selfie face embedding using Facenet512. Cosine similarity threshold ensures the same person in both documents.</li>
+                                <li><strong>Name Cross-Check:</strong> Name extracted from bank statement compared with name on passport using fuzzy string matching. Detects discrepancies, maiden names, or typos.</li>
+                                <li><strong>Passport Expiration:</strong> Passport expiration date extracted and validated against current date. Expired passports automatically rejected.</li>
+                                <li><strong>Bank Statement Recency:</strong> Bank statement date checked to ensure document is recent enough (configurable threshold, typically 3 months). Prevents using old addresses or outdated information.</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Layer 3: Proof-of-Address -->
+                <div class="verification-layer" data-aos="fade-right">
+                    <div class="layer-header">
+                        <div class="layer-number">3</div>
+                        <h4>Proof-of-Address Verification</h4>
+                    </div>
+                    <div class="layer-content">
+                        <div class="layer-icon">🏠</div>
+                        <div class="layer-details">
+                            <h5>Bank Statement Address Validation</h5>
+                            <p>Extracts and validates the residential address from the bank statement to ensure the applicant has a verifiable address and the document is authentic.</p>
+                            <ul class="feature-list">
+                                <li><strong>Address Extraction:</strong> DoTR OCR extracts the full residential address from the bank statement including street address, city, state/province, postal code, and country.</li>
+                                <li><strong>Format Validation:</strong> Validates address format matches expected patterns for the declared country. Detects malformed or incomplete addresses.</li>
+                                <li><strong>Document Authenticity:</strong> Bank statement metadata, logo detection, and layout analysis verify the document is a genuine bank statement—not a forged or manipulated image.</li>
+                                <li><strong>Name-Address Consistency:</strong> Ensures the name on the bank statement matches the extracted address recipient name, preventing use of another person's statement.</li>
+                                <li><strong>PO Box Detection:</strong> Optionally flags PO Box addresses based on compliance requirements. Some jurisdictions require physical residential addresses.</li>
+                                <li><strong>Country Validation:</strong> Validates that the address country matches the passport issuing country or declared country of residence.</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Verification Flow Diagram -->
+            <div class="verification-flow" data-aos="zoom-in" data-aos-delay="200">
+                <svg viewBox="0 0 900 600" class="arch-svg">
+                    <!-- Background -->
+                    <rect width="900" height="450" fill="#0a0a0f"/>
+
+                    <!-- Grid pattern -->
+                    <defs>
+                        <pattern id="verificationGrid" width="20" height="20" patternUnits="userSpaceOnUse">
+                            <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#1a1a2e" stroke-width="0.5"/>
+                        </pattern>
+                    </defs>
+                    <rect width="900" height="450" fill="url(#verificationGrid)"/>
+
+                    <!-- Title -->
+                    <text x="450" y="35" text-anchor="middle" fill="#ffffff" font-family="Inter" font-size="18" font-weight="600">Identity Verification Flow</text>
+
+                    <!-- Documents Input -->
+                    <g transform="translate(50, 60)">
+                        <rect width="180" height="140" rx="8" fill="#1a1a2e" stroke="#888888" stroke-width="2"/>
+                        <text x="90" y="25" text-anchor="middle" fill="#ffffff" font-family="Inter" font-size="13" font-weight="600">Documents</text>
+
+                        <!-- Document items -->
+                        <g transform="translate(15, 45)">
+                            <rect width="150" height="25" rx="4" fill="#00d4aa" opacity="0.1" stroke="#00d4aa" stroke-width="1"/>
+                            <text x="75" y="17" text-anchor="middle" fill="#00d4aa" font-family="Inter" font-size="10">Passport Image</text>
+                        </g>
+                        <g transform="translate(15, 75)">
+                            <rect width="150" height="25" rx="4" fill="#6366f1" opacity="0.1" stroke="#6366f1" stroke-width="1"/>
+                            <text x="75" y="17" text-anchor="middle" fill="#6366f1" font-family="Inter" font-size="10">Selfie / Video</text>
+                        </g>
+                        <g transform="translate(15, 105)">
+                            <rect width="150" height="25" rx="4" fill="#8b5cf6" opacity="0.1" stroke="#8b5cf6" stroke-width="1"/>
+                            <text x="75" y="17" text-anchor="middle" fill="#8b5cf6" font-family="Inter" font-size="10">Bank Statement</text>
+                        </g>
+                    </g>
+
+                    <!-- Arrow to Extraction -->
+                    <path d="M 230 130 L 270 130" stroke="#888888" stroke-width="2" marker-end="url(#grayArrow)" class="flow-line"/>
+
+                    <!-- Data Extraction -->
+                    <g transform="translate(280, 60)">
+                        <rect width="200" height="140" rx="8" fill="#1a1a2e" stroke="#6366f1" stroke-width="2"/>
+                        <text x="100" y="25" text-anchor="middle" fill="#6366f1" font-family="Inter" font-size="13" font-weight="600">Data Extraction</text>
+
+                        <!-- Extraction items -->
+                        <g transform="translate(15, 45)">
+                            <text x="0" y="12" fill="#888888" font-family="Inter" font-size="9">• Passport: Name, DOB, Expiry</text>
+                            <text x="0" y="30" fill="#888888" font-family="Inter" font-size="9">• Passport: Face photo</text>
+                            <text x="0" y="48" fill="#888888" font-family="Inter" font-size="9">• Selfie: Face embedding</text>
+                            <text x="0" y="66" fill="#888888" font-family="Inter" font-size="9">• Bank Statement: Name, Date, Address</text>
+                            <text x="0" y="84" fill="#888888" font-family="Inter" font-size="9">• Video: Gesture sequence</text>
+                        </g>
+                    </g>
+
+                    <!-- Arrow to Verification -->
+                    <path d="M 480 130 L 520 130" stroke="#6366f1" stroke-width="2" marker-end="url(#purpleArrow)" class="flow-line"/>
+
+                    <!-- Verification Checks -->
+                    <g transform="translate(530, 60)">
+                        <rect width="320" height="140" rx="8" fill="#1a1a2e" stroke="#00d4aa" stroke-width="2"/>
+                        <text x="160" y="25" text-anchor="middle" fill="#00d4aa" font-family="Inter" font-size="13" font-weight="600">Verification Checks</text>
+
+                        <!-- Check items -->
+                        <g transform="translate(15, 45)">
+                            <text x="0" y="10" fill="#22c55e" font-family="Inter" font-size="9" font-weight="600">✓ Face Match</text>
+                            <text x="100" y="10" fill="#888888" font-family="Inter" font-size="8">Cosine similarity ≥ threshold</text>
+
+                            <text x="0" y="30" fill="#22c55e" font-family="Inter" font-size="9" font-weight="600">✓ Name Match</text>
+                            <text x="100" y="30" fill="#888888" font-family="Inter" font-size="8">Passport name = Statement name</text>
+
+                            <text x="0" y="50" fill="#22c55e" font-family="Inter" font-size="9" font-weight="600">✓ Passport Valid</text>
+                            <text x="100" y="50" fill="#888888" font-family="Inter" font-size="8">Expiry date &gt; today</text>
+
+                            <text x="0" y="70" fill="#22c55e" font-family="Inter" font-size="9" font-weight="600">✓ Statement Recent</text>
+                            <text x="100" y="70" fill="#888888" font-family="Inter" font-size="8">Date within threshold (3 mo)</text>
+
+                            <text x="0" y="90" fill="#22c55e" font-family="Inter" font-size="9" font-weight="600">✓ Address Valid</text>
+                            <text x="100" y="90" fill="#888888" font-family="Inter" font-size="8">Format, completeness, authenticity</text>
+
+                            <text x="0" y="110" fill="#22c55e" font-family="Inter" font-size="9" font-weight="600">✓ Liveness</text>
+                            <text x="100" y="110" fill="#888888" font-family="Inter" font-size="8">Video gestures at correct times</text>
+                        </g>
+                    </g>
+
+                    <!-- Proof-of-Life Section -->
+                    <g transform="translate(50, 230)">
+                        <rect width="380" height="170" rx="12" fill="rgba(99, 102, 241, 0.05)" stroke="#6366f1" stroke-width="2"/>
+                        <text x="190" y="25" text-anchor="middle" fill="#6366f1" font-family="Inter" font-size="14" font-weight="600">Layer 1: Proof-of-Life</text>
+
+                        <!-- Content -->
+                        <g transform="translate(20, 45)">
+                            <text x="0" y="12" fill="#ffffff" font-family="Inter" font-size="11" font-weight="600">Video Selfie + Hand Gestures</text>
+                            <text x="0" y="30" fill="#888888" font-family="Inter" font-size="9">• MediaPipe: 21 landmarks per finger</text>
+                            <text x="0" y="46" fill="#888888" font-family="Inter" font-size="9">• Gestures at exact timestamps (4.5s, 8.5s, 12.5s, 16.5s)</text>
+                            <text x="0" y="62" fill="#888888" font-family="Inter" font-size="9">• DeepFace anti-spoof: detects photos, masks, screens</text>
+                            <text x="0" y="78" fill="#888888" font-family="Inter" font-size="9">• Temporal analysis: natural human motion</text>
+                            <text x="0" y="94" fill="#888888" font-family="Inter" font-size="9">• Anti-replay: unique per submission</text>
+
+                            <rect x="0" y="110" width="340" height="40" rx="6" fill="rgba(34, 197, 94, 0.1)" stroke="#22c55e" stroke-width="1"/>
+                            <text x="170" y="127" text-anchor="middle" fill="#22c55e" font-family="Inter" font-size="9" font-weight="600">Prevents: Deepfakes, Photos, Replay Attacks</text>
+                            <text x="170" y="142" text-anchor="middle" fill="#22c55e" font-family="Inter" font-size="8">Ensures: Real person, physically present, live interaction</text>
+                        </g>
+                    </g>
+
+                    <!-- Proof-of-Identity Section -->
+                    <g transform="translate(470, 230)">
+                        <rect width="380" height="170" rx="12" fill="rgba(0, 212, 170, 0.05)" stroke="#00d4aa" stroke-width="2"/>
+                        <text x="190" y="25" text-anchor="middle" fill="#00d4aa" font-family="Inter" font-size="14" font-weight="600">Layer 2: Proof-of-Identity</text>
+
+                        <!-- Content -->
+                        <g transform="translate(20, 45)">
+                            <text x="0" y="12" fill="#ffffff" font-family="Inter" font-size="11" font-weight="600">Document Cross-Validation</text>
+                            <text x="0" y="30" fill="#888888" font-family="Inter" font-size="9">• Face: Passport photo ↔ Selfie (Facenet512)</text>
+                            <text x="0" y="46" fill="#888888" font-family="Inter" font-size="9">• Name: Passport name ↔ Statement name (fuzzy)</text>
+                            <text x="0" y="62" fill="#888888" font-family="Inter" font-size="9">• Date: Passport expiry &gt; today</text>
+                            <text x="0" y="78" fill="#888888" font-family="Inter" font-size="9">• Date: Bank statement recent (configurable)</text>
+                            <text x="0" y="94" fill="#888888" font-family="Inter" font-size="9">• OCR: DoTR extracts text from documents</text>
+
+                            <rect x="0" y="110" width="340" height="40" rx="6" fill="rgba(34, 197, 94, 0.1)" stroke="#22c55e" stroke-width="1"/>
+                            <text x="170" y="127" text-anchor="middle" fill="#22c55e" font-family="Inter" font-size="9" font-weight="600">Prevents: Identity fraud, Document forgery</text>
+                            <text x="170" y="142" text-anchor="middle" fill="#22c55e" font-family="Inter" font-size="8">Ensures: Same person, Valid documents, Current info</text>
+                        </g>
+                    </g>
+
+                    <!-- Proof-of-Address Section -->
+                    <g transform="translate(260, 420)">
+                        <rect width="380" height="150" rx="12" fill="rgba(139, 92, 246, 0.05)" stroke="#8b5cf6" stroke-width="2"/>
+                        <text x="190" y="25" text-anchor="middle" fill="#8b5cf6" font-family="Inter" font-size="14" font-weight="600">Layer 3: Proof-of-Address</text>
+
+                        <!-- Content -->
+                        <g transform="translate(20, 45)">
+                            <text x="0" y="12" fill="#ffffff" font-family="Inter" font-size="11" font-weight="600">Bank Statement Address Validation</text>
+                            <text x="0" y="30" fill="#888888" font-family="Inter" font-size="9">• OCR: Extract full address (street, city, state, postal)</text>
+                            <text x="0" y="46" fill="#888888" font-family="Inter" font-size="9">• Format: Validates address pattern for country</text>
+                            <text x="0" y="62" fill="#888888" font-family="Inter" font-size="9">• Authenticity: Logo detection, layout analysis</text>
+                            <text x="0" y="78" fill="#888888" font-family="Inter" font-size="9">• Name-Address: Matches recipient to statement name</text>
+                            <text x="0" y="94" fill="#888888" font-family="Inter" font-size="9">• PO Box: Optional flag for compliance requirements</text>
+
+                            <rect x="0" y="110" width="340" height="25" rx="6" fill="rgba(34, 197, 94, 0.1)" stroke="#22c55e" stroke-width="1"/>
+                            <text x="170" y="127" text-anchor="middle" fill="#22c55e" font-family="Inter" font-size="9" font-weight="600">Prevents: Fake addresses, Stolen statements</text>
+                        </g>
+                    </g>
+
+                    <!-- Output -->
+                    <g transform="translate(50, 590)">
+                        <text x="400" y="12" text-anchor="middle" fill="#22c55e" font-family="Inter" font-size="11" font-weight="600">Output: Binary PASS/FAIL with detailed verification results</text>
+                    </g>
+
+                    <!-- Arrow markers -->
+                    <defs>
+                        <marker id="grayArrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                            <polygon points="0 0, 10 3, 0 6" fill="#888888"/>
+                        </marker>
+                        <marker id="purpleArrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                            <polygon points="0 0, 10 3, 0 6" fill="#6366f1"/>
+                        </marker>
+                    </defs>
+                </svg>
+            </div>
+
+            <!-- Key Benefits -->
+            <div class="verification-benefits" data-aos="fade-up" data-aos-delay="300">
+                <h3>Why Three-Layer Verification?</h3>
+                <div class="benefits-grid">
+                    <div class="benefit-item" data-aos="fade-up" data-aos-delay="100">
+                        <div class="benefit-icon">🎯</div>
+                        <h4>Prevents Identity Fraud</h4>
+                        <p>Face matching and name cross-validation ensure documents belong to the same person. Cannot use stolen documents with different names.</p>
+                    </div>
+                    <div class="benefit-item" data-aos="fade-up" data-aos-delay="200">
+                        <div class="benefit-icon">⏰</div>
+                        <h4>Ensures Currency</h4>
+                        <p>Passport expiration and bank statement recency checks prevent using outdated or expired documents for verification.</p>
+                    </div>
+                    <div class="benefit-item" data-aos="fade-up" data-aos-delay="300">
+                        <div class="benefit-icon">🏠</div>
+                        <h4>Validates Proof-of-Address</h4>
+                        <p>Bank statement address extraction and format validation ensure the applicant has a verifiable residential address. Prevents fake or stolen addresses.</p>
+                    </div>
+                    <div class="benefit-item" data-aos="fade-up" data-aos-delay="400">
+                        <div class="benefit-icon">🤖</div>
+                        <h4>Detects Presentation Attacks</h4>
+                        <p>Liveness detection via video selfies and hand gestures thwarts deepfakes, photos of photos, and replay attacks.</p>
+                    </div>
+                    <div class="benefit-item" data-aos="fade-up" data-aos-delay="500">
+                        <div class="benefit-icon">🔐</div>
+                        <h4>No Human Review</h4>
+                        <p>Algorithmic verification eliminates human bias and ensures consistent decisions. Full audit trail for compliance.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Video Demo Section -->
+    <section class="video-demo" id="demo">
+        <div class="container">
+            <div class="section-header" data-aos="fade-up">
+                <h2>Gesture Animation Demo</h2>
+                <p>See the hand gesture video selfie authentication in action</p>
+            </div>
+
+            <div class="video-container" data-aos="zoom-in" data-aos-delay="200">
+                <video class="demo-video" id="gestureDemoVideo" autoplay loop muted playsinline preload="auto" controls style="max-height: 500px;">
+                    <source src="assets/videos/gesture-demo.mp4" type="video/mp4">
+                    <source src="assets/videos/gesture-demo.mov" type="video/quicktime">
+                    Your browser does not support HTML5 video. Please download the video to view it.
+                </video>
+            </div>
+
+            <div class="video-info" data-aos="fade-up" data-aos-delay="300">
+                <p>This demo shows the gesture-based video selfie authentication system. The user displays specific hand gestures (showing 4, 3, 2, 1 fingers) at precise timestamps (4.5s, 8.5s, 12.5s, 16.5s). MediaPipe detects 21 hand landmarks per finger to verify the gesture sequence, ensuring proof-of-life without requiring third parties.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Quick Start -->
+    <section class="quickstart" id="quickstart">
+        <div class="container">
+            <div class="section-header" data-aos="fade-up">
+                <h2>Quick Start</h2>
+                <p>Get NI6 running in minutes</p>
+            </div>
+            <div class="code-block" data-aos="flip-up" data-aos-delay="200">
+                <div class="code-header">
+                    <span class="code-title">Terminal</span>
+                    <button class="copy-btn" id="copyBtn">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                        </svg>
+                        Copy
+                    </button>
+                </div>
+                <pre><code class="language-bash" id="installCode"># Clone repository
+git clone https://github.com/your-org/ni6.git
+cd ni6
+
+# Install dependencies with Poetry
+poetry install
+
+# Download model weights (required for forgery detection & face recognition)
+python scripts/download_model_weights.py
+
+# Copy environment configuration
+cp deploy/.env.example deploy/.env
+
+# Edit deploy/.env with your database credentials
+# Required: MariaDB host, port, user, password
+# Required: RethinkDB host, port, database
+
+# Create databases and load schemas
+./deploy/setup-database.sh
+
+# Start all 3 NI6 instances
+./deploy/start-instances.sh</code></pre>
+            </div>
+            <div class="instance-info" data-aos="fade-up" data-aos-delay="300">
+                <h3>Instance Configuration</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Instance</th>
+                            <th>Port</th>
+                            <th>Database</th>
+                            <th>Purpose</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Instance 1</td>
+                            <td><code>12410</code></td>
+                            <td><code>osint_db1</code></td>
+                            <td>Receives Share 0</td>
+                        </tr>
+                        <tr>
+                            <td>Instance 2</td>
+                            <td><code>12411</code></td>
+                            <td><code>osint_db2</code></td>
+                            <td>Receives Share 1</td>
+                        </tr>
+                        <tr>
+                            <td>Instance 3</td>
+                            <td><code>12412</code></td>
+                            <td><code>osint_db3</code></td>
+                            <td>Receives Share 2</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <!-- Superlexicon -->
+    <section class="technology" id="superlexicon">
+        <div class="container">
+            <div class="section-header" data-aos="fade-up">
+                <h2>The Superlexicon Project</h2>
+                <p>Distributed systems patterns, documented</p>
+            </div>
+            <div class="cards-grid" data-aos="fade-up" data-aos-delay="200">
+                <div class="card">
+                    <div class="card-icon">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+                            <path d="M12 6l-4 4 4 4"/>
+                            <path d="M16 10H8"/>
+                        </svg>
+                    </div>
+                    <h3>What is Superlexicon?</h3>
+                    <p>Superlexicon is <strong>Mano Thanabalan's</strong> project to document reusable distributed systems patterns. Think of it like a pattern library, but for decentralized infrastructure.</p>
+                </div>
+                <div class="card">
+                    <div class="card-icon">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="M12 16v-4"/>
+                            <path d="M12 8h.01"/>
+                        </svg>
+                    </div>
+                    <h3>NI6 = Pattern #1</h3>
+                    <p>NI6 is the first pattern in Superlexicon. It shows how to do self-custody without trusted third parties, while still staying compliant with KYC regulations.</p>
+                </div>
+                <div class="card">
+                    <div class="card-icon">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                        </svg>
+                    </div>
+                    <h3>Where this is going</h3>
+                    <p>The end goal: a blockchain with <strong>zero fees</strong>. No proof-of-waste, no staking required. Just efficient distributed consensus.</p>
+                </div>
+            </div>
+            <div class="vision-box" data-aos="fade-up" data-aos-delay="300">
+                <h3>The pattern approach</h3>
+                <p>Each Superlexicon pattern is something you can actually reuse. NI6 combines Shamir's secret sharing, video selfie biometrics, and algorithmic KYC to remove custodians from the equation. Future patterns will tackle other distributed systems problems — consensus without burning electricity, permissionless networks without token speculation, infrastructure that doesn't collapse when the token price dumps.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer" data-aos="fade-in">
+        <div class="container footer-container">
+            <div class="footer-section">
+                <div class="footer-logo">NI6</div>
+                <p class="footer-tagline">Algorithmic Consistency. Verifiable Neutrality.</p>
+            </div>
+            <div class="footer-section">
+                <h4>Resources</h4>
+                <ul>
+                    <li><a href="https://github.com/your-org/ni6">GitHub Repository</a></li>
+                    <li><a href="https://github.com/your-org/ni6/blob/main/docs/API.md">API Documentation</a></li>
+                </ul>
+            </div>
+            <div class="footer-section">
+                <h4>Legal</h4>
+                <ul>
+                    <li><a href="https://github.com/your-org/ni6/blob/main/LICENSE">License: GPL-3.0</a></li>
+                    <li><a href="#">Privacy Policy</a></li>
+                </ul>
+            </div>
+            <div class="footer-section">
+                <h4>Connect</h4>
+                <ul>
+                    <li><a href="https://github.com/your-org/ni6">GitHub</a></li>
+                    <li><a href="mailto:contact@ni6.dev">Email</a></li>
+                </ul>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            <div class="container">
+                <p>&copy; 2024 NI6. SPDX-License-Identifier: GPL-3.0</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="https://unpkg.com/aos@next/dist/aos.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="js/main.js"></script>
+
+    <!-- Video Autoplay Script -->
+    <script>
+        // Video autoplay when section is in view
+        document.addEventListener('DOMContentLoaded', function() {
+            const video = document.getElementById('gestureDemoVideo');
+            const videoSection = document.querySelector('.video-demo');
+
+            if (video && videoSection) {
+                console.log('Video element found, setting up autoplay...');
+
+                // Add loading event listeners
+                video.addEventListener('loadstart', function() {
+                    console.log('Video loading started');
+                });
+
+                video.addEventListener('canplay', function() {
+                    console.log('Video can play through');
+                    video.classList.add('loaded');
+                });
+
+                video.addEventListener('playing', function() {
+                    console.log('Video is now playing');
+                    video.classList.add('playing');
+                });
+
+                video.addEventListener('pause', function() {
+                    console.log('Video paused');
+                    video.classList.remove('playing');
+                });
+
+                video.addEventListener('error', function(e) {
+                    console.error('Video error:', e);
+                    console.error('Error code:', video.error.code);
+                    console.error('Error message:', video.error.message);
+                });
+
+                // Function to play video
+                const playVideo = function() {
+                    console.log('Attempting to play video...');
+                    video.play().then(function() {
+                        console.log('✓ Video started playing successfully');
+                        video.classList.add('playing');
+                    }).catch(function(error) {
+                        console.log('✗ Autoplay prevented:', error.name);
+                        if (error.name === 'NotAllowedError') {
+                            console.log('  Reason: Browser requires user interaction first');
+                        } else if (error.name === 'NotSupportedError') {
+                            console.log('  Reason: Video format not supported');
+                        }
+                    });
+                };
+
+                // Try immediate play
+                setTimeout(playVideo, 500);
+
+                // Intersection Observer to detect when video section is in view
+                const observerOptions = {
+                    root: null,
+                    rootMargin: '0px',
+                    threshold: 0.3  // Play when 30% of the section is visible
+                };
+
+                const observer = new IntersectionObserver(function(entries) {
+                    entries.forEach(function(entry) {
+                        console.log('Section visibility changed:', entry.isIntersecting);
+                        if (entry.isIntersecting) {
+                            // Section is in view - play video
+                            playVideo();
+                        } else {
+                            // Section is out of view - pause video
+                            video.pause();
+                        }
+                    });
+                }, observerOptions);
+
+                // Start observing the video section
+                observer.observe(videoSection);
+                console.log('✓ Intersection Observer attached to video section');
+
+                // Add click handler as fallback
+                video.addEventListener('click', function() {
+                    if (video.paused) {
+                        video.play();
+                        video.classList.add('playing');
+                    } else {
+                        video.pause();
+                        video.classList.remove('playing');
+                    }
+                });
+            } else {
+                console.error('✗ Video element or section not found');
+            }
+        });
+    </script>
+</body>
+</html>

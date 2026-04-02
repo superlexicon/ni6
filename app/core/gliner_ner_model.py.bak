@@ -1,0 +1,787 @@
+"""
+GLiNER NER Model Wrapper for Bank Statement Entity Extraction
+
+This module provides a GLiNER-based Named Entity Recognition model
+wrapper integrated with the GPU resource manager for extracting
+entities from bank statements using zero-shot NER.
+
+GLiNER: Generalist and Lightweight Model for Named Entity Recognition
+Paper: https://arxiv.org/abs/2311.15268
+Repo: https://github.com/urchade/GLiNER
+"""
+
+import logging
+import os
+from typing import Optional, Dict, List, Any, TYPE_CHECKING
+
+# Lazy import for GLiNER to avoid dependency issues
+def get_gliner_classes():
+    """Lazy import GLiNER to avoid dependency issues"""
+    try:
+        from gliner import GLiNER
+        return GLiNER
+    except ImportError as e:
+        raise ImportError(
+            "GLiNER is not installed. Install it with: poetry add gliner"
+        ) from e
+
+# Type hints for when type checking
+if TYPE_CHECKING:
+    from gliner import GLiNER
+
+from app.core.logger import get_logger
+from app.core.gpu_manager import ModelType, get_gpu_manager
+from app.core.framework_coordinator import get_framework_coordinator, FrameworkType
+
+logger = logging.getLogger(__name__)
+
+# Model configuration
+# Using multi-lingual model for diverse Malaysian name patterns (Malay, Chinese, Tamil with S/O D/O A/L markers)
+GLINER_MODEL_NAME = "urchade/gliner_multi-v2.1"
+# Alternative models (uncomment to use):
+# GLINER_MODEL_NAME = "knowledgator/gliner-bi-small-v1.0"  # Alternative small model
+# GLINER_MODEL_NAME = "urchade/gliner_small-v2.1"  # Faster, less accurate
+
+
+class GLiNERNERModel:
+    """
+    GLiNER NER model wrapper integrated with GPU resource manager.
+
+    This class manages the GLiNER-based Named Entity Recognition model
+    with centralized GPU resource allocation and memory management.
+
+    GLiNER supports zero-shot NER - it can identify custom entities
+    without task-specific training by using entity descriptions.
+    """
+
+    _instance: Optional['GLiNERNERModel'] = None
+    _initialized: bool = False
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(GLiNERNERModel, cls).__new__(cls)
+        return cls._instance
+
+    def __init__(self):
+        if not self._initialized:
+            self.gpu_manager = get_gpu_manager()
+            self.framework_coordinator = get_framework_coordinator()
+            self.logger = get_logger()
+            self._initialized = True
+            self._setup_environment()
+            logger.info("GLiNERNERModel initialized with unified framework coordinator")
+
+    def _setup_environment(self):
+        """Setup environment for GLiNER model."""
+        # Set HF_HOME for caching models
+        if not os.environ.get('HF_HOME'):
+            cache_dir = os.path.expanduser("~/.cache/huggingface")
+            os.makedirs(cache_dir, exist_ok=True)
+            os.environ['HF_HOME'] = cache_dir
+
+        self.logger.info(f"HuggingFace cache directory: {os.environ.get('HF_HOME')}")
+
+    def get_model(self) -> 'GLiNER':
+        """
+        Get GLiNER model with GPU resource management (synchronous version).
+        Creates model without async GPU manager for module-level initialization.
+
+        Returns:
+            GLiNER model instance
+        """
+        try:
+            model = self._create_model()
+            self.logger.debug("GLiNER model created (GPU resources allocated on first use)")
+            return model
+        except Exception as e:
+            self.logger.error(f"Failed to get GLiNER model: {e}")
+            raise RuntimeError(f"GLiNER model initialization failed: {str(e)}")
+
+    async def get_model_with_gpu(self) -> 'GLiNER':
+        """
+        Get GLiNER model with async GPU resource management.
+
+        Returns:
+            GLiNER model instance with GPU resources allocated
+        """
+        try:
+            result = await self.gpu_manager.get_model_with_gpu(
+                model_type=ModelType.GLINER_NER,
+                model_class=self._create_model,
+            )
+            self.logger.debug("GLiNER model retrieved from GPU manager")
+            return result
+        except Exception as e:
+            self.logger.error(f"Failed to get GLiNER model: {e}")
+            raise RuntimeError(f"GLiNER model initialization failed: {str(e)}")
+
+    def _create_model(self) -> 'GLiNER':
+        """
+        Create GLiNER model instance.
+
+        Returns:
+            GLiNER model instance
+        """
+        try:
+            # Get PyTorch device
+            device = self.framework_coordinator.get_device_string(FrameworkType.PYTORCH)
+            self.logger.info(f"Using device for GLiNER: {device}")
+
+            # Lazy import GLiNER
+            GLiNER = get_gliner_classes()
+
+            self.logger.info(f"Loading GLiNER model: {GLINER_MODEL_NAME}")
+
+            # Load model (GLiNER handles device mapping via map_location parameter)
+            model = GLiNER.from_pretrained(
+                GLINER_MODEL_NAME,
+                map_location=device
+            )
+
+            self.logger.info(f"GLiNER model loaded successfully on {device}")
+
+            return model
+
+        except Exception as e:
+            self.logger.error(f"Failed to create GLiNER model: {str(e)}")
+            raise
+
+    async def release_model(self) -> bool:
+        """
+        Release GLiNER model resources.
+
+        Returns:
+            True if model was released successfully
+        """
+        try:
+            released = await self.gpu_manager.release_model(ModelType.GLINER_NER)
+            if released:
+                self.logger.info("GLiNER model resources released")
+            return released
+        except Exception as e:
+            self.logger.error(f"Failed to release GLiNER model: {e}")
+            return False
+
+    def extract_bank_statement_entities(
+        self,
+        text: str,
+        labels: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """
+        Extract entities from bank statement text using GLiNER (synchronous).
+
+        Args:
+            text: Bank statement OCR text
+            labels: Custom entity labels to extract. If None, uses default bank statement labels.
+
+        Returns:
+            Dictionary mapping entity types to extracted values with confidence scores
+        """
+        if labels is None:
+            labels = self._get_bank_statement_labels()
+
+        try:
+            model = self.get_model()
+
+            # Run zero-shot NER with threshold for low-confidence filtering
+            # GLiNER returns a List of dicts, need to convert to dict format
+            entities_list = model.predict_entities(text, labels, threshold=0.3)
+
+            # Group and filter results - expects dict from GLiNER results
+            results = self._group_entities(entities_list, labels)
+
+            # Log special case for multiple addresses
+            if results.get('address') and isinstance(results['address'], list):
+                self.logger.info(f"GLiNER extracted {len(results['address'])} addresses")
+
+            self.logger.info(f"GLiNER extracted {len([r for r in results.values() if r])} entity types")
+            return results
+
+        except Exception as e:
+            self.logger.error(f"GLiNER extraction failed: {e}")
+            return {label: None for label in labels}
+
+    async def extract_bank_statement_entities_async(
+        self,
+        text: str,
+        labels: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """
+        Extract entities from bank statement text using GLiNER (async).
+
+        Args:
+            text: Bank statement OCR text
+            labels: Custom entity labels to extract. If None, uses default bank statement labels.
+
+        Returns:
+            Dictionary mapping entity types to extracted values with confidence scores
+        """
+        if labels is None:
+            labels = self._get_bank_statement_labels()
+
+        try:
+            model = await self.get_model_with_gpu()
+
+            # Run zero-shot NER with threshold for low-confidence filtering
+            # GLiNER returns a List of dicts, need to convert to dict format
+            entities_list = model.predict_entities(text, labels, threshold=0.3)
+
+            # Group and filter results - expects dict from GLiNER results
+            results = self._group_entities(entities_list, labels)
+
+            # Log special case for multiple addresses
+            if results.get('address') and isinstance(results['address'], list):
+                self.logger.info(f"GLiNER extracted {len(results['address'])} addresses")
+
+            self.logger.info(f"GLiNER extracted {len([r for r in results.values() if r])} entity types")
+            return results
+
+        except Exception as e:
+            self.logger.error(f"GLiNER extraction failed: {e}")
+            return {label: None for label in labels}
+
+    def _get_bank_statement_labels(self) -> List[str]:
+        """Get default entity labels for bank statement extraction."""
+        return [
+            "account holder name including S/O D/O A/L patterns",
+            "customer full name with S/O D/O A/L",
+            "person name or customer name with title or honorific like Mr Mrs Ms Dr",
+            "bank name",
+            "account number",
+            "address",
+            "statement date",
+            "currency",
+            "branch"
+        ]
+
+    def _get_id_card_labels(self) -> List[str]:
+        """
+        Get default entity labels for ID card extraction.
+
+        These labels are designed for zero-shot NER to extract common ID card fields.
+        Labels include descriptive patterns to help GLiNER identify the correct entities.
+        """
+        return [
+            # Personal Information
+            "full name or person name including S/O D/O A/L patterns",
+            "given name or first name",
+            "surname or last name",
+            "father's name or father name",
+            "mother's name or mother name",
+            "date of birth or birth date",
+            "gender or sex M F",
+
+            # Document Information
+            "identification number or ID number or card number",
+            "PAN number or permanent account number",
+            "driver license number or driving licence number",
+            "national ID number or citizenship number",
+            "passport number or document number",
+
+            # Dates
+            "issue date or date of issue",
+            "expiry date or expiration date or valid until",
+
+            # Location
+            "address or residential address",
+            "city or town",
+            "state or province or region",
+            "postal code or zip code",
+            "country or nationality",
+
+            # Authority/Issuing
+            "issuing authority or issuing office",
+            "place of birth or birthplace",
+
+            # Additional Fields (varies by card type)
+            "blood group or blood type",
+        ]
+
+    async def extract_id_card_entities(
+        self,
+        text: str,
+        labels: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """
+        Extract entities from ID card text using GLiNER (async).
+
+        Similar pattern to extract_bank_statement_entities_async().
+
+        Args:
+            text: ID card OCR text
+            labels: Custom entity labels to extract. If None, uses default ID card labels.
+
+        Returns:
+            Dictionary mapping entity types to extracted values with confidence scores
+        """
+        if labels is None:
+            labels = self._get_id_card_labels()
+
+        try:
+            model = await self.get_model_with_gpu()
+
+            # Run zero-shot NER with threshold for low-confidence filtering
+            entities = model.predict_entities(text, labels, threshold=0.3)
+
+            # Group and filter results
+            results = self._group_id_card_entities(entities, labels)
+
+            self.logger.info(f"GLiNER extracted {len([r for r in results.values() if r])} ID card entity types")
+            return results
+
+        except Exception as e:
+            self.logger.error(f"GLiNER ID card extraction failed: {e}")
+            return {label: None for label in labels}
+
+    def _group_id_card_entities(self, entities: List[Dict], labels: List[str]) -> Dict[str, Any]:
+        """
+        Group GLiNER entities by label type for ID card extraction.
+
+        Similar to _group_entities but optimized for ID card fields.
+        For name-type labels, returns all entities as a list.
+        For other single-value labels, returns only the highest confidence entity.
+
+        Args:
+            entities: List of entity dicts from GLiNER with 'text', 'label', 'score' keys
+            labels: List of valid entity labels
+
+        Returns:
+            Dictionary mapping normalized label names to entity/ies with confidence.
+        """
+        # Log raw entities for debugging
+        self.logger.debug(f"Raw GLiNER ID card entities ({len(entities)}): {entities}")
+
+        # Labels that can have multiple values (name fields)
+        multi_value_labels = {
+            'full name or person name including s/o d/o a/l patterns',
+            'given name or first name',
+            'surname or last name',
+            "father's name or father name",
+            "mother's name or mother name",
+        }
+
+        # Initialize results with None
+        results = {}
+
+        for entity in entities:
+            text = entity.get("text", "").strip()
+            label = entity.get("label", "").lower()
+            score = entity.get("score", 0.0)
+
+            # Log each entity being processed
+            self.logger.debug(f"Processing entity: text='{text}', label='{label}', score={score:.3f}")
+
+            # Skip low confidence predictions
+            if score < 0.3:
+                self.logger.debug(f"  → Skipped (confidence {score:.3f} < 0.3)")
+                continue
+
+            # Normalize label to our schema
+            normalized_label = self._normalize_id_card_label(label, labels)
+
+            if not normalized_label:
+                self.logger.debug(f"  → Skipped (label '{label}' could not be normalized)")
+                continue
+
+            # For multi-value labels (names), collect all entities
+            if normalized_label in multi_value_labels:
+                if normalized_label not in results:
+                    results[normalized_label] = []
+                results[normalized_label].append({
+                    "value": text,
+                    "confidence": score
+                })
+                self.logger.debug(f"  → Accepted as '{normalized_label}' (multi-value)")
+            else:
+                # For single-value labels, keep highest confidence only
+                if normalized_label not in results or score > results[normalized_label].get("confidence", 0):
+                    results[normalized_label] = {
+                        "value": text,
+                        "confidence": score
+                    }
+                    self.logger.debug(f"  → Accepted as '{normalized_label}'")
+
+        # Ensure all labels have entries
+        for label in labels:
+            normalized = self._normalize_id_card_label(label.lower(), labels)
+            if normalized and normalized not in results:
+                results[normalized] = None
+
+        return results
+
+    def _normalize_id_card_label(self, label: str, valid_labels: List[str]) -> Optional[str]:
+        """
+        Normalize GLiNER label to ID card schema field name.
+
+        Args:
+            label: Label from GLiNER
+            valid_labels: List of valid labels
+
+        Returns:
+            Normalized label name or None if invalid
+        """
+        label_lower = label.lower()
+
+        # Direct match
+        if label_lower in [l.lower() for l in valid_labels]:
+            return label_lower
+
+        # Map common variations for ID card fields
+        mappings = {
+            # Name mappings
+            "person": "full name or person name including s/o d/o a/l patterns",
+            "name": "full name or person name including s/o d/o a/l patterns",
+            "holder": "full name or person name including s/o d/o a/l patterns",
+
+            # ID number mappings
+            "id": "identification number or id number or card number",
+            "card no": "identification number or id number or card number",
+            "id no": "identification number or id number or card number",
+
+            # PAN specific
+            "pan": "pan number or permanent account number",
+            "permanent account": "pan number or permanent account number",
+
+            # Driver license
+            "driving licence": "driver license number or driving licence number",
+            "driving license": "driver license number or driving licence number",
+            "dl": "driver license number or driving licence number",
+
+            # National ID
+            "citizenship": "national id number or citizenship number",
+            "nric": "national id number or citizenship number",
+
+            # Dates
+            "birth": "date of birth or birth date",
+            "dob": "date of birth or birth date",
+            "valid": "expiry date or expiration date or valid until",
+            "expiration": "expiry date or expiration date or valid until",
+
+            # Location
+            "town": "city or town",
+            "zip": "postal code or zip code",
+            "region": "state or province or region",
+
+            # Authority
+            "office": "issuing authority or issuing office",
+            "birthplace": "place of birth or birthplace",
+
+            # Additional
+            "blood": "blood group or blood type",
+        }
+
+        for key, value in mappings.items():
+            if key in label_lower:
+                return value
+
+        # Partial match
+        for valid_label in valid_labels:
+            if valid_label.lower() in label_lower or label_lower in valid_label.lower():
+                return valid_label.lower()
+
+        return None
+
+    def _group_entities(self, entities: List[Dict], labels: List[str]) -> Dict[str, Any]:
+        """
+        Group GLiNER entities by label type and filter by confidence.
+
+        For multi-value labels like 'address', returns all entities above threshold.
+        For single-value labels, returns only the highest confidence entity.
+
+        Args:
+            entities: List of entity dicts from GLiNER with 'text', 'label', 'score' keys
+            labels: List of valid entity labels
+
+        Returns:
+            Dictionary mapping normalized label names to entity/ies with confidence.
+            Multi-value labels return a list, single-value labels return a dict.
+        """
+        # Log raw entities for debugging
+        self.logger.debug(f"Raw GLiNER entities ({len(entities)}): {entities}")
+
+        # Labels that can have multiple values
+        multi_value_labels = {'address', 'branch'}  # branch can have multiple values (e.g., DBS, POSB)
+
+        # Initialize results with None
+        results = {}
+
+        for entity in entities:
+            text = entity.get("text", "").strip()
+            label = entity.get("label", "").lower()
+            score = entity.get("score", 0.0)
+
+            # Log each entity being processed
+            self.logger.debug(f"Processing entity: text='{text}', label='{label}', score={score:.3f}")
+
+            # Skip low confidence predictions
+            if score < 0.3:
+                self.logger.debug(f"  → Skipped (confidence {score:.3f} < 0.3)")
+                continue
+
+            # Normalize label to our schema
+            normalized_label = self._normalize_label(label, labels)
+
+            if not normalized_label:
+                self.logger.debug(f"  → Skipped (label '{label}' could not be normalized)")
+                continue
+
+            # For multi-value labels, collect all entities
+            if normalized_label in multi_value_labels:
+                if normalized_label not in results:
+                    results[normalized_label] = []
+                results[normalized_label].append({
+                    "value": text,
+                    "confidence": score
+                })
+                self.logger.debug(f"  → Accepted as '{normalized_label}' (multi-value)")
+            else:
+                # For single-value labels, keep highest confidence only
+                if normalized_label not in results or score > results[normalized_label].get("confidence", 0):
+                    results[normalized_label] = {
+                        "value": text,
+                        "confidence": score
+                    }
+                    self.logger.debug(f"  → Accepted as '{normalized_label}'")
+
+        # Ensure all labels have entries
+        for label in labels:
+            normalized = self._normalize_label(label.lower(), labels)
+            if normalized and normalized not in results:
+                results[normalized] = None
+
+        # NEW: Post-process to find misclassified account holder names
+        reclassified_name = self._post_process_misclassified_names(entities, results)
+        if reclassified_name and not results.get("account holder name"):
+            results["account holder name"] = reclassified_name
+
+        return results
+
+    def _normalize_label(self, label: str, valid_labels: List[str]) -> Optional[str]:
+        """
+        Normalize GLiNER label to our schema.
+
+        Args:
+            label: Label from GLiNER
+            valid_labels: List of valid labels
+
+        Returns:
+            Normalized label name or None if invalid
+        """
+        label_lower = label.lower()
+
+        # Direct match
+        if label_lower in [l.lower() for l in valid_labels]:
+            return label_lower
+
+        # Map common variations - including GLiNER zero-shot NER label variations
+        mappings = {
+            # Original mappings
+            "account holder": "account holder name",
+            "customer": "customer name",
+            "bank": "bank name",
+            "account no": "account number",
+            "date": "statement date",
+
+            # NEW: Common GLiNER label variations for person names
+            "person": "account holder name",
+            "name": "account holder name",
+            "holder": "account holder name",
+            "individual": "account holder name",
+            "customer name": "account holder name",
+
+            # NEW: Common GLiNER label variations for organizations/banks
+            "organization": "bank name",
+            "org": "bank name",
+            "company": "bank name",
+            "financial institution": "bank name",
+            "financial": "bank name",
+        }
+
+        for key, value in mappings.items():
+            if key in label_lower:
+                return value
+
+        # Partial match
+        for valid_label in valid_labels:
+            if valid_label.lower() in label_lower or label_lower in valid_label.lower():
+                return valid_label.lower()
+
+        return None
+
+    def _post_process_misclassified_names(
+        self,
+        entities: List[Dict],
+        results: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Post-process GLiNER entities to find misclassified account holder names.
+
+        GLiNER often labels person names as "bank name", "organization", "branch", etc.
+        This method scans all entities and finds those that look like person names
+        but were misclassified.
+
+        S/O pattern matches are HIGHEST PRIORITY - if found, return immediately.
+
+        Args:
+            entities: Raw GLiNER entities with 'text', 'label', 'score'
+            results: Current grouped results from _group_entities()
+
+        Returns:
+            Updated account holder name dict if a misclassified name is found, else None
+        """
+        import re
+
+        # Only run if we don't already have a high-confidence account holder name
+        current_name = results.get("account holder name")
+        if current_name and current_name.get("confidence", 0) >= 0.7:
+            return None  # Already have a good name
+
+        # HIGHEST PRIORITY - Check for S/O, D/O, A/L patterns first
+        for entity in entities:
+            text = entity.get("text", "").strip()
+            score = entity.get("score", 0.0)
+
+            # Skip low confidence
+            if score < 0.3:
+                continue
+
+            # Check for S/O, D/O, A/L patterns (Malaysian/Indian name markers)
+            if re.search(r'\s+(S/O|D/O|A/L|S/O\.|D/O\.|A/L\.)\s+', text, re.IGNORECASE):
+                # Quick validation - make sure it's not an address component
+                name_score = self._is_misclassified_person_name(
+                    text,
+                    entity.get("label", ""),
+                    score
+                )
+                # If it passes basic validation (not obviously an address), use it
+                if name_score >= 0.3:
+                    self.logger.info(
+                        f"GLiNER post-processing: Found S/O pattern '{text}' "
+                        f"(conf={score:.2f})"
+                    )
+                    return {
+                        "value": text,
+                        "confidence": min(score * 0.95, 0.98),
+                        "reclassified": True,
+                        "so_pattern": True
+                    }
+
+        best_candidate = None
+        best_score = 0.0
+
+        for entity in entities:
+            text = entity.get("text", "").strip()
+            label = entity.get("label", "").lower()
+            score = entity.get("score", 0.0)
+
+            # Skip if confidence is too low
+            if score < 0.3:
+                continue
+
+            # Skip if already labeled as account holder name
+            if "account holder" in label or "customer name" in label:
+                continue
+
+            # Check if this looks like a misclassified person name
+            name_score = self._is_misclassified_person_name(text, label, score)
+            if name_score > best_score:
+                best_score = name_score
+                best_candidate = {
+                    "value": text,
+                    "confidence": min(score * 0.9, 0.95),  # Slightly reduce confidence
+                    "reclassified": True  # Mark as reclassified for logging
+                }
+
+        if best_candidate:
+            self.logger.info(
+                f"GLiNER post-processing: Reclassified '{best_candidate['value']}' "
+                f"(orig label was misclassified, conf={best_candidate['confidence']:.2f})"
+            )
+            return best_candidate
+
+        return None
+
+    def _is_misclassified_person_name(self, text: str, label: str, score: float) -> float:
+        """
+        Determine if an entity is a misclassified person name.
+
+        Returns a confidence score (0-1) indicating likelihood of being a person name.
+        """
+        import re
+
+        text_upper = text.upper()
+        name_score = 0.0
+
+        # Strong indicators: S/O, D/O, A/L patterns (Malaysian/Indian names)
+        if re.search(r'\s+(S/O|D/O|A/L|S/O\.|D/O\.|A/L\.)\s+', text, re.IGNORECASE):
+            name_score += 0.6
+
+        # Strong indicators: Common name prefixes (MR., MRS., MS., DR., etc.)
+        if re.match(r'^(MR\.?|MRS\.?|MS\.?|DR\.?|MISS\.?)\s+[A-Z]', text_upper):
+            name_score += 0.4
+
+        # Pattern: Title-case person name (2-4 words, no digits)
+        if re.match(r'^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3}$', text):
+            name_score += 0.3
+
+        # Pattern: All caps person name (common in some bank statements)
+        if re.match(r'^[A-Z][A-Z\s\-\']{2,50}$', text) and not re.search(r'\d', text):
+            # Exclude obvious non-names (banks, companies, address components)
+            exclusion_terms = [
+                'BANK', 'COMPANY', 'LIMITED', 'LTD', 'BRANCH', 'STATEMENT',
+                'ACCOUNT', 'BALANCE', 'CURRENCY', 'ADDRESS', 'TELEPHONE',
+                # Bank abbreviations that GLiNER misclassifies as names
+                'DBS', 'POSB', 'OCBC', 'UOB', 'CIMB', 'CITIBANK', 'HSBC',
+                'STANDARD', 'CHARTERED', 'MAYBANK', 'RHB', 'XDBS',
+                # Street types (address components that should NOT be person names)
+                'STREET', 'ST', 'ROAD', 'RD', 'LANE', 'LN', 'DRIVE', 'DR',
+                'AVENUE', 'AVE', 'PLACE', 'PL', 'COURT', 'WAY', 'WALK', 'CLOSE',
+                'CRESCENT', 'JALAN', 'LORONG', 'SOI', 'VIEW', 'HEIGHTS',
+                # Building types
+                'BLOCK', 'BLK', 'FLAT', 'UNIT', 'BUILDING',
+                # Address indicators
+                'NO', 'NUMBER', 'POSTAL', 'CODE', 'ZIP',
+                # Country names (that GLiNER sometimes misclassifies as person names)
+                'SINGAPORE', 'MALAYSIA', 'THAILAND', 'INDONESIA', 'INDIA',
+                'VIETNAM', 'PHILIPPINES', 'MYANMAR', 'CAMBODIA', 'LAOS',
+                'UNITED STATES', 'AMERICA', 'USA', 'BRITAIN', 'UK',
+                'AUSTRALIA', 'CHINA', 'JAPAN', 'KOREA', 'TAIWAN',
+                'HONG KONG', 'MACAU', 'UAE', 'SAUDI ARABIA'
+            ]
+            if not any(term in text_upper for term in exclusion_terms):
+                name_score += 0.2
+
+        # Boost if labeled as something that commonly misclassifies names
+        misleading_labels = ['bank name', 'branch', 'organization', 'org', 'company']
+        if any(ml in label for ml in misleading_labels):
+            # If it looks like a name but is labeled as bank/branch/org, boost confidence
+            if name_score > 0:
+                name_score += 0.2
+
+        # Penalty: Contains typical banking/business terminology
+        banking_terms = ['bank', 'branch', 'ltd', 'pte', 'inc', 'corp', 'statement',
+                         'account', 'balance', 'currency', 'deposit', 'withdrawal']
+        if any(term in text_upper.split() for term in banking_terms):
+            name_score -= 0.3
+
+        # Penalty: Contains numbers (unless S/O pattern)
+        if re.search(r'\d', text) and not re.search(r'S/O|D/O|A/L', text_upper):
+            name_score -= 0.2
+
+        # Penalty: Too short (single word < 3 chars) or too long (> 50 chars)
+        if len(text) < 3 or len(text) > 50:
+            name_score -= 0.1
+
+        return max(0.0, min(name_score, 1.0))
+
+
+# Global instance for module-level access
+_gliner_ner_model_instance: Optional[GLiNERNERModel] = None
+
+
+def get_gliner_ner_model() -> GLiNERNERModel:
+    """Get lazy-loaded GLiNER NER model instance."""
+    global _gliner_ner_model_instance
+    if _gliner_ner_model_instance is None:
+        _gliner_ner_model_instance = GLiNERNERModel()
+    return _gliner_ner_model_instance

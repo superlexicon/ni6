@@ -1,0 +1,154 @@
+# Docker Compose for ni6 and OSSPEP
+#
+# Services:
+#   mysql - Shared MySQL database for both applications
+#   osspep - Quarkus scraper for sanctions and PEP data
+#   fastapi-app - Main FastAPI application
+#
+# Usage:
+#   docker-compose up -d
+#
+# Environment variables can be set in .env file or passed directly
+
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: ni6-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${DB_NAME:-osint_db1}
+      MYSQL_USER: ${DB_USER:-osint_user}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-osint_password}
+    ports:
+      - "${DB_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      # Mount schema directory for initialization
+      - ./schema:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpassword}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rethinkdb:
+    image: rethinkdb:2.4
+    container_name: ni6-rethinkdb
+    restart: unless-stopped
+    ports:
+      - "${RETHINKDB_PORT:-28015}:28015"
+      - "${RETHINKDB_UI_PORT:-8080}:8080"
+    volumes:
+      - rethinkdb_data:/data
+    command: rethinkdb --bind all --driver-port 28015 --http-port 8080
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  osspep:
+    build:
+      context: ./osspep
+      dockerfile: Dockerfile
+    container_name: osspep-scraper
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      # Database configuration
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_NAME=${DB_NAME:-osint_db1}
+      - DB_USER=${DB_USER:-osint_user}
+      - DB_PASSWORD=${DB_PASSWORD:-osint_password}
+      # Quarkus datasource configuration
+      - QUARKUS_DATASOURCE_JDBC_URL=jdbc:mysql://mysql:3306/${DB_NAME:-osint_db1}
+      - QUARKUS_DATASOURCE_USERNAME=${DB_USER:-osint_user}
+      - QUARKUS_DATASOURCE_PASSWORD=${DB_PASSWORD:-osint_password}
+      # OpenSanctions sync schedule (cron expression)
+      - OPEN_SANCTIONS_CRON=${OPEN_SANCTIONS_CRON:-0 0 3 ? * SUN}
+      # OpenSanctions datasets to sync
+      - OPEN_SANCTIONS_DATASETS=${OPEN_SANCTIONS_DATASETS:-eu_fsf,ofac_sdn,un_sc,gb_hmt,us_fara}
+    # Optional: Add resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-files: "3"
+
+  fastapi-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ni6-api
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rethinkdb:
+        condition: service_healthy
+      osspep:
+        condition: service_started
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      # Database configuration
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_NAME=${DB_NAME:-osint_db1}
+      - DB_USER=${DB_USER:-osint_user}
+      - DB_PASSWORD=${DB_PASSWORD:-osint_password}
+      # RethinkDB configuration
+      - RETHINKDB_HOST=rethinkdb
+      - RETHINKDB_PORT=28015
+      - RETHINKDB_DB=${RETHINKDB_DB:-ni6_sync}
+      - RETHINKDB_TABLE=${RETHINKDB_TABLE:-otp_events}
+      - RETHINKDB_INSTANCE_ID=${INSTANCE_ID:-instance1}
+      # OSINT configuration
+      - OSINT_ENABLE_SANCTIONS_SYNC=false  # Disabled - handled by OSSPEP
+      - OSINT_ENABLE_PEP_SYNC=false  # Disabled - handled by OSSPEP
+      - OSINT_ENABLE_SANCTIONS_CHECK=true  # Read-only from DB
+      - OSINT_ENABLE_PEP_CHECK=true  # Read-only from DB
+    volumes:
+      # Mount models directory for persistence
+      - ./models:/app/models
+      # Mount uploads directory for document processing
+      - ./uploads:/app/uploads
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-files: "3"
+
+volumes:
+  mysql_data:
+    driver: local
+  rethinkdb_data:
+    driver: local

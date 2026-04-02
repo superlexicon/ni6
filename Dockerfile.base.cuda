@@ -1,0 +1,104 @@
+# Base image for IM-OSINT CUDA builds
+# Contains: system deps, Python 3.11, Poetry, dependencies, PyTorch, weights
+# Build: docker build -f Dockerfile.base.cuda -t 10.0.0.14:5000/im-osint-base-cuda:latest .
+# Push: docker push 10.0.0.14:5000/im-osint-base-cuda:latest
+
+FROM nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
+
+# Environment variables
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONFAULTHANDLER=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONHASHSEED=random \
+    PIP_NO_CACHE_DIR=off \
+    PIP_DISABLE_PIP_VERSION_CHECK=on \
+    PIP_DEFAULT_TIMEOUT=300 \
+    PIP_RETRIES=5 \
+    POETRY_REQUESTS_TIMEOUT=600 \
+    CUDA_HOME=/usr/local/cuda \
+    PATH=$PATH:/usr/local/cuda/bin \
+    LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/cuda/lib64 \
+    POETRY_VIRTUALENVS_CREATE=false \
+    POETRY_VIRTUALENVS_IN_PROJECT=false \
+    POETRY_NO_INTERACTION=1 \
+    POETRY_CACHE_DIR=/tmp/poetry_cache \
+    TF_CPP_MIN_LOG_LEVEL=2 \
+    TF_USE_LEGACY_KERAS=1 \
+    PYTHON="/usr/bin/python3.11"
+
+# Install system dependencies - Python 3.11
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 \
+    python3.11-dev \
+    python3.11-venv \
+    python3.11-distutils \
+    python3-pip \
+    build-essential \
+    cmake \
+    curl \
+    git \
+    wget \
+    ffmpeg \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libglib2.0-0 \
+    libgtk-3-0 \
+    libavcodec-dev \
+    libavformat-dev \
+    libswscale-dev \
+    libgomp1 \
+    libhdf5-dev \
+    libpng-dev \
+    libjpeg-dev \
+    libtiff-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Python 3.11 as default and install pip/Poetry
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 && \
+    update-alternatives --set python3 /usr/bin/python3.11 && \
+    python3.11 -m pip install --upgrade pip setuptools wheel && \
+    python3.11 -m pip install poetry && \
+    python3 --version && \
+    poetry --version
+
+# Set working directory
+WORKDIR /app
+
+# Copy dependency files only (not full source)
+COPY pyproject.toml.base pyproject.toml.cuda ./
+
+# Install dependencies with Poetry first (will install CPU-only torch from PyPI)
+RUN poetry config virtualenvs.create false && \
+    poetry config virtualenvs.in-project false && \
+    poetry config cache-dir /tmp/poetry_cache && \
+    cp pyproject.toml.base pyproject.toml && \
+    cat pyproject.toml.cuda >> pyproject.toml && \
+    poetry lock && \
+    poetry install --no-root --no-interaction --no-ansi && \
+    rm -rf /tmp/poetry_cache && \
+    echo "Poetry dependencies installed"
+
+# Install cuSPARSELt library required by PyTorch (libcusparseLt.so.0)
+# The library installs to a subdirectory, create symlink to standard location
+RUN apt-get update && \
+    apt-get install -y libcusparselt0-cuda-12 && \
+    ln -sf /usr/lib/x86_64-linux-gnu/libcusparseLt/12/libcusparseLt.so.0 /usr/lib/x86_64-linux-gnu/libcusparseLt.so.0 && \
+    ldconfig && \
+    rm -rf /var/lib/apt/lists/* && \
+    echo "cuSPARSELt installed"
+
+# Force-reinstall PyTorch with CUDA support (overrides CPU version from Poetry)
+RUN pip3 install --upgrade pip && \
+    pip3 install --force-reinstall --no-deps torch torchvision --index-url https://download.pytorch.org/whl/cu124 && \
+    echo "PyTorch CUDA installed successfully"
+
+# Copy pre-downloaded weights (5.1 GB - rarely change)
+COPY app/deepface_weights/ /root/.deepface/weights/
+COPY app/photoholmes/weights/ /app/app/photoholmes/weights/
+COPY app/spacy_models/ /app/app/spacy_models/
+COPY app/nltk_data/ /app/app/nltk_data/
+COPY app/finbert_weights/ /app/app/finbert_weights/
+
+# Create runtime directories
+RUN mkdir -p /app/logs /app/temp /var/run/mysqld

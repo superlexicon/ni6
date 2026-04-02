@@ -1,0 +1,17 @@
+# IM-OSINT Application Dockerfile (ROCm)
+# Requires base image: 10.0.0.14:5000/im-osint-base-rocm:latest
+# Build: docker build -f Dockerfile.rocm -t 10.0.0.14:5000/im-osint-rocm:latest .
+
+FROM 10.0.0.14:5000/im-osint-base-rocm:latest
+
+WORKDIR /app
+
+# Copy application code only (dependencies and weights are in base image)
+COPY --exclude=deepface_weights --exclude=photoholmes/weights app/ /app/app/
+COPY .env* /app/
+
+# Expose port
+EXPOSE 12410
+
+# Default command
+CMD ["python3", "-m", "app.main"]

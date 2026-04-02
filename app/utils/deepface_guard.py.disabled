@@ -1,0 +1,174 @@
+"""
+DeepFace Runtime Guard
+
+This module provides an aggressive compatibility guard that ensures
+DeepFace compatibility immediately before every single DeepFace operation.
+This is the ultimate defense against KerasTensor errors.
+"""
+
+import functools
+import asyncio
+from typing import Any, Callable, Union
+from app.core.logger import get_logger
+
+
+class DeepFaceGuard:
+    """Runtime guard for DeepFace operations to prevent KerasTensor errors."""
+
+    def __init__(self):
+        self.logger = get_logger()
+        self._compatibility_applied = False
+
+    def ensure_compatibility(self):
+        """Ensure DeepFace compatibility immediately before operations."""
+        if not self._compatibility_applied:
+            try:
+                # Import and apply compatibility
+                from app.utils.deepface_compatibility import ensure_deepface_compatibility
+                ensure_deepface_compatibility()
+                self._compatibility_applied = True
+                self.logger.debug("DeepFace guard compatibility applied")
+            except Exception as e:
+                self.logger.warning(f"DeepFace guard compatibility failed: {e}")
+
+    def reset_compatibility(self):
+        """Force compatibility to be reapplied on next operation."""
+        self._compatibility_applied = False
+        self.logger.debug("DeepFace guard compatibility reset")
+
+
+# Global guard instance
+_guard = DeepFaceGuard()
+
+
+def safe_deepface_operation(func: Callable) -> Callable:
+    """
+    Decorator to ensure DeepFace compatibility before any DeepFace operation.
+
+    Args:
+        func: Function that uses DeepFace
+
+    Returns:
+        Wrapped function with compatibility guard
+    """
+    @functools.wraps(func)
+    def sync_wrapper(*args, **kwargs):
+        # Ensure compatibility before synchronous DeepFace operations
+        _guard.ensure_compatibility()
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            # Reset compatibility on failure and retry once
+            _guard.reset_compatibility()
+            _guard.ensure_compatibility()
+            return func(*args, **kwargs)
+
+    return sync_wrapper
+
+
+def async_safe_deepface_operation(func: Callable) -> Callable:
+    """
+    Decorator to ensure DeepFace compatibility before any async DeepFace operation.
+
+    Args:
+        func: Async function that uses DeepFace
+
+    Returns:
+        Wrapped async function with compatibility guard
+    """
+    @functools.wraps(func)
+    async def async_wrapper(*args, **kwargs):
+        # Ensure compatibility before async DeepFace operations
+        _guard.ensure_compatibility()
+        try:
+            return await func(*args, **kwargs)
+        except Exception as e:
+            # Reset compatibility on failure and retry once
+            _guard.reset_compatibility()
+            _guard.ensure_compatibility()
+            return await func(*args, **kwargs)
+
+    return async_wrapper
+
+
+class SafeDeepFace:
+    """
+    Safe wrapper around DeepFace operations with runtime compatibility guard.
+    """
+
+    def __init__(self):
+        self.logger = get_logger()
+        # Import DeepFace after compatibility setup
+        self._ensure_import()
+
+    def _ensure_import(self):
+        """Import DeepFace with compatibility guaranteed."""
+        _guard.ensure_compatibility()
+        from app.helper.deepface_compatibility_wrapper import DeepFace
+        self.DeepFace = DeepFace
+        self.logger.debug("DeepFace imported safely")
+
+    def represent(self, *args, **kwargs):
+        """Safe wrapper for DeepFace.represent()"""
+        _guard.ensure_compatibility()
+        return self.DeepFace.represent(*args, **kwargs)
+
+    def extract_faces(self, *args, **kwargs):
+        """Safe wrapper for DeepFace.extract_faces()"""
+        _guard.ensure_compatibility()
+        return self.DeepFace.extract_faces(*args, **kwargs)
+
+    def analyze(self, *args, **kwargs):
+        """Safe wrapper for DeepFace.analyze()"""
+        _guard.ensure_compatibility()
+        return self.DeepFace.analyze(*args, **kwargs)
+
+    def verify(self, *args, **kwargs):
+        """Safe wrapper for DeepFace.verify()"""
+        _guard.ensure_compatibility()
+        return self.DeepFace.verify(*args, **kwargs)
+
+
+# Global safe DeepFace instance
+_safe_deepface = None
+
+
+def get_safe_deepface():
+    """Get the global safe DeepFace instance."""
+    global _safe_deepface
+    if _safe_deepface is None:
+        _safe_deepface = SafeDeepFace()
+    return _safe_deepface
+
+
+def patch_deepface_methods():
+    """Patch DeepFace methods globally with compatibility guards."""
+    try:
+        _guard.ensure_compatibility()
+
+        # Import original DeepFace
+        from app.helper.deepface_compatibility_wrapper import DeepFace as OriginalDeepFace
+
+        # Patch synchronous methods
+        if hasattr(OriginalDeepFace, 'represent'):
+            OriginalDeepFace.represent = safe_deepface_operation(OriginalDeepFace.represent)
+
+        if hasattr(OriginalDeepFace, 'extract_faces'):
+            OriginalDeepFace.extract_faces = safe_deepface_operation(OriginalDeepFace.extract_faces)
+
+        if hasattr(OriginalDeepFace, 'analyze'):
+            OriginalDeepFace.analyze = safe_deepface_operation(OriginalDeepFace.analyze)
+
+        if hasattr(OriginalDeepFace, 'verify'):
+            OriginalDeepFace.verify = safe_deepface_operation(OriginalDeepFace.verify)
+
+        logger = get_logger()
+        logger.info("DeepFace methods patched with runtime compatibility guard")
+
+    except Exception as e:
+        logger = get_logger()
+        logger.error(f"Failed to patch DeepFace methods: {e}")
+
+
+# Apply patches at import time
+patch_deepface_methods()

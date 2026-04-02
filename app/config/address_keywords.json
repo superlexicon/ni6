@@ -1,0 +1,102 @@
+{
+  "version": "1.0",
+  "default": {
+    "keywords": [
+      "STREET", "ST", "ROAD", "RD", "LANE", "LN", "AVENUE", "AVE",
+      "BLOCK", "BLK", "BUILDING", "UNIT", "FLAT", "APARTMENT",
+      "PO BOX", "POSTAL", "ZIP", "NEAR", "OPPOSITE", "OPP"
+    ],
+    "unit_patterns": [],
+    "postal_patterns": [
+      "\\b\\d{6}\\b",
+      "\\b\\d{5}\\b",
+      "\\b\\d{4}\\b"
+    ]
+  },
+  "countries": {
+    "AE": {
+      "keywords": [
+        "TOWER", "TOWERS", "BUILDING", "VILLA", "FLAT", "UNIT",
+        "PO BOX", "P.O. BOX", "P.O.BOX", "POBOX", "BOX",
+        "ISLAND", "REEM", "DOWNTOWN", "MARINA", "JBR",
+        "TAMOUH", "AL REEM", "BLAND"
+      ],
+      "unit_patterns": ["^\\d{3,5}$"],
+      "postal_patterns": []
+    },
+    "SG": {
+      "keywords": [
+        "BLK", "BLOCK", "STREET", "ST", "ROAD", "RD", "LANE", "LN",
+        "CRESCENT", "CLOSE", "DRIVE", "PLACE", "JALAN", "LORONG",
+        "CONDOMINIUM", "CONDO", "TOWER"
+      ],
+      "unit_patterns": ["^#?\\d{1,2}[\\-]\\d{1,4}[A-Z]?$"],
+      "postal_patterns": ["\\b\\d{6}\\b"]
+    },
+    "IN": {
+      "keywords": [
+        "H NO", "HNO", "H.NO", "HOUSE NO", "DOOR NO", "FLAT", "PLOT", "KHASRA",
+        "NAGAR", "PALLY", "PALLE", "COLONY", "SECTOR", "PHASE", "EXTENSION", "EXTN",
+        "NEAR", "OPP", "OPPOSITE", "TEMPLE", "CHURCH", "MOSQUE",
+        "MANDIR", "MASJID", "SCHOOL", "MARKET", "DIST", "DISTRICT",
+        "MARG", "MARGA", "ROAD", "RD", "STREET", "ST", "LANE", "LN", "AVE", "AVENUE",
+        "TALUKA", "TEHSIL", "BLOCK", "GRAM", "VILLAGE", "PO", "POST", "POSTOFFICE",
+        "TOWN", "CITY", "AREA", "PURAM", "PUR", "PURA", "PET", "PETA", "WADA", "WADI",
+        "GALI", "MOHALLA", "CHOWK", "CHOWKI", "BAZAR", "BAZAAR", "MANDI",
+        "INDUSTRIAL", "ESTATE", "COMPLEX", "CENTER", "CENTRE", "BUILDING", "BLDG"
+      ],
+      "unit_patterns": [],
+      "postal_patterns": ["\\b\\d{6}\\b"]
+    },
+    "TH": {
+      "keywords": [
+        "SOI", "MOO", "BAAN", "TAMBON", "AMPHOE", "KHET", "KWAENG"
+      ],
+      "unit_patterns": [],
+      "postal_patterns": ["\\b\\d{5}\\b"]
+    },
+    "MY": {
+      "keywords": [
+        "JALAN", "LORONG", "TAMAN", "BLOK", "BLOCK"
+      ],
+      "unit_patterns": [],
+      "postal_patterns": ["\\b\\d{5}\\b"]
+    },
+    "MM": {
+      "keywords": [
+        "STREET", "ST", "ROAD", "RD", "LANE", "LN", "AVENUE", "AVE",
+        "QUARTER", "WARD", "TOWNSHIP", "CITY", "MYANMAR",
+        "YANGON", "RANGOON", "MANDALAY", "NAYPYIDAW", "BAGAN",
+        "TAUNGGYI", "MAWLAMYINE", "PATHEIN", "MONYWA", "MEIKHTILA",
+        "SITTWE", "TAUNGGYI", "LASHIO", "PYAY", "THANDWE",
+        "BUILDING", "FLOOR", "ROOM", "NO", "NUMBER"
+      ],
+      "unit_patterns": ["^[\\d]+", "^(NO|NUM|NUMBER)\\s*\\d+"],
+      "postal_patterns": ["\\b\\d{5}\\b"]
+    },
+    "HK": {
+      "keywords": [
+        "BUILDING", "TOWER", "FLOOR", "FLAT", "ROOM"
+      ],
+      "unit_patterns": [],
+      "postal_patterns": []
+    },
+    "GB": {
+      "keywords": [
+        "STREET", "ST", "ROAD", "RD", "LANE", "LN", "AVENUE", "AVE",
+        "COURT", "DRIVE", "GROVE", "PLACE", "SQUARE", "WAY"
+      ],
+      "unit_patterns": [],
+      "postal_patterns": ["\\b[A-Z]{1,2}\\d{1,2}[A-Z]?\\s*\\d[A-Z]{2}\\b"]
+    },
+    "US": {
+      "keywords": [
+        "STREET", "ST", "ROAD", "RD", "AVENUE", "AVE", "BOULEVARD", "BLVD",
+        "DRIVE", "DR", "LANE", "LN", "COURT", "CT", "WAY", "PLACE", "PL",
+        "APARTMENT", "APT", "SUITE", "STE", "UNIT"
+      ],
+      "unit_patterns": ["^(APT|SUITE|STE|UNIT)\\s*#?\\d+$"],
+      "postal_patterns": ["\\b\\d{5}(-\\d{4})?\\b"]
+    }
+  }
+}

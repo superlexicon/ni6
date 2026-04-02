@@ -1,0 +1,2 @@
+# CPU-only PyTorch dependencies
+countrystatecity-countries = "^1.0.0"

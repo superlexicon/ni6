@@ -1,0 +1,2303 @@
+{
+  "banks": [
+    {
+      "key": "dbs",
+      "name": "DBS Bank",
+      "swift_code": "DBSSSGSG",
+      "country": "SG"
+    },
+    {
+      "key": "dbs",
+      "name": "DBS Bank (HK)",
+      "swift_code": "DHBKHKHH",
+      "country": "HK"
+    },
+    {
+      "key": "dbs",
+      "name": "DBS Bank India Limited",
+      "swift_code": "DBSSINBB",
+      "country": "IN"
+    },
+    {
+      "key": "development bank of singapore",
+      "name": "DBS Bank",
+      "swift_code": "DBSSSGSG",
+      "country": "SG"
+    },
+    {
+      "key": "posb",
+      "name": "POSB",
+      "swift_code": "DBSSSGSG",
+      "country": "SG"
+    },
+    {
+      "key": "ocbc",
+      "name": "OCBC Bank",
+      "swift_code": "OCBCSGSG",
+      "country": "SG"
+    },
+    {
+      "key": "ocbc",
+      "name": "OCBC Wing Hang",
+      "swift_code": "WIHBHKHH",
+      "country": "HK"
+    },
+    {
+      "key": "ocbc",
+      "name": "OCBC Malaysia",
+      "swift_code": "OCBCMYKL",
+      "country": "MY"
+    },
+    {
+      "key": "oversea-chinese banking",
+      "name": "OCBC Bank",
+      "swift_code": "OCBCSGSG",
+      "country": "SG"
+    },
+    {
+      "key": "uob",
+      "name": "United Overseas Bank",
+      "swift_code": "UOVBSGSG",
+      "country": "SG"
+    },
+    {
+      "key": "uob",
+      "name": "UOB Malaysia",
+      "swift_code": "UOVBMYKL",
+      "country": "MY"
+    },
+    {
+      "key": "uob",
+      "name": "UOB Thailand",
+      "swift_code": "UOVBTHBK",
+      "country": "TH"
+    },
+    {
+      "key": "uob",
+      "name": "UOB Indonesia",
+      "swift_code": "BBIJIDJA",
+      "country": "ID"
+    },
+    {
+      "key": "united overseas bank",
+      "name": "United Overseas Bank",
+      "swift_code": "UOVBSGSG",
+      "country": "SG"
+    },
+    {
+      "key": "hsbc",
+      "name": "HSBC",
+      "swift_code": "MIDLGB22",
+      "country": "GB"
+    },
+    {
+      "key": "hsbc",
+      "name": "HSBC",
+      "swift_code": "HSBCSGSG",
+      "country": "SG"
+    },
+    {
+      "key": "hsbc",
+      "name": "HSBC",
+      "swift_code": "HSBCHKHH",
+      "country": "HK"
+    },
+    {
+      "key": "hsbc",
+      "name": "HSBC",
+      "swift_code": "MRMDUS33",
+      "country": "US"
+    },
+    {
+      "key": "hsbc",
+      "name": "HSBC",
+      "swift_code": "HKBAAU2S",
+      "country": "AU"
+    },
+    {
+      "key": "hsbc",
+      "name": "HSBC Germany",
+      "swift_code": "HSBCDEFF",
+      "country": "DE"
+    },
+    {
+      "key": "hsbc",
+      "name": "HSBC Japan",
+      "swift_code": "HSBCJPJT",
+      "country": "JP"
+    },
+    {
+      "key": "hsbc",
+      "name": "HSBC India",
+      "swift_code": "HSBCINBB",
+      "country": "IN"
+    },
+    {
+      "key": "hsbc",
+      "name": "HSBC Malaysia",
+      "swift_code": "HBMBMYKL",
+      "country": "MY"
+    },
+    {
+      "key": "hsbc",
+      "name": "HSBC Thailand",
+      "swift_code": "HSBCTHBK",
+      "country": "TH"
+    },
+    {
+      "key": "hsbc",
+      "name": "HSBC Indonesia",
+      "swift_code": "HSBCIDJA",
+      "country": "ID"
+    },
+    {
+      "key": "hsbc",
+      "name": "HSBC Philippines",
+      "swift_code": "HSBCPHMM",
+      "country": "PH"
+    },
+    {
+      "key": "hsbc",
+      "name": "HSBC UAE",
+      "swift_code": "BBMEAEAD",
+      "country": "AE"
+    },
+    {
+      "key": "hsbc",
+      "name": "HSBC Vietnam",
+      "swift_code": "HSBCVNVX",
+      "country": "VN"
+    },
+    {
+      "key": "hsbc",
+      "name": "HSBC Canada",
+      "swift_code": "HKBCCATT",
+      "country": "CA"
+    },
+    {
+      "key": "hsbc",
+      "name": "HSBC France",
+      "swift_code": "CCFRFRPP",
+      "country": "FR"
+    },
+    {
+      "key": "hsbc",
+      "name": "HSBC Mexico",
+      "swift_code": "BABORXMM",
+      "country": "MX"
+    },
+    {
+      "key": "citibank",
+      "name": "Citibank",
+      "swift_code": "CITIUS33",
+      "country": "US"
+    },
+    {
+      "key": "citibank",
+      "name": "Citibank",
+      "swift_code": "CITISGSG",
+      "country": "SG"
+    },
+    {
+      "key": "citibank",
+      "name": "Citibank",
+      "swift_code": "CITIHKHX",
+      "country": "HK"
+    },
+    {
+      "key": "citibank",
+      "name": "Citibank",
+      "swift_code": "CITIAU2X",
+      "country": "AU"
+    },
+    {
+      "key": "citibank",
+      "name": "Citibank Japan",
+      "swift_code": "CITIJPJT",
+      "country": "JP"
+    },
+    {
+      "key": "citibank",
+      "name": "Citibank India",
+      "swift_code": "CITIINBX",
+      "country": "IN"
+    },
+    {
+      "key": "citibank",
+      "name": "Citibank Malaysia",
+      "swift_code": "CITIMYKL",
+      "country": "MY"
+    },
+    {
+      "key": "citibank",
+      "name": "Citibank Thailand",
+      "swift_code": "CITITHBX",
+      "country": "TH"
+    },
+    {
+      "key": "citibank",
+      "name": "Citibank Indonesia",
+      "swift_code": "CITIIDJA",
+      "country": "ID"
+    },
+    {
+      "key": "citibank",
+      "name": "Citibank Philippines",
+      "swift_code": "CITIPHMX",
+      "country": "PH"
+    },
+    {
+      "key": "citibank",
+      "name": "Citibank UAE",
+      "swift_code": "CITIAEAD",
+      "country": "AE"
+    },
+    {
+      "key": "citibank",
+      "name": "Citibank Korea",
+      "swift_code": "CITIKRSX",
+      "country": "KR"
+    },
+    {
+      "key": "citi",
+      "name": "Citibank",
+      "swift_code": "CITIUS33",
+      "country": "US"
+    },
+    {
+      "key": "citi",
+      "name": "Citibank",
+      "swift_code": "CITISGSG",
+      "country": "SG"
+    },
+    {
+      "key": "citi",
+      "name": "Citibank",
+      "swift_code": "CITIHKHX",
+      "country": "HK"
+    },
+    {
+      "key": "citi",
+      "name": "Citibank",
+      "swift_code": "CITIAU2X",
+      "country": "AU"
+    },
+    {
+      "key": "standard chartered",
+      "name": "Standard Chartered",
+      "swift_code": "SCBLGB2L",
+      "country": "GB"
+    },
+    {
+      "key": "standard chartered",
+      "name": "Standard Chartered",
+      "swift_code": "SCBLSGSG",
+      "country": "SG"
+    },
+    {
+      "key": "standard chartered",
+      "name": "Standard Chartered",
+      "swift_code": "SCBLHKHH",
+      "country": "HK"
+    },
+    {
+      "key": "standard chartered",
+      "name": "Standard Chartered India",
+      "swift_code": "SCBLINBB",
+      "country": "IN"
+    },
+    {
+      "key": "standard chartered",
+      "name": "Standard Chartered Malaysia",
+      "swift_code": "SCBLMYKX",
+      "country": "MY"
+    },
+    {
+      "key": "standard chartered",
+      "name": "Standard Chartered Thailand",
+      "swift_code": "SCBLTHBX",
+      "country": "TH"
+    },
+    {
+      "key": "standard chartered",
+      "name": "Standard Chartered Indonesia",
+      "swift_code": "SCBLIDJX",
+      "country": "ID"
+    },
+    {
+      "key": "standard chartered",
+      "name": "Standard Chartered UAE",
+      "swift_code": "SCBLAEADXXX",
+      "country": "AE"
+    },
+    {
+      "key": "standard chartered",
+      "name": "Standard Chartered Vietnam",
+      "swift_code": "SCBLVNVX",
+      "country": "VN"
+    },
+    {
+      "key": "standard chartered",
+      "name": "SC Bank Korea",
+      "swift_code": "SCBLKRSE",
+      "country": "KR"
+    },
+    {
+      "key": "jpmorgan",
+      "name": "JPMorgan Chase",
+      "swift_code": "CHASUS33",
+      "country": "US"
+    },
+    {
+      "key": "jpmorgan",
+      "name": "JPMorgan Chase",
+      "swift_code": "CHASSGSG",
+      "country": "SG"
+    },
+    {
+      "key": "jpmorgan",
+      "name": "JPMorgan Chase",
+      "swift_code": "CHASGB2L",
+      "country": "GB"
+    },
+    {
+      "key": "jpmorgan",
+      "name": "JPMorgan Chase",
+      "swift_code": "CHASHKHH",
+      "country": "HK"
+    },
+    {
+      "key": "jpmorgan",
+      "name": "JPMorgan",
+      "swift_code": "CABOREFF",
+      "country": "DE"
+    },
+    {
+      "key": "jp morgan",
+      "name": "JPMorgan Chase",
+      "swift_code": "CHASUS33",
+      "country": "US"
+    },
+    {
+      "key": "jp morgan",
+      "name": "JPMorgan Chase",
+      "swift_code": "CHASSGSG",
+      "country": "SG"
+    },
+    {
+      "key": "jpmorgan chase",
+      "name": "JPMorgan Chase",
+      "swift_code": "CHASUS33",
+      "country": "US"
+    },
+    {
+      "key": "chase",
+      "name": "Chase",
+      "swift_code": "CHASUS33",
+      "country": "US"
+    },
+    {
+      "key": "goldman sachs",
+      "name": "Goldman Sachs",
+      "swift_code": "GSCHUS33",
+      "country": "US"
+    },
+    {
+      "key": "goldman sachs",
+      "name": "Goldman Sachs",
+      "swift_code": "GSSGSGSG",
+      "country": "SG"
+    },
+    {
+      "key": "goldman sachs",
+      "name": "Goldman Sachs",
+      "swift_code": "GABORB2L",
+      "country": "GB"
+    },
+    {
+      "key": "goldman sachs",
+      "name": "Goldman Sachs",
+      "swift_code": "GSABHKHH",
+      "country": "HK"
+    },
+    {
+      "key": "goldman sachs",
+      "name": "Goldman Sachs",
+      "swift_code": "GABOREFF",
+      "country": "DE"
+    },
+    {
+      "key": "morgan stanley",
+      "name": "Morgan Stanley",
+      "swift_code": "MSTCUS33",
+      "country": "US"
+    },
+    {
+      "key": "morgan stanley",
+      "name": "Morgan Stanley",
+      "swift_code": "MSILSGSG",
+      "country": "SG"
+    },
+    {
+      "key": "morgan stanley",
+      "name": "Morgan Stanley",
+      "swift_code": "MABORB2L",
+      "country": "GB"
+    },
+    {
+      "key": "morgan stanley",
+      "name": "Morgan Stanley",
+      "swift_code": "MSASHKHH",
+      "country": "HK"
+    },
+    {
+      "key": "bank of america",
+      "name": "Bank of America",
+      "swift_code": "BOFAUS3N",
+      "country": "US"
+    },
+    {
+      "key": "bank of america",
+      "name": "Bank of America",
+      "swift_code": "BOFASGSG",
+      "country": "SG"
+    },
+    {
+      "key": "bofa",
+      "name": "Bank of America",
+      "swift_code": "BOFAUS3N",
+      "country": "US"
+    },
+    {
+      "key": "ubs",
+      "name": "UBS",
+      "swift_code": "UBSWCHZH",
+      "country": "CH"
+    },
+    {
+      "key": "ubs",
+      "name": "UBS",
+      "swift_code": "UBSWSGSG",
+      "country": "SG"
+    },
+    {
+      "key": "ubs",
+      "name": "UBS",
+      "swift_code": "UBSWGB2L",
+      "country": "GB"
+    },
+    {
+      "key": "ubs",
+      "name": "UBS",
+      "swift_code": "UBSWHKHH",
+      "country": "HK"
+    },
+    {
+      "key": "ubs",
+      "name": "UBS",
+      "swift_code": "UBSWDEFF",
+      "country": "DE"
+    },
+    {
+      "key": "credit suisse",
+      "name": "Credit Suisse",
+      "swift_code": "CRESCHZZ",
+      "country": "CH"
+    },
+    {
+      "key": "credit suisse",
+      "name": "Credit Suisse",
+      "swift_code": "CRESSGSG",
+      "country": "SG"
+    },
+    {
+      "key": "credit suisse",
+      "name": "Credit Suisse",
+      "swift_code": "CABORB2L",
+      "country": "GB"
+    },
+    {
+      "key": "credit suisse",
+      "name": "Credit Suisse",
+      "swift_code": "CABORHKH",
+      "country": "HK"
+    },
+    {
+      "key": "credit suisse",
+      "name": "Credit Suisse",
+      "swift_code": "CABOREFF",
+      "country": "DE"
+    },
+    {
+      "key": "deutsche bank",
+      "name": "Deutsche Bank",
+      "swift_code": "DEUTDEFF",
+      "country": "DE"
+    },
+    {
+      "key": "deutsche bank",
+      "name": "Deutsche Bank",
+      "swift_code": "DEUTSGSG",
+      "country": "SG"
+    },
+    {
+      "key": "deutsche bank",
+      "name": "Deutsche Bank",
+      "swift_code": "DEUTGB2L",
+      "country": "GB"
+    },
+    {
+      "key": "deutsche bank",
+      "name": "Deutsche Bank",
+      "swift_code": "DEUTHKHH",
+      "country": "HK"
+    },
+    {
+      "key": "bnp paribas",
+      "name": "BNP Paribas",
+      "swift_code": "BNPAFRPP",
+      "country": "FR"
+    },
+    {
+      "key": "bnp paribas",
+      "name": "BNP Paribas",
+      "swift_code": "BNPASGSG",
+      "country": "SG"
+    },
+    {
+      "key": "bnp paribas",
+      "name": "BNP Paribas",
+      "swift_code": "BNPAHKHH",
+      "country": "HK"
+    },
+    {
+      "key": "bnp paribas",
+      "name": "BNP Paribas",
+      "swift_code": "BNPADEFF",
+      "country": "DE"
+    },
+    {
+      "key": "bnp",
+      "name": "BNP Paribas",
+      "swift_code": "BNPAFRPP",
+      "country": "FR"
+    },
+    {
+      "key": "barclays",
+      "name": "Barclays",
+      "swift_code": "BARCGB22",
+      "country": "GB"
+    },
+    {
+      "key": "barclays",
+      "name": "Barclays",
+      "swift_code": "BARCSGSG",
+      "country": "SG"
+    },
+    {
+      "key": "anz",
+      "name": "ANZ",
+      "swift_code": "ANZBAU3M",
+      "country": "AU"
+    },
+    {
+      "key": "anz",
+      "name": "ANZ Bank",
+      "swift_code": "ANZBSGSG",
+      "country": "SG"
+    },
+    {
+      "key": "anz",
+      "name": "ANZ New Zealand",
+      "swift_code": "ANZBNZ22",
+      "country": "NZ"
+    },
+    {
+      "key": "maybank",
+      "name": "Maybank",
+      "swift_code": "MABORYMK",
+      "country": "MY"
+    },
+    {
+      "key": "maybank",
+      "name": "Maybank",
+      "swift_code": "MBBESGSG",
+      "country": "SG"
+    },
+    {
+      "key": "maybank",
+      "name": "Maybank Indonesia",
+      "swift_code": "BMRIIDJA",
+      "country": "ID"
+    },
+    {
+      "key": "malayan banking",
+      "name": "Maybank",
+      "swift_code": "MABORYMK",
+      "country": "MY"
+    },
+    {
+      "key": "cimb",
+      "name": "CIMB Bank",
+      "swift_code": "CIBBMYKL",
+      "country": "MY"
+    },
+    {
+      "key": "cimb",
+      "name": "CIMB Bank",
+      "swift_code": "CIBBSGSG",
+      "country": "SG"
+    },
+    {
+      "key": "cimb",
+      "name": "CIMB Thai",
+      "swift_code": "CIABTHBK",
+      "country": "TH"
+    },
+    {
+      "key": "cimb",
+      "name": "CIMB Niaga",
+      "swift_code": "CIMBIDJA",
+      "country": "ID"
+    },
+    {
+      "key": "bank of china",
+      "name": "Bank of China",
+      "swift_code": "BKCHCNBJ",
+      "country": "CN"
+    },
+    {
+      "key": "bank of china",
+      "name": "Bank of China",
+      "swift_code": "BKCHSGSG",
+      "country": "SG"
+    },
+    {
+      "key": "bank of china",
+      "name": "Bank of China (HK)",
+      "swift_code": "BKCHHKHH",
+      "country": "HK"
+    },
+    {
+      "key": "boc",
+      "name": "Bank of China",
+      "swift_code": "BKCHCNBJ",
+      "country": "CN"
+    },
+    {
+      "key": "boc",
+      "name": "Bank of China (HK)",
+      "swift_code": "BKCHHKHH",
+      "country": "HK"
+    },
+    {
+      "key": "icbc",
+      "name": "ICBC",
+      "swift_code": "ICBKCNBJ",
+      "country": "CN"
+    },
+    {
+      "key": "icbc",
+      "name": "ICBC",
+      "swift_code": "ICBKSGSG",
+      "country": "SG"
+    },
+    {
+      "key": "icbc",
+      "name": "ICBC Asia",
+      "swift_code": "UBHKHKHH",
+      "country": "HK"
+    },
+    {
+      "key": "industrial and commercial bank",
+      "name": "ICBC",
+      "swift_code": "ICBKCNBJ",
+      "country": "CN"
+    },
+    {
+      "key": "industrial and commercial bank",
+      "name": "ICBC Asia",
+      "swift_code": "UBHKHKHH",
+      "country": "HK"
+    },
+    {
+      "key": "mizuho",
+      "name": "Mizuho Bank",
+      "swift_code": "MHCBJPJT",
+      "country": "JP"
+    },
+    {
+      "key": "mizuho",
+      "name": "Mizuho Bank",
+      "swift_code": "MHCBSGSG",
+      "country": "SG"
+    },
+    {
+      "key": "smbc",
+      "name": "SMBC",
+      "swift_code": "SMBCJPJT",
+      "country": "JP"
+    },
+    {
+      "key": "smbc",
+      "name": "SMBC",
+      "swift_code": "SMBCSGSG",
+      "country": "SG"
+    },
+    {
+      "key": "sumitomo mitsui",
+      "name": "SMBC",
+      "swift_code": "SMBCJPJT",
+      "country": "JP"
+    },
+    {
+      "key": "sumitomo mitsui",
+      "name": "SMBC",
+      "swift_code": "SMBCSGSG",
+      "country": "SG"
+    },
+    {
+      "key": "hang seng",
+      "name": "Hang Seng Bank",
+      "swift_code": "HASEHKHH",
+      "country": "HK"
+    },
+    {
+      "key": "hang seng",
+      "name": "Hang Seng Bank",
+      "swift_code": "HASESGSG",
+      "country": "SG"
+    },
+    {
+      "key": "hang seng bank",
+      "name": "Hang Seng Bank",
+      "swift_code": "HASEHKHH",
+      "country": "HK"
+    },
+    {
+      "key": "state bank of india",
+      "name": "State Bank of India",
+      "swift_code": "SBININBB",
+      "country": "IN"
+    },
+    {
+      "key": "state bank of india",
+      "name": "State Bank of India",
+      "swift_code": "SBINSGSG",
+      "country": "SG"
+    },
+    {
+      "key": "sbi",
+      "name": "State Bank of India",
+      "swift_code": "SBININBB",
+      "country": "IN"
+    },
+    {
+      "key": "sbi",
+      "name": "State Bank of India",
+      "swift_code": "SBINSGSG",
+      "country": "SG"
+    },
+    {
+      "key": "rhb",
+      "name": "RHB Bank",
+      "swift_code": "RHBBMYKL",
+      "country": "MY"
+    },
+    {
+      "key": "rhb",
+      "name": "RHB Bank",
+      "swift_code": "RHBBSGSG",
+      "country": "SG"
+    },
+    {
+      "key": "rhb bank",
+      "name": "RHB Bank",
+      "swift_code": "RHBBMYKL",
+      "country": "MY"
+    },
+    {
+      "key": "wells fargo",
+      "name": "Wells Fargo",
+      "swift_code": "WFBIUS6S",
+      "country": "US"
+    },
+    {
+      "key": "us bank",
+      "name": "U.S. Bank",
+      "swift_code": "USBKUS44",
+      "country": "US"
+    },
+    {
+      "key": "pnc",
+      "name": "PNC Bank",
+      "swift_code": "PNCCUS33",
+      "country": "US"
+    },
+    {
+      "key": "truist",
+      "name": "Truist Bank",
+      "swift_code": "BRBTUS33",
+      "country": "US"
+    },
+    {
+      "key": "capital one",
+      "name": "Capital One",
+      "swift_code": "HIBKUS3C",
+      "country": "US"
+    },
+    {
+      "key": "charles schwab",
+      "name": "Charles Schwab",
+      "swift_code": "SCHBUS33",
+      "country": "US"
+    },
+    {
+      "key": "fidelity",
+      "name": "Fidelity",
+      "swift_code": "FMRAUS6S",
+      "country": "US"
+    },
+    {
+      "key": "ally bank",
+      "name": "Ally Bank",
+      "swift_code": "ALLYUS31",
+      "country": "US"
+    },
+    {
+      "key": "discover",
+      "name": "Discover Bank",
+      "swift_code": "DOFSUS44",
+      "country": "US"
+    },
+    {
+      "key": "synchrony",
+      "name": "Synchrony Bank",
+      "swift_code": "SYFIUS33",
+      "country": "US"
+    },
+    {
+      "key": "silicon valley bank",
+      "name": "Silicon Valley Bank",
+      "swift_code": "SVBKUS6S",
+      "country": "US"
+    },
+    {
+      "key": "svb",
+      "name": "Silicon Valley Bank",
+      "swift_code": "SVBKUS6S",
+      "country": "US"
+    },
+    {
+      "key": "first republic",
+      "name": "First Republic Bank",
+      "swift_code": "FRBBUS6S",
+      "country": "US"
+    },
+    {
+      "key": "american express",
+      "name": "American Express",
+      "swift_code": "ABORUSAT",
+      "country": "US"
+    },
+    {
+      "key": "amex",
+      "name": "American Express",
+      "swift_code": "ABORUSAT",
+      "country": "US"
+    },
+    {
+      "key": "lloyds",
+      "name": "Lloyds Bank",
+      "swift_code": "LOYDGB2L",
+      "country": "GB"
+    },
+    {
+      "key": "lloyds bank",
+      "name": "Lloyds Bank",
+      "swift_code": "LOYDGB2L",
+      "country": "GB"
+    },
+    {
+      "key": "natwest",
+      "name": "NatWest",
+      "swift_code": "NWBKGB2L",
+      "country": "GB"
+    },
+    {
+      "key": "royal bank of scotland",
+      "name": "RBS",
+      "swift_code": "RABORB2L",
+      "country": "GB"
+    },
+    {
+      "key": "rbs",
+      "name": "RBS",
+      "swift_code": "RABORB2L",
+      "country": "GB"
+    },
+    {
+      "key": "santander",
+      "name": "Banco Santander",
+      "swift_code": "BSCHESMM",
+      "country": "ES"
+    },
+    {
+      "key": "santander",
+      "name": "Santander UK",
+      "swift_code": "ABBYGB2L",
+      "country": "GB"
+    },
+    {
+      "key": "santander",
+      "name": "Santander Brasil",
+      "swift_code": "BANSBRPL",
+      "country": "BR"
+    },
+    {
+      "key": "santander",
+      "name": "Santander Mexico",
+      "swift_code": "BMSXMXMM",
+      "country": "MX"
+    },
+    {
+      "key": "nationwide",
+      "name": "Nationwide",
+      "swift_code": "NAIAGB21",
+      "country": "GB"
+    },
+    {
+      "key": "virgin money",
+      "name": "Virgin Money",
+      "swift_code": "NLOYGB22",
+      "country": "GB"
+    },
+    {
+      "key": "metro bank",
+      "name": "Metro Bank",
+      "swift_code": "MYMBGB2L",
+      "country": "GB"
+    },
+    {
+      "key": "monzo",
+      "name": "Monzo Bank",
+      "swift_code": "MONZGB2L",
+      "country": "GB"
+    },
+    {
+      "key": "revolut",
+      "name": "Revolut",
+      "swift_code": "REVOGB21",
+      "country": "GB"
+    },
+    {
+      "key": "starling",
+      "name": "Starling Bank",
+      "swift_code": "SRLGGB2L",
+      "country": "GB"
+    },
+    {
+      "key": "halifax",
+      "name": "Halifax",
+      "swift_code": "HLFXGB21",
+      "country": "GB"
+    },
+    {
+      "key": "tsb",
+      "name": "TSB Bank",
+      "swift_code": "TSBSGB2A",
+      "country": "GB"
+    },
+    {
+      "key": "coutts",
+      "name": "Coutts",
+      "swift_code": "CABORB21",
+      "country": "GB"
+    },
+    {
+      "key": "commonwealth bank",
+      "name": "Commonwealth Bank",
+      "swift_code": "CTBAAU2S",
+      "country": "AU"
+    },
+    {
+      "key": "cba",
+      "name": "Commonwealth Bank",
+      "swift_code": "CTBAAU2S",
+      "country": "AU"
+    },
+    {
+      "key": "commbank",
+      "name": "Commonwealth Bank",
+      "swift_code": "CTBAAU2S",
+      "country": "AU"
+    },
+    {
+      "key": "westpac",
+      "name": "Westpac",
+      "swift_code": "WPACAU2S",
+      "country": "AU"
+    },
+    {
+      "key": "westpac",
+      "name": "Westpac NZ",
+      "swift_code": "WPACNZ2W",
+      "country": "NZ"
+    },
+    {
+      "key": "nab",
+      "name": "NAB",
+      "swift_code": "NATAAU33",
+      "country": "AU"
+    },
+    {
+      "key": "national australia bank",
+      "name": "NAB",
+      "swift_code": "NATAAU33",
+      "country": "AU"
+    },
+    {
+      "key": "macquarie",
+      "name": "Macquarie Bank",
+      "swift_code": "MACQAU2S",
+      "country": "AU"
+    },
+    {
+      "key": "macquarie bank",
+      "name": "Macquarie Bank",
+      "swift_code": "MACQAU2S",
+      "country": "AU"
+    },
+    {
+      "key": "bendigo bank",
+      "name": "Bendigo Bank",
+      "swift_code": "BENDAU3B",
+      "country": "AU"
+    },
+    {
+      "key": "suncorp",
+      "name": "Suncorp Bank",
+      "swift_code": "METWAU4B",
+      "country": "AU"
+    },
+    {
+      "key": "bank of queensland",
+      "name": "Bank of Queensland",
+      "swift_code": "QABORAU2",
+      "country": "AU"
+    },
+    {
+      "key": "boq",
+      "name": "Bank of Queensland",
+      "swift_code": "QABORAU2",
+      "country": "AU"
+    },
+    {
+      "key": "bank of east asia",
+      "name": "Bank of East Asia",
+      "swift_code": "BEASHKHH",
+      "country": "HK"
+    },
+    {
+      "key": "bea",
+      "name": "Bank of East Asia",
+      "swift_code": "BEASHKHH",
+      "country": "HK"
+    },
+    {
+      "key": "china construction bank",
+      "name": "China Construction Bank",
+      "swift_code": "PCBCCNBJ",
+      "country": "CN"
+    },
+    {
+      "key": "china construction bank",
+      "name": "CCB Asia",
+      "swift_code": "PCBCHKHH",
+      "country": "HK"
+    },
+    {
+      "key": "ccb",
+      "name": "China Construction Bank",
+      "swift_code": "PCBCCNBJ",
+      "country": "CN"
+    },
+    {
+      "key": "ccb",
+      "name": "CCB Asia",
+      "swift_code": "PCBCHKHH",
+      "country": "HK"
+    },
+    {
+      "key": "commerzbank",
+      "name": "Commerzbank",
+      "swift_code": "COBADEFF",
+      "country": "DE"
+    },
+    {
+      "key": "unicredit",
+      "name": "UniCredit",
+      "swift_code": "HYVEDEMM",
+      "country": "DE"
+    },
+    {
+      "key": "unicredit",
+      "name": "UniCredit",
+      "swift_code": "UNCRITMM",
+      "country": "IT"
+    },
+    {
+      "key": "hypovereinsbank",
+      "name": "HypoVereinsbank",
+      "swift_code": "HYVEDEMM",
+      "country": "DE"
+    },
+    {
+      "key": "ing",
+      "name": "ING",
+      "swift_code": "INGBNL2A",
+      "country": "NL"
+    },
+    {
+      "key": "ing",
+      "name": "ING",
+      "swift_code": "INGDDEFF",
+      "country": "DE"
+    },
+    {
+      "key": "ing",
+      "name": "ING",
+      "swift_code": "INGBAU2S",
+      "country": "AU"
+    },
+    {
+      "key": "ing",
+      "name": "ING France",
+      "swift_code": "INGBFRPP",
+      "country": "FR"
+    },
+    {
+      "key": "ing",
+      "name": "ING Italia",
+      "swift_code": "INGBITM1",
+      "country": "IT"
+    },
+    {
+      "key": "ing",
+      "name": "ING Spain",
+      "swift_code": "INGDESMMXXX",
+      "country": "ES"
+    },
+    {
+      "key": "ing bank",
+      "name": "ING",
+      "swift_code": "INGBNL2A",
+      "country": "NL"
+    },
+    {
+      "key": "dkb",
+      "name": "DKB",
+      "swift_code": "BYLADEM1",
+      "country": "DE"
+    },
+    {
+      "key": "n26",
+      "name": "N26",
+      "swift_code": "NTSBDEB1",
+      "country": "DE"
+    },
+    {
+      "key": "postbank",
+      "name": "Postbank",
+      "swift_code": "PBNKDEFF",
+      "country": "DE"
+    },
+    {
+      "key": "sparkasse",
+      "name": "Sparkasse",
+      "swift_code": "SSKNDE33",
+      "country": "DE"
+    },
+    {
+      "key": "volksbank",
+      "name": "Volksbank",
+      "swift_code": "GENODEF1",
+      "country": "DE"
+    },
+    {
+      "key": "mufg",
+      "name": "MUFG Bank",
+      "swift_code": "BOABORJT",
+      "country": "JP"
+    },
+    {
+      "key": "mitsubishi ufj",
+      "name": "MUFG Bank",
+      "swift_code": "BOABORJT",
+      "country": "JP"
+    },
+    {
+      "key": "resona",
+      "name": "Resona Bank",
+      "swift_code": "DABORJJT",
+      "country": "JP"
+    },
+    {
+      "key": "japan post bank",
+      "name": "Japan Post Bank",
+      "swift_code": "JPPSJPJ1",
+      "country": "JP"
+    },
+    {
+      "key": "shinsei bank",
+      "name": "Shinsei Bank",
+      "swift_code": "LTRSJPJT",
+      "country": "JP"
+    },
+    {
+      "key": "rakuten bank",
+      "name": "Rakuten Bank",
+      "swift_code": "ABORJPJ1",
+      "country": "JP"
+    },
+    {
+      "key": "sony bank",
+      "name": "Sony Bank",
+      "swift_code": "SNYBJPJT",
+      "country": "JP"
+    },
+    {
+      "key": "agricultural bank",
+      "name": "Agricultural Bank of China",
+      "swift_code": "ABOCCNBJ",
+      "country": "CN"
+    },
+    {
+      "key": "abc",
+      "name": "Agricultural Bank of China",
+      "swift_code": "ABOCCNBJ",
+      "country": "CN"
+    },
+    {
+      "key": "china merchants bank",
+      "name": "China Merchants Bank",
+      "swift_code": "CMBCCNBS",
+      "country": "CN"
+    },
+    {
+      "key": "cmb",
+      "name": "China Merchants Bank",
+      "swift_code": "CMBCCNBS",
+      "country": "CN"
+    },
+    {
+      "key": "citic bank",
+      "name": "CITIC Bank",
+      "swift_code": "CIBKCNBJ",
+      "country": "CN"
+    },
+    {
+      "key": "ping an bank",
+      "name": "Ping An Bank",
+      "swift_code": "SZDBCNBS",
+      "country": "CN"
+    },
+    {
+      "key": "hdfc bank",
+      "name": "HDFC Bank",
+      "swift_code": "HDFCINBB",
+      "country": "IN"
+    },
+    {
+      "key": "hdfc",
+      "name": "HDFC Bank",
+      "swift_code": "HDFCINBB",
+      "country": "IN"
+    },
+    {
+      "key": "icici bank",
+      "name": "ICICI Bank",
+      "swift_code": "ICICINBB",
+      "country": "IN"
+    },
+    {
+      "key": "icici",
+      "name": "ICICI Bank",
+      "swift_code": "ICICINBB",
+      "country": "IN"
+    },
+    {
+      "key": "axis bank",
+      "name": "Axis Bank",
+      "swift_code": "AXISINBB",
+      "country": "IN"
+    },
+    {
+      "key": "axis",
+      "name": "Axis Bank",
+      "swift_code": "AXISINBB",
+      "country": "IN"
+    },
+    {
+      "key": "kotak mahindra",
+      "name": "Kotak Mahindra Bank",
+      "swift_code": "KKBKINBB",
+      "country": "IN"
+    },
+    {
+      "key": "kotak",
+      "name": "Kotak Mahindra Bank",
+      "swift_code": "KKBKINBB",
+      "country": "IN"
+    },
+    {
+      "key": "yes bank",
+      "name": "Yes Bank",
+      "swift_code": "YABORB2L",
+      "country": "IN"
+    },
+    {
+      "key": "indusind bank",
+      "name": "IndusInd Bank",
+      "swift_code": "INDBINBB",
+      "country": "IN"
+    },
+    {
+      "key": "punjab national bank",
+      "name": "Punjab National Bank",
+      "swift_code": "PUNBINBB",
+      "country": "IN"
+    },
+    {
+      "key": "bank of baroda",
+      "name": "Bank of Baroda",
+      "swift_code": "BARBORBB",
+      "country": "IN"
+    },
+    {
+      "key": "canara bank",
+      "name": "Canara Bank",
+      "swift_code": "CNRBINBB",
+      "country": "IN"
+    },
+    {
+      "key": "public bank",
+      "name": "Public Bank",
+      "swift_code": "PABORYMK",
+      "country": "MY"
+    },
+    {
+      "key": "hong leong bank",
+      "name": "Hong Leong Bank",
+      "swift_code": "HLBBMYKL",
+      "country": "MY"
+    },
+    {
+      "key": "hong leong",
+      "name": "Hong Leong Bank",
+      "swift_code": "HLBBMYKL",
+      "country": "MY"
+    },
+    {
+      "key": "ambank",
+      "name": "AmBank",
+      "swift_code": "ARBKMYKL",
+      "country": "MY"
+    },
+    {
+      "key": "bank islam",
+      "name": "Bank Islam",
+      "swift_code": "BIMBMYKL",
+      "country": "MY"
+    },
+    {
+      "key": "affin bank",
+      "name": "Affin Bank",
+      "swift_code": "PHBMMYKL",
+      "country": "MY"
+    },
+    {
+      "key": "affin",
+      "name": "Affin Bank",
+      "swift_code": "PHBMMYKL",
+      "country": "MY"
+    },
+    {
+      "key": "alliance bank",
+      "name": "Alliance Bank",
+      "swift_code": "MFBBMYKL",
+      "country": "MY"
+    },
+    {
+      "key": "bangkok bank",
+      "name": "Bangkok Bank",
+      "swift_code": "BKKBTHBK",
+      "country": "TH"
+    },
+    {
+      "key": "kasikornbank",
+      "name": "Kasikornbank",
+      "swift_code": "KASITHBK",
+      "country": "TH"
+    },
+    {
+      "key": "kbank",
+      "name": "Kasikornbank",
+      "swift_code": "KASITHBK",
+      "country": "TH"
+    },
+    {
+      "key": "scb",
+      "name": "Siam Commercial Bank",
+      "swift_code": "SICOTHBK",
+      "country": "TH"
+    },
+    {
+      "key": "siam commercial bank",
+      "name": "Siam Commercial Bank",
+      "swift_code": "SICOTHBK",
+      "country": "TH"
+    },
+    {
+      "key": "krung thai bank",
+      "name": "Krung Thai Bank",
+      "swift_code": "KRABORHK",
+      "country": "TH"
+    },
+    {
+      "key": "ktb",
+      "name": "Krung Thai Bank",
+      "swift_code": "KRABORHK",
+      "country": "TH"
+    },
+    {
+      "key": "krungthai",
+      "name": "Krung Thai Bank",
+      "swift_code": "KRABORHK",
+      "country": "TH"
+    },
+    {
+      "key": "krungsri",
+      "name": "Bank of Ayudhya",
+      "swift_code": "AYUDTHBK",
+      "country": "TH"
+    },
+    {
+      "key": "bank central asia",
+      "name": "Bank Central Asia",
+      "swift_code": "CENAIDJA",
+      "country": "ID"
+    },
+    {
+      "key": "bca",
+      "name": "Bank Central Asia",
+      "swift_code": "CENAIDJA",
+      "country": "ID"
+    },
+    {
+      "key": "bank mandiri",
+      "name": "Bank Mandiri",
+      "swift_code": "BMRIIDJA",
+      "country": "ID"
+    },
+    {
+      "key": "mandiri",
+      "name": "Bank Mandiri",
+      "swift_code": "BMRIIDJA",
+      "country": "ID"
+    },
+    {
+      "key": "bri",
+      "name": "Bank Rakyat Indonesia",
+      "swift_code": "BRIIIDJA",
+      "country": "ID"
+    },
+    {
+      "key": "bni",
+      "name": "Bank Negara Indonesia",
+      "swift_code": "BNINIDJA",
+      "country": "ID"
+    },
+    {
+      "key": "danamon",
+      "name": "Bank Danamon",
+      "swift_code": "BDINIDJA",
+      "country": "ID"
+    },
+    {
+      "key": "permata",
+      "name": "PermataBank",
+      "swift_code": "BBBAIDJA",
+      "country": "ID"
+    },
+    {
+      "key": "bdo",
+      "name": "BDO Unibank",
+      "swift_code": "BNORPHMM",
+      "country": "PH"
+    },
+    {
+      "key": "bpi",
+      "name": "Bank of the Philippine Islands",
+      "swift_code": "BOPIPHMM",
+      "country": "PH"
+    },
+    {
+      "key": "metrobank",
+      "name": "Metropolitan Bank",
+      "swift_code": "MBTCPHMM",
+      "country": "PH"
+    },
+    {
+      "key": "landbank",
+      "name": "Land Bank of the Philippines",
+      "swift_code": "TLBPPHMM",
+      "country": "PH"
+    },
+    {
+      "key": "unionbank",
+      "name": "UnionBank",
+      "swift_code": "UBORPHMM",
+      "country": "PH"
+    },
+    {
+      "key": "rcbc",
+      "name": "RCBC",
+      "swift_code": "RCBCPHMM",
+      "country": "PH"
+    },
+    {
+      "key": "security bank",
+      "name": "Security Bank",
+      "swift_code": "SETCPHMM",
+      "country": "PH"
+    },
+    {
+      "key": "julius baer",
+      "name": "Julius Baer",
+      "swift_code": "JBCHCHZZ",
+      "country": "CH"
+    },
+    {
+      "key": "pictet",
+      "name": "Pictet",
+      "swift_code": "PICTCHGG",
+      "country": "CH"
+    },
+    {
+      "key": "lombard odier",
+      "name": "Lombard Odier",
+      "swift_code": "LOCOCHGG",
+      "country": "CH"
+    },
+    {
+      "key": "raiffeisen",
+      "name": "Raiffeisen",
+      "swift_code": "RAIFCH22",
+      "country": "CH"
+    },
+    {
+      "key": "zkb",
+      "name": "ZKB",
+      "swift_code": "ZKBKCHZZ",
+      "country": "CH"
+    },
+    {
+      "key": "postfinance",
+      "name": "PostFinance",
+      "swift_code": "POFICHBE",
+      "country": "CH"
+    },
+    {
+      "key": "royal bank of canada",
+      "name": "RBC",
+      "swift_code": "ROYCCAT2",
+      "country": "CA"
+    },
+    {
+      "key": "rbc",
+      "name": "RBC",
+      "swift_code": "ROYCCAT2",
+      "country": "CA"
+    },
+    {
+      "key": "td bank",
+      "name": "TD Bank",
+      "swift_code": "TDOMCATT",
+      "country": "CA"
+    },
+    {
+      "key": "td bank",
+      "name": "TD Bank",
+      "swift_code": "TDOMUS33",
+      "country": "US"
+    },
+    {
+      "key": "td",
+      "name": "TD Bank",
+      "swift_code": "TDOMCATT",
+      "country": "CA"
+    },
+    {
+      "key": "bank of montreal",
+      "name": "BMO",
+      "swift_code": "BOFMCAM2",
+      "country": "CA"
+    },
+    {
+      "key": "bmo",
+      "name": "BMO",
+      "swift_code": "BOFMCAM2",
+      "country": "CA"
+    },
+    {
+      "key": "scotiabank",
+      "name": "Scotiabank",
+      "swift_code": "NOSCCATT",
+      "country": "CA"
+    },
+    {
+      "key": "scotiabank",
+      "name": "Scotiabank Mexico",
+      "swift_code": "MBCOMXMM",
+      "country": "MX"
+    },
+    {
+      "key": "cibc",
+      "name": "CIBC",
+      "swift_code": "CIBCCATT",
+      "country": "CA"
+    },
+    {
+      "key": "desjardins",
+      "name": "Desjardins",
+      "swift_code": "CCDQCAMM",
+      "country": "CA"
+    },
+    {
+      "key": "tangerine",
+      "name": "Tangerine",
+      "swift_code": "INGBCATT",
+      "country": "CA"
+    },
+    {
+      "key": "credit agricole",
+      "name": "Credit Agricole",
+      "swift_code": "AGRIFRPP",
+      "country": "FR"
+    },
+    {
+      "key": "societe generale",
+      "name": "Societe Generale",
+      "swift_code": "SOGEFRPP",
+      "country": "FR"
+    },
+    {
+      "key": "credit mutuel",
+      "name": "Credit Mutuel",
+      "swift_code": "CMCIFRPP",
+      "country": "FR"
+    },
+    {
+      "key": "la banque postale",
+      "name": "La Banque Postale",
+      "swift_code": "PSSTFRPP",
+      "country": "FR"
+    },
+    {
+      "key": "lcl",
+      "name": "LCL",
+      "swift_code": "CRLYFRPP",
+      "country": "FR"
+    },
+    {
+      "key": "boursorama",
+      "name": "Boursorama",
+      "swift_code": "BOUSFRPP",
+      "country": "FR"
+    },
+    {
+      "key": "emirates nbd",
+      "name": "Emirates NBD",
+      "swift_code": "EBILAEAD",
+      "country": "AE"
+    },
+    {
+      "key": "enbd",
+      "name": "Emirates NBD",
+      "swift_code": "EBILAEAD",
+      "country": "AE"
+    },
+    {
+      "key": "fab",
+      "name": "First Abu Dhabi Bank",
+      "swift_code": "NBADAEAD",
+      "country": "AE"
+    },
+    {
+      "key": "first abu dhabi",
+      "name": "First Abu Dhabi Bank",
+      "swift_code": "NBADAEAD",
+      "country": "AE"
+    },
+    {
+      "key": "adcb",
+      "name": "ADCB",
+      "swift_code": "ADCBAEAA",
+      "country": "AE"
+    },
+    {
+      "key": "mashreq",
+      "name": "Mashreq Bank",
+      "swift_code": "BOMLAEAD",
+      "country": "AE"
+    },
+    {
+      "key": "dib",
+      "name": "Dubai Islamic Bank",
+      "swift_code": "DUIBAEADXXX",
+      "country": "AE"
+    },
+    {
+      "key": "rakbank",
+      "name": "RAKBANK",
+      "swift_code": "RAKBAEAD",
+      "country": "AE"
+    },
+    {
+      "key": "national bank of ras al khaimah",
+      "name": "National Bank of Ras Al Khaimah",
+      "swift_code": "RAKBAEAD",
+      "country": "AE"
+    },
+    {
+      "key": "ras al khaimah",
+      "name": "RAK Bank",
+      "swift_code": "RAKBAEAD",
+      "country": "AE"
+    },
+    {
+      "key": "kb kookmin",
+      "name": "KB Kookmin Bank",
+      "swift_code": "CZNBKRSE",
+      "country": "KR"
+    },
+    {
+      "key": "kookmin",
+      "name": "KB Kookmin Bank",
+      "swift_code": "CZNBKRSE",
+      "country": "KR"
+    },
+    {
+      "key": "shinhan",
+      "name": "Shinhan Bank",
+      "swift_code": "SHBKKRSE",
+      "country": "KR"
+    },
+    {
+      "key": "woori",
+      "name": "Woori Bank",
+      "swift_code": "HVBKKRSEXXX",
+      "country": "KR"
+    },
+    {
+      "key": "hana",
+      "name": "Hana Bank",
+      "swift_code": "KOEXKRSE",
+      "country": "KR"
+    },
+    {
+      "key": "nh bank",
+      "name": "NH Bank",
+      "swift_code": "NACFKRSE",
+      "country": "KR"
+    },
+    {
+      "key": "ibk",
+      "name": "Industrial Bank of Korea",
+      "swift_code": "IBKOKRSE",
+      "country": "KR"
+    },
+    {
+      "key": "kakao bank",
+      "name": "Kakao Bank",
+      "swift_code": "KAKOKR22",
+      "country": "KR"
+    },
+    {
+      "key": "toss bank",
+      "name": "Toss Bank",
+      "swift_code": "TOSOKR22",
+      "country": "KR"
+    },
+    {
+      "key": "rabobank",
+      "name": "Rabobank",
+      "swift_code": "RABONL2U",
+      "country": "NL"
+    },
+    {
+      "key": "abn amro",
+      "name": "ABN AMRO",
+      "swift_code": "ABNANL2A",
+      "country": "NL"
+    },
+    {
+      "key": "triodos",
+      "name": "Triodos Bank",
+      "swift_code": "TRIONL2U",
+      "country": "NL"
+    },
+    {
+      "key": "bunq",
+      "name": "bunq",
+      "swift_code": "BUNQNL2A",
+      "country": "NL"
+    },
+    {
+      "key": "bbva",
+      "name": "BBVA",
+      "swift_code": "BBVAESMM",
+      "country": "ES"
+    },
+    {
+      "key": "bbva",
+      "name": "BBVA Mexico",
+      "swift_code": "BABORXMM",
+      "country": "MX"
+    },
+    {
+      "key": "caixabank",
+      "name": "CaixaBank",
+      "swift_code": "CAIXESBB",
+      "country": "ES"
+    },
+    {
+      "key": "sabadell",
+      "name": "Banco Sabadell",
+      "swift_code": "BSABESBB",
+      "country": "ES"
+    },
+    {
+      "key": "bankinter",
+      "name": "Bankinter",
+      "swift_code": "BKBKESMM",
+      "country": "ES"
+    },
+    {
+      "key": "intesa sanpaolo",
+      "name": "Intesa Sanpaolo",
+      "swift_code": "BCITITMM",
+      "country": "IT"
+    },
+    {
+      "key": "intesa",
+      "name": "Intesa Sanpaolo",
+      "swift_code": "BCITITMM",
+      "country": "IT"
+    },
+    {
+      "key": "banco bpm",
+      "name": "Banco BPM",
+      "swift_code": "BAPPIT21",
+      "country": "IT"
+    },
+    {
+      "key": "bper",
+      "name": "BPER Banca",
+      "swift_code": "BPMOIT22",
+      "country": "IT"
+    },
+    {
+      "key": "monte dei paschi",
+      "name": "Monte dei Paschi di Siena",
+      "swift_code": "PASCITM1",
+      "country": "IT"
+    },
+    {
+      "key": "fineco",
+      "name": "FinecoBank",
+      "swift_code": "FEABORIT",
+      "country": "IT"
+    },
+    {
+      "key": "banco do brasil",
+      "name": "Banco do Brasil",
+      "swift_code": "BRASBRRJ",
+      "country": "BR"
+    },
+    {
+      "key": "itau",
+      "name": "Itau Unibanco",
+      "swift_code": "ITAUBRSP",
+      "country": "BR"
+    },
+    {
+      "key": "bradesco",
+      "name": "Bradesco",
+      "swift_code": "BBDEBRSP",
+      "country": "BR"
+    },
+    {
+      "key": "nubank",
+      "name": "Nubank",
+      "swift_code": "NUBABRSP",
+      "country": "BR"
+    },
+    {
+      "key": "btg pactual",
+      "name": "BTG Pactual",
+      "swift_code": "BPACBRSP",
+      "country": "BR"
+    },
+    {
+      "key": "banamex",
+      "name": "Citibanamex",
+      "swift_code": "BNMXMXMM",
+      "country": "MX"
+    },
+    {
+      "key": "citibanamex",
+      "name": "Citibanamex",
+      "swift_code": "BNMXMXMM",
+      "country": "MX"
+    },
+    {
+      "key": "banorte",
+      "name": "Banorte",
+      "swift_code": "MENOMXMT",
+      "country": "MX"
+    },
+    {
+      "key": "inbursa",
+      "name": "Inbursa",
+      "swift_code": "INBUMXMM",
+      "country": "MX"
+    },
+    {
+      "key": "asb",
+      "name": "ASB Bank",
+      "swift_code": "ASBBNZ2A",
+      "country": "NZ"
+    },
+    {
+      "key": "bnz",
+      "name": "Bank of New Zealand",
+      "swift_code": "BKNZNZ22",
+      "country": "NZ"
+    },
+    {
+      "key": "kiwibank",
+      "name": "Kiwibank",
+      "swift_code": "KIABORZ1",
+      "country": "NZ"
+    },
+    {
+      "key": "vietcombank",
+      "name": "Vietcombank",
+      "swift_code": "BFTVVNVX",
+      "country": "VN"
+    },
+    {
+      "key": "vcb",
+      "name": "Vietcombank",
+      "swift_code": "BFTVVNVX",
+      "country": "VN"
+    },
+    {
+      "key": "vietinbank",
+      "name": "VietinBank",
+      "swift_code": "ICBVVNVX",
+      "country": "VN"
+    },
+    {
+      "key": "bidv",
+      "name": "BIDV",
+      "swift_code": "BIDVVNVX",
+      "country": "VN"
+    },
+    {
+      "key": "agribank",
+      "name": "Agribank",
+      "swift_code": "VBAAVNVX",
+      "country": "VN"
+    },
+    {
+      "key": "techcombank",
+      "name": "Techcombank",
+      "swift_code": "VTCBVNVX",
+      "country": "VN"
+    },
+    {
+      "key": "vpbank",
+      "name": "VPBank",
+      "swift_code": "VPBKVNVX",
+      "country": "VN"
+    },
+    {
+      "key": "mbbank",
+      "name": "MB Bank",
+      "swift_code": "MABORVNX",
+      "country": "VN"
+    },
+    {
+      "key": "acb",
+      "name": "ACB",
+      "swift_code": "ASCBVNVX",
+      "country": "VN"
+    },
+    {
+      "key": "sacombank",
+      "name": "Sacombank",
+      "swift_code": "SGTTVNVX",
+      "country": "VN"
+    },
+    {
+      "key": "bank of maharashtra",
+      "name": "Bank of Maharashtra",
+      "swift_code": "MAHBINBB",
+      "country": "IN"
+    },
+    {
+      "key": "mahabank",
+      "name": "Bank of Maharashtra",
+      "swift_code": "MAHBINBB",
+      "country": "IN"
+    }
+  ],
+  "defaults": {
+    "dbs": "SG",
+    "development bank of singapore": "SG",
+    "posb": "SG",
+    "ocbc": "SG",
+    "oversea-chinese banking": "SG",
+    "uob": "SG",
+    "united overseas bank": "SG",
+    "hsbc": "GB",
+    "citibank": "US",
+    "citi": "US",
+    "standard chartered": "GB",
+    "jpmorgan": "US",
+    "jp morgan": "US",
+    "jpmorgan chase": "US",
+    "chase": "US",
+    "goldman sachs": "US",
+    "morgan stanley": "US",
+    "bank of america": "US",
+    "bofa": "US",
+    "ubs": "CH",
+    "credit suisse": "CH",
+    "deutsche bank": "DE",
+    "bnp paribas": "FR",
+    "bnp": "FR",
+    "barclays": "GB",
+    "anz": "AU",
+    "maybank": "MY",
+    "malayan banking": "MY",
+    "cimb": "MY",
+    "bank of china": "CN",
+    "boc": "CN",
+    "icbc": "CN",
+    "industrial and commercial bank": "CN",
+    "mizuho": "JP",
+    "smbc": "JP",
+    "sumitomo mitsui": "JP",
+    "hang seng": "HK",
+    "hang seng bank": "HK",
+    "state bank of india": "IN",
+    "sbi": "IN",
+    "rhb": "MY",
+    "rhb bank": "MY",
+    "wells fargo": "US",
+    "us bank": "US",
+    "pnc": "US",
+    "truist": "US",
+    "capital one": "US",
+    "charles schwab": "US",
+    "fidelity": "US",
+    "ally bank": "US",
+    "discover": "US",
+    "synchrony": "US",
+    "silicon valley bank": "US",
+    "svb": "US",
+    "first republic": "US",
+    "american express": "US",
+    "amex": "US",
+    "lloyds": "GB",
+    "lloyds bank": "GB",
+    "natwest": "GB",
+    "royal bank of scotland": "GB",
+    "rbs": "GB",
+    "santander": "ES",
+    "nationwide": "GB",
+    "virgin money": "GB",
+    "metro bank": "GB",
+    "monzo": "GB",
+    "revolut": "GB",
+    "starling": "GB",
+    "halifax": "GB",
+    "tsb": "GB",
+    "coutts": "GB",
+    "commonwealth bank": "AU",
+    "cba": "AU",
+    "commbank": "AU",
+    "westpac": "AU",
+    "nab": "AU",
+    "national australia bank": "AU",
+    "macquarie": "AU",
+    "macquarie bank": "AU",
+    "bendigo bank": "AU",
+    "suncorp": "AU",
+    "bank of queensland": "AU",
+    "boq": "AU",
+    "bank of east asia": "HK",
+    "bea": "HK",
+    "china construction bank": "CN",
+    "ccb": "CN",
+    "commerzbank": "DE",
+    "unicredit": "DE",
+    "hypovereinsbank": "DE",
+    "ing": "NL",
+    "ing bank": "NL",
+    "dkb": "DE",
+    "n26": "DE",
+    "postbank": "DE",
+    "sparkasse": "DE",
+    "volksbank": "DE",
+    "mufg": "JP",
+    "mitsubishi ufj": "JP",
+    "resona": "JP",
+    "japan post bank": "JP",
+    "shinsei bank": "JP",
+    "rakuten bank": "JP",
+    "sony bank": "JP",
+    "agricultural bank": "CN",
+    "abc": "CN",
+    "china merchants bank": "CN",
+    "cmb": "CN",
+    "citic bank": "CN",
+    "ping an bank": "CN",
+    "hdfc bank": "IN",
+    "hdfc": "IN",
+    "icici bank": "IN",
+    "icici": "IN",
+    "axis bank": "IN",
+    "axis": "IN",
+    "kotak mahindra": "IN",
+    "kotak": "IN",
+    "yes bank": "IN",
+    "indusind bank": "IN",
+    "punjab national bank": "IN",
+    "bank of baroda": "IN",
+    "canara bank": "IN",
+    "public bank": "MY",
+    "hong leong bank": "MY",
+    "hong leong": "MY",
+    "ambank": "MY",
+    "bank islam": "MY",
+    "affin bank": "MY",
+    "affin": "MY",
+    "alliance bank": "MY",
+    "bangkok bank": "TH",
+    "kasikornbank": "TH",
+    "kbank": "TH",
+    "scb": "TH",
+    "siam commercial bank": "TH",
+    "krung thai bank": "TH",
+    "ktb": "TH",
+    "krungthai": "TH",
+    "krungsri": "TH",
+    "bank central asia": "ID",
+    "bca": "ID",
+    "bank mandiri": "ID",
+    "mandiri": "ID",
+    "bri": "ID",
+    "bni": "ID",
+    "danamon": "ID",
+    "permata": "ID",
+    "bdo": "PH",
+    "bpi": "PH",
+    "metrobank": "PH",
+    "landbank": "PH",
+    "unionbank": "PH",
+    "rcbc": "PH",
+    "security bank": "PH",
+    "julius baer": "CH",
+    "pictet": "CH",
+    "lombard odier": "CH",
+    "raiffeisen": "CH",
+    "zkb": "CH",
+    "postfinance": "CH",
+    "royal bank of canada": "CA",
+    "rbc": "CA",
+    "td bank": "CA",
+    "td": "CA",
+    "bank of montreal": "CA",
+    "bmo": "CA",
+    "scotiabank": "CA",
+    "cibc": "CA",
+    "desjardins": "CA",
+    "tangerine": "CA",
+    "credit agricole": "FR",
+    "societe generale": "FR",
+    "credit mutuel": "FR",
+    "la banque postale": "FR",
+    "lcl": "FR",
+    "boursorama": "FR",
+    "emirates nbd": "AE",
+    "enbd": "AE",
+    "fab": "AE",
+    "first abu dhabi": "AE",
+    "adcb": "AE",
+    "mashreq": "AE",
+    "dib": "AE",
+    "rakbank": "AE",
+    "kb kookmin": "KR",
+    "kookmin": "KR",
+    "shinhan": "KR",
+    "woori": "KR",
+    "hana": "KR",
+    "nh bank": "KR",
+    "ibk": "KR",
+    "kakao bank": "KR",
+    "toss bank": "KR",
+    "rabobank": "NL",
+    "abn amro": "NL",
+    "triodos": "NL",
+    "bunq": "NL",
+    "bbva": "ES",
+    "caixabank": "ES",
+    "sabadell": "ES",
+    "bankinter": "ES",
+    "intesa sanpaolo": "IT",
+    "intesa": "IT",
+    "banco bpm": "IT",
+    "bper": "IT",
+    "monte dei paschi": "IT",
+    "fineco": "IT",
+    "banco do brasil": "BR",
+    "itau": "BR",
+    "bradesco": "BR",
+    "nubank": "BR",
+    "btg pactual": "BR",
+    "banamex": "MX",
+    "citibanamex": "MX",
+    "banorte": "MX",
+    "inbursa": "MX",
+    "asb": "NZ",
+    "bnz": "NZ",
+    "kiwibank": "NZ",
+    "vietcombank": "VN",
+    "vcb": "VN",
+    "vietinbank": "VN",
+    "bidv": "VN",
+    "agribank": "VN",
+    "techcombank": "VN",
+    "vpbank": "VN",
+    "mbbank": "VN",
+    "acb": "VN",
+    "sacombank": "VN",
+    "bank of maharashtra": "IN",
+    "mahabank": "IN"
+  }
+}

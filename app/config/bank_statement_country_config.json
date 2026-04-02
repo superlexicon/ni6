@@ -1,0 +1,256 @@
+{
+  "version": "1.0",
+  "description": "Country-specific configuration for bank statement processing. Consolidates hardcoded country logic from Python code into a single config file.",
+  "supported_countries": ["IN", "US", "GB", "AE", "SG", "TH", "MY", "MM", "HK"],
+  "dynamic_location_countries": ["IN", "US", "GB", "AE", "SG", "TH", "MY", "MM", "HK"],
+  "countries": {
+    "AE": {
+      "country_code": "AE",
+      "country_name": "United Arab Emirates",
+      "name_aliases": ["uae", "united arab emirates"],
+      "postal_code": {
+        "required": false,
+        "pattern": "\\b\\d{5}\\b",
+        "length": 5
+      },
+      "subdivisions": {
+        "type": "emirates",
+        "list": ["Dubai", "Abu Dhabi", "Sharjah", "Ajman", "Umm Al Quwain", "Ras Al Khaimah", "Fujairah"],
+        "additional_cities": ["Al Ain"]
+      },
+      "address_patterns": {
+        "building": [
+          "(Villa\\s+\\d+[A-Z]?)\\s*,?\\s*(.+?)(?:,|$)",
+          "(Building\\s+\\d+[A-Z]?)\\s*,?\\s*(.+?)(?:,|$)",
+          "(Plot\\s+\\d+[A-Z]?)\\s*,?\\s*(.+?)(?:,|$)",
+          "(Tower\\s+\\d+[A-Z]?)\\s*,?\\s*(.+?)(?:,|$)",
+          "(Block\\s+\\d+[A-Z]?)\\s*,?\\s*(.+?)(?:,|$)"
+        ],
+        "unit_tower": [
+          "^(\\d{3,5})\\s*,?\\s+([A-Z][A-Za-z\\s]+?\\s+TOWER)"
+        ],
+        "tower_name": [
+          "([A-Z][A-Za-z\\s]+?\\s+(?:TOWER|BUILDING))"
+        ],
+        "street": [
+          "(Street\\s+\\d+[A-Z]?)"
+        ],
+        "extraction_patterns": [
+          ",\\s*(Dubai|Abu Dhabi|Sharjah|Ajman|Umm Al Quwain|Ras Al Khaimah|Fujairah|Al Ain)\\b"
+        ]
+      },
+      "unit_patterns": ["^\\d{3,5}$"],
+      "bank_abbreviations": ["FAB", "ENBD", "ADCB", "DIB", "MASHREQ", "RAKBANK", "ADIB", "CBD", "SIB", "NBF", "EIB", "UAB", "CBI", "BOS", "AJMAN", "ALHILAL", "NBQ", "ALMASRAF", "INVEST", "WIO", "ZAND", "MBANK"],
+      "bank_regulatory_patterns": [
+        "CENTRAL BANK OF (?:THE )?UAE",
+        "CENTRAL BANK OF (?:THE )?UNITED ARAB EMIRATES",
+        "REGULATED BY.*UAE",
+        "REGULATED BY.*UNITED ARAB EMIRATES",
+        "LICENSED BY.*UAE",
+        "LICENSED IN.*UAE",
+        "LICENSED BY.*DUBAI",
+        "LICENSED BY.*ABU DHABI"
+      ],
+      "header_patterns": [
+        "\\bUAE\\b",
+        "UNITED ARAB EMIRATES",
+        "\\bABU DHABI\\b",
+        "\\bDUBAI\\b",
+        "\\bSHARJAH\\b",
+        "\\bAJMAN\\b",
+        "\\bRAS AL KHAIMAH\\b",
+        "\\bFUJAIRAH\\b",
+        "\\bUMM AL QUWAIN\\b"
+      ],
+      "inference_patterns": ["united arab emirates", "uae", "dubai", "abu dhabi"]
+    },
+    "IN": {
+      "country_code": "IN",
+      "country_name": "India",
+      "name_aliases": ["india", "bharat"],
+      "postal_code": {
+        "required": true,
+        "pattern": "\\b\\d{6}\\b",
+        "length": 6
+      },
+      "subdivisions": {
+        "type": "states",
+        "list": [],
+        "use_dynamic": true
+      },
+      "address_patterns": {
+        "building": [
+          "(H\\s*NO\\.?\\s*[\\d\\w\\s]+?)(?:,|$)",
+          "(House\\s+No\\.?\\s*[\\d\\w]+)",
+          "(PLOT\\s*NO\\.?\\s*[\\d\\w]+)",
+          "(DOOR\\s*NO\\.?\\s*[\\d\\w]+)",
+          "(FLAT\\s*NO\\.?\\s*[\\d\\w]+)",
+          "(\\d+[\\-\\d]*,\\s*[A-Za-z\\s]+?)(?:,|NEAR|TEMPLE|CHURCH|MOSQUE|$)"
+        ]
+      },
+      "unit_patterns": [],
+      "city_aliases": {
+        "BANGALORE": "BENGALURU",
+        "BOMBAY": "MUMBAI",
+        "CALCUTTA": "KOLKATA",
+        "MADRAS": "CHENNAI",
+        "COCHIN": "KOCHI",
+        "TRIVANDRUM": "THIRUVANANTHAPURAM",
+        "POONA": "PUNE",
+        "BARODA": "VADODARA",
+        "AHMEDABAD": "AHMADABAD"
+      },
+      "bank_regulatory_patterns": [
+        "CENTRAL BANK OF INDIA",
+        "RESERVE BANK OF INDIA",
+        "RBI\\s"
+      ],
+      "header_patterns": [
+        "\\bINDIA\\b",
+        "\\bBHARAT\\b",
+        "\\bMAHARASHTRA\\b",
+        "\\bTAMIL NADU\\b",
+        "\\bKARNATAKA\\b",
+        "\\bGUJARAT\\b"
+      ],
+      "inference_patterns": ["india", "pin ", "pin-", "pincode", "pincode-", " tamil nadu", " maharashtra", " karnataka", " delhi", " gujarat", "andhra pradesh", " pradesh"]
+    },
+    "SG": {
+      "country_code": "SG",
+      "country_name": "Singapore",
+      "name_aliases": ["singapore"],
+      "postal_code": {
+        "required": true,
+        "pattern": "\\b\\d{6}\\b",
+        "length": 6
+      },
+      "subdivisions": {
+        "type": "none",
+        "list": []
+      },
+      "unit_patterns": ["^#?\\d{1,2}[\\-]\\d{1,4}[A-Z]?$"],
+      "bank_regulatory_patterns": [
+        "MONETARY AUTHORITY OF SINGAPORE",
+        "MAS\\s"
+      ],
+      "header_patterns": [
+        "\\bSINGAPORE\\b",
+        "REPUBLIC OF SINGAPORE"
+      ],
+      "inference_patterns": ["singapore", "blk ", "block ", " s(", " singapore "]
+    },
+    "MY": {
+      "country_code": "MY",
+      "country_name": "Malaysia",
+      "name_aliases": ["malaysia"],
+      "postal_code": {
+        "required": true,
+        "pattern": "\\b\\d{5}\\b",
+        "length": 5
+      },
+      "subdivisions": {
+        "type": "states",
+        "list": [],
+        "use_dynamic": true
+      },
+      "unit_patterns": [],
+      "bank_regulatory_patterns": [
+        "CENTRAL BANK OF MALAYSIA",
+        "BANK NEGARA MALAYSIA"
+      ],
+      "inference_patterns": ["malaysia"]
+    },
+    "TH": {
+      "country_code": "TH",
+      "country_name": "Thailand",
+      "name_aliases": ["thailand"],
+      "postal_code": {
+        "required": true,
+        "pattern": "\\b\\d{5}\\b",
+        "length": 5
+      },
+      "subdivisions": {
+        "type": "provinces",
+        "list": [],
+        "use_dynamic": true
+      },
+      "unit_patterns": [],
+      "inference_patterns": ["thailand"]
+    },
+    "GB": {
+      "country_code": "GB",
+      "country_name": "United Kingdom",
+      "name_aliases": ["united kingdom", "england", "scotland", "wales", "northern ireland", "britain"],
+      "postal_code": {
+        "required": true,
+        "pattern": "\\b[A-Z]{1,2}\\d{1,2}[A-Z]?\\s*\\d[A-Z]{2}\\b",
+        "length": null
+      },
+      "subdivisions": {
+        "type": "countries",
+        "list": [],
+        "use_dynamic": true
+      },
+      "unit_patterns": [],
+      "bank_regulatory_patterns": [
+        "BANK OF ENGLAND"
+      ],
+      "inference_patterns": ["united kingdom", "england", "scotland", "wales", "northern ireland", "britain", ", uk", " uk "]
+    },
+    "US": {
+      "country_code": "US",
+      "country_name": "United States",
+      "name_aliases": ["united states", "usa", "u.s.a", "u.s.a."],
+      "postal_code": {
+        "required": true,
+        "pattern": "\\b\\d{5}(-\\d{4})?\\b",
+        "length": 5
+      },
+      "subdivisions": {
+        "type": "states",
+        "list": [],
+        "use_dynamic": true
+      },
+      "unit_patterns": ["^(APT|SUITE|STE|UNIT)\\s*#?\\d+$"],
+      "bank_regulatory_patterns": [
+        "FEDERAL RESERVE"
+      ],
+      "inference_patterns": ["united states", "usa", "u.s.a", "u.s.a.", ", usa", " usa "]
+    },
+    "HK": {
+      "country_code": "HK",
+      "country_name": "Hong Kong",
+      "name_aliases": ["hong kong"],
+      "postal_code": {
+        "required": false,
+        "pattern": "",
+        "length": null
+      },
+      "subdivisions": {
+        "type": "districts",
+        "list": [],
+        "use_dynamic": true
+      },
+      "unit_patterns": [],
+      "inference_patterns": ["hong kong"]
+    },
+    "MM": {
+      "country_code": "MM",
+      "country_name": "Myanmar",
+      "name_aliases": ["myanmar", "burma"],
+      "postal_code": {
+        "required": true,
+        "pattern": "\\b\\d{5}\\b",
+        "length": 5
+      },
+      "subdivisions": {
+        "type": "states",
+        "list": [],
+        "use_dynamic": true
+      },
+      "unit_patterns": ["^[\\d]+", "^(NO|NUM|NUMBER)\\s*\\d+"],
+      "inference_patterns": ["myanmar", "rangoon", "mandalay"]
+    }
+  },
+  "postal_code_optional_countries": ["AE", "KW", "QA", "BH", "OM", "SA", "HK"]
+}

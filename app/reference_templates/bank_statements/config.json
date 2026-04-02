@@ -1,0 +1,1079 @@
+{
+  "version": "1.0",
+  "description": "Bank statement validation configuration",
+
+  "currencies": {
+    "SGD": {"name": "Singapore Dollar", "country": "SG", "account_number_length": {"min": 9, "max": 12}},
+    "INR": {"name": "Indian Rupee", "country": "IN", "account_number_length": {"min": 9, "max": 18}},
+    "MYR": {"name": "Malaysian Ringgit", "country": "MY", "account_number_length": {"min": 10, "max": 14}},
+    "THB": {"name": "Thai Baht", "country": "TH", "account_number_length": {"min": 10, "max": 12}},
+    "MMK": {"name": "Myanmar Kyat", "country": "MM", "account_number_length": {"min": 10, "max": 16}},
+    "IDR": {"name": "Indonesian Rupiah", "country": "ID", "account_number_length": {"min": 10, "max": 16}},
+    "USD": {"name": "US Dollar", "country": "US", "account_number_length": {"min": 8, "max": 12}},
+    "GBP": {"name": "British Pound", "country": "GB", "account_number_length": {"min": 8, "max": 8}},
+    "HKD": {"name": "Hong Kong Dollar", "country": "HK", "account_number_length": {"min": 8, "max": 12}},
+    "AED": {"name": "UAE Dirham", "country": "AE", "account_number_length": {"min": 8, "max": 20}}
+  },
+
+  "currency_name_map": {
+    "UAE DIRHAM": "AED",
+    "DIRHAM": "AED",
+    "EMIRATES DIRHAM": "AED",
+    "US DOLLAR": "USD",
+    "DOLLAR": "USD",
+    "EURO": "EUR",
+    "BRITISH POUND": "GBP",
+    "POUND STERLING": "GBP",
+    "INDIAN RUPEE": "INR",
+    "RUPEE": "INR",
+    "SINGAPORE DOLLAR": "SGD",
+    "MALAYSIAN RINGGIT": "MYR",
+    "THAI BAHT": "THB",
+    "MYANMAR KYAT": "MMK",
+    "KYAT": "MMK",
+    "INDONESIAN RUPIAH": "IDR",
+    "HONG KONG DOLLAR": "HKD",
+    "SAUDI RIYAL": "SAR",
+    "RIYAL": "SAR"
+  },
+
+  "address_formats": {
+    "SG": {"postal_code_pattern": "\\d{6}", "postal_code_length": 6},
+    "IN": {"postal_code_pattern": "\\d{6}", "postal_code_length": 6},
+    "MY": {"postal_code_pattern": "\\d{5}", "postal_code_length": 5},
+    "TH": {"postal_code_pattern": "\\d{5}", "postal_code_length": 5},
+    "MM": {"postal_code_pattern": "\\d{5}", "postal_code_length": 5},
+    "AE": {"postal_code_pattern": "\\d{5}", "postal_code_length": 5}
+  },
+
+  "state_to_country_map": {
+    "Andhra Pradesh": "IN", "Tamil Nadu": "IN", "Tamilnadu": "IN",
+    "Uttarakhand": "IN", "Uttaranchal": "IN", "Odisha": "IN", "Orissa": "IN",
+    "Singapore": "SG",
+    "Dubai": "AE", "Abu Dhabi": "AE", "Sharjah": "AE", "Ajman": "AE",
+    "Umm Al Quwain": "AE", "Ras Al Khaimah": "AE", "Fujairah": "AE", "Al Ain": "AE"
+  },
+
+  "account_number_labels": [
+    "ACCOUNT NUMBER",
+    "ACCOUNT NUMBER:",
+    "ACCOUNT NO",
+    "ACCOUNT NO.",
+    "ACCOUNT NUM",
+    "A/C NUMBER",
+    "A/C NO",
+    "A/C NO.",
+    "AC NUMBER",
+    "AC NO",
+    "AC NO.",
+    "ACCOUNT NO:",
+    "A/C NO:",
+    "ACCOUNTNUMBER",
+    "ACCOUNTNO",
+    "ACCOUNTNUM",
+    "ACCOUNTNO.",
+    "AC/NO",
+    "A / C NO",
+    "A / C NUMBER",
+    "ACC NO",
+    "ACC NO.",
+    "ACC NUMBER",
+    "ACCNT NO",
+    "ACCT NO",
+    "ACCT NO.",
+    "ACCT NUMBER",
+    "ACCOUNT REF",
+    "ACCOUNT REFERENCE",
+    "REF NO",
+    "REFERENCE NO",
+    "CARD NUMBER",
+    "PRIMARY CARD NUMBER",
+    "CARD NO"
+  ],
+
+  "account_holder_name_labels": [
+    "CUSTOMER NAME",
+    "NAME OF ACCOUNT HOLDER",
+    "A/C HOLDER NAME",
+    "ACCOUNT HOLDER NAME:",
+    "CUSTOMER NAME:",
+    "A/C HOLDER NAME:",
+    "MR.",
+    "MRS.",
+    "MS.",
+    "DR.",
+    "MISS.",
+    "PROF.",
+    "REV.",
+    "HON."
+  ],
+
+  "currency_labels": [
+    "CURRENCY",
+    "CURRENCY NAME",
+    "Amount (",
+    "CURRENCY CODE",
+    "ACCOUNT DETAILS -"
+  ],
+
+  "iban_labels": [
+    "IBAN",
+    "INTERNATIONAL BANK ACCOUNT NUMBER",
+    "INTL BANK ACCOUNT NO"
+  ],
+
+  "statement_date_labels": [
+    "STATEMENT DATE",
+    "STATEMENT DATE:",
+    "DATE OF STATEMENT",
+    "STATEMENT PERIOD",
+    "STATEMENT PERIOD:",
+    "PERIOD",
+    "PERIOD:",
+    "AS OF",
+    "AS OF:"
+  ],
+
+  "opening_balance_labels": [
+    "OPENING BALANCE",
+    "OPENING BALANCE:",
+    "OPENING BAL:",
+    "PREVIOUS BALANCE",
+    "PREVIOUS BALANCE:",
+    "BRING FORWARD",
+    "BRING FORWARD:",
+    "BF",
+    "B/F"
+  ],
+
+  "closing_balance_labels": [
+    "CLOSING BALANCE",
+    "CLOSING BALANCE:",
+    "CLOSING BAL:",
+    "CURRENT BALANCE",
+    "CURRENT BALANCE:",
+    "ENDING BALANCE",
+    "ENDING BALANCE:",
+    "CARRY FORWARD",
+    "CARRY FORWARD:",
+    "CF",
+    "C/F"
+  ],
+
+  "address_labels": [
+
+  ],
+  "address_extraction_exceptions": {
+    "skip_field_label": ["HDFC"],
+    "description": "Banks where 'Address' label refers to bank address, not customer address"
+  },
+  "banks": {
+    "JPM": {
+      "US":["CHASUS33", "CHASUS3N"],
+      "GB": ["CHASGB2L"],
+      "SG":["CHASSGSG"],
+      "JP": ["CHASJPJT"],
+      "DE": ["CHASDEF0"]
+    },
+    "MS": {
+      "US": ["MORQUS33"],
+      "GB": ["MORQGB2L"],
+      "SG": ["MORQSGSG"],
+      "HK": ["MORQHKHH"]
+    },
+    "GS": {
+      "US":["GOSCUS33"],
+      "GB": ["GOSCGB2L"],
+      "SG":["GOSCSGSG"],
+      "HK": ["GOSCHKHH"]
+    },
+    "BOA": {
+      "US": ["BOFAUS3N", "BOFAUS3W"],
+      "GB": ["BOFAGB22"],
+      "SG": ["BOFASGSG"],
+      "HK": ["BOFAHKHX"],
+      "IN": ["BOFAINMB"]
+    },
+    "CITI": {
+      "US": ["CITIUS33"],
+      "GB":["CITIGB2L"],
+      "SG": ["CITISGSG"],
+      "HK":["CITIHKHX"],
+      "IN": ["CITIINBX"],
+      "AE":["CITIAEAD"]
+    },
+    "WFC": {
+      "US":["PNBPUS3NNYC", "WFBIUS3W"],
+      "GB": ["PNBPGB2L"],
+      "HK": ["PNBPHKHH"]
+    },
+    "USB": {
+      "US":["USBKUS33"]
+    },
+    "PNC": {
+      "US":["PNCPUS33"]
+    },
+    "COF": {
+      "US": ["COFBUS33"]
+    },
+    "TRUIST": {
+      "US": ["BBTCUS33"]
+    },
+    "BK": {
+      "US": ["IRVTUS3N"],
+      "GB": ["BOFBGB22"],
+      "SG": ["IRVTSGSG"]
+    },
+    "STT": {
+      "US": ["SBOSUS33"],
+      "GB":["SBOSGB2L"],
+      "SG": ["SBOSSGSG"]
+    },
+    "BMO": {
+      "CA": ["BOFMCA22"],
+      "US":["BOFMUS33"],
+      "GB": ["BOFMGB22"]
+    },
+    "BNS": {
+      "CA": ["NOSCCA22"],
+      "US": ["NOSCUS33"],
+      "GB": ["NOSCGB22"]
+    },
+    "TD": {
+      "CA": ["TDOMCA2T"],
+      "US": ["TDOMUS33"]
+    },
+    "CIBC": {
+      "CA": ["CIBCCA2T"]
+    },
+    "RBC": {
+      "CA": ["ROYCCAT2"],
+      "US":["ROYCUS33"],
+      "GB": ["ROYCGB22"]
+    },
+    "HSBC": {
+      "GB": ["HBUKGB22", "MIDLGB22"],
+      "HK": ["HSBCHKHH"],
+      "US": ["HSBCUS33"],
+      "SG": ["HSBCSGSG"],
+      "IN": ["HSBCINBB"],
+      "AE": ["BBMEAEAD"]
+    },
+    "BARC": {
+      "GB":["BARCGB22"],
+      "US": ["BARCUS33"],
+      "IE":["BARCIE2D"],
+      "SG": ["BARCSGSG"],
+      "IN":["BARCINBB"],
+      "AE": ["BARCAEAD"]
+    },
+    "LLOYDS": {
+      "GB": ["LOYDGB22"]
+    },
+    "NATWEST": {
+      "GB": ["NWBKGB22"]
+    },
+    "SCB": {
+      "GB": ["SCBLGB2L"],
+      "SG": ["SCBLSGSG"],
+      "HK": ["SCBLHKHH"],
+      "IN": ["SCBLINBB"],
+      "AE": ["SCBLAEAD"],
+      "KE": ["SCBLKENX"]
+    },
+    "DB": {
+      "DE": ["DEUTDEFF", "DEUTDEFFXXX"],
+      "US": ["DEUTUS33"],
+      "GB": ["DEUTGB2L"],
+      "SG": ["DEUTSGSG"],
+      "IN": ["DEUTINBB"]
+    },
+    "CBK": {
+      "DE": ["COBADEFF"]
+    },
+    "DZ": {
+      "DE": ["GENODEF1"]
+    },
+    "BNP": {
+      "FR": ["BNPAFRPP"],
+      "US": ["BNPAUS33"],
+      "GB": ["BNPAGB22"],
+      "SG": ["BNPASGSG"],
+      "CH": ["BNPACHZZ"]
+    },
+    "SOCGEN": {
+      "FR":["SOGEFRPP"],
+      "US": ["SOGEUS33"],
+      "GB":["SOGEGB2L"],
+      "SG": ["SOGESGSG"]
+    },
+    "CREDITAGR": {
+      "FR": ["AGRIFRPP"]
+    },
+    "BPCE": {
+      "FR": ["CEPAFRPP"]
+    },
+    "UBS": {
+      "CH": ["UBSWCHZH"],
+      "US": ["UBSWUS33"],
+      "GB": ["UBSWGB2L"],
+      "SG": ["UBSWSGSG"],
+      "HK": ["UBSWHKHH"]
+    },
+    "ISP": {
+      "IT": ["BCITITMM"]
+    },
+    "UCG": {
+      "IT":["UNCRITMM"],
+      "DE": ["HYVEDEMM"]
+    },
+    "SAN": {
+      "ES": ["BSCHESMM"],
+      "GB": ["SANTGB2L"],
+      "US": ["SANTUS33"],
+      "BR": ["BSBRBRSP"]
+    },
+    "BBVA": {
+      "ES": ["BBVAESMM"],
+      "MX":["BBVAMXMM"]
+    },
+    "CABK": {
+      "ES":["CAIXESBB"]
+    },
+    "ING": {
+      "NL": ["INGBNL2A"],
+      "BE": ["INGBBEBB"],
+      "DE": ["INGDDEFF"],
+      "PL": ["INGBPLPW"]
+    },
+    "RABO": {
+      "NL": ["RABONL2U"]
+    },
+    "ABN": {
+      "NL":["ABNANL2A"]
+    },
+    "NDA": {
+      "SE":["NDEASESM"],
+      "FI": ["NDEAFIHH"],
+      "DK": ["NDEADKKK"],
+      "NO": ["NDEANOKK"]
+    },
+    "DANSKE": {
+      "DK": ["DABADKKK"],
+      "SE": ["DABASEST"],
+      "FI":["DABAFIHH"]
+    },
+    "KBC": {
+      "BE":["KREDBEBB"]
+    },
+    "ERSTE": {
+      "AT": ["GIBAATWW"]
+    },
+    "DBS": {
+      "SG": ["DBSSSGSG"],
+      "HK": ["DBSSHKHH"],
+      "IN": ["DBSSINBB"],
+      "TW": ["DBSSTWTP"],
+      "CN": ["DBSSCNBJ"]
+    },
+    "OCBC": {
+      "SG": ["OCBCSGSG"],
+      "MY":["OCBCMYKL"],
+      "HK": ["OCBCHKHH"],
+      "CN":["OCBCCNBJ"]
+    },
+    "UOB": {
+      "SG": ["UOVBSGSG"],
+      "MY": ["UOVBMYKL"],
+      "TH": ["UOVBTHBK"],
+      "CN": ["UOVBCNBJ"]
+    },
+    "ICBC": {
+      "CN": ["ICBCCNBJ"],
+      "HK": ["ICBCHKHH"],
+      "US": ["ICBCUS33"],
+      "SG": ["ICBCSGSG"],
+      "GB": ["ICBCGB2L"]
+    },
+    "BOC": {
+      "CN": ["BKCHCNBJ"],
+      "HK": ["BKCHHKHH"],
+      "US":["BKCHUS33"],
+      "GB": ["BKCHGB2L"],
+      "SG":["BKCHSGSG"]
+    },
+    "ABC": {
+      "CN": ["ABOCCNBJ"],
+      "HK": ["ABOCHKHH"],
+      "SG": ["ABOCSGSG"]
+    },
+    "CCB": {
+      "CN": ["PCBCCNBJ"],
+      "HK": ["PCBCHKHH"],
+      "SG": ["PCBCSGSG"]
+    },
+    "BOCOM": {
+      "CN": ["COMMCNBJ"],
+      "HK": ["COMMHKHH"]
+    },
+    "CMB": {
+      "CN": ["CMBCCNBJ"],
+      "HK": ["CMBCHKHH"]
+    },
+    "MUFG": {
+      "JP":["BOTKJPJT"],
+      "US": ["BOTKUS33"],
+      "GB":["BOTKGB2L"],
+      "SG": ["BOTKSGSG"]
+    },
+    "SMBC": {
+      "JP": ["SMBCJPJT"],
+      "US":["SMBCUS33"],
+      "GB": ["SMBCGB2L"],
+      "SG":["SMBCSGSG"]
+    },
+    "MHFG": {
+      "JP": ["MHBKJPJT"],
+      "US": ["MHBKUS33"],
+      "GB":["MHBKGB2L"]
+    },
+    "JPOST": {
+      "JP": ["JPBSJPJT"]
+    },
+    "CBA": {
+      "AU": ["CTBAAU2S"],
+      "US": ["CTBAUS33"],
+      "GB": ["CTBAGB22"],
+      "NZ": ["CTBANZ2A"]
+    },
+    "NAB": {
+      "AU":["NATAUU33"],
+      "US": ["NATAUS33"],
+      "GB":["NATAGB22"],
+      "NZ": ["NATANZ2A"]
+    },
+    "ANZ": {
+      "AU": ["ANZBAU3M"],
+      "NZ":["ANZBNZ22"],
+      "SG": ["ANZBSGSG"]
+    },
+    "WBC": {
+      "AU": ["WPACAU2S"],
+      "NZ": ["WPACNZ2W"]
+    },
+    "MQG": {
+      "AU": ["MACQAU2S"],
+      "GB": ["MACQGB2L"]
+    },
+    "KB": {
+      "KR":["KOKZKRSE"]
+    },
+    "SHINHAN": {
+      "KR":["SHBKKRSE"]
+    },
+    "HANA": {
+      "KR":["HNBNKRSE"]
+    },
+    "WOORI": {
+      "KR": ["HVBKKRSE"]
+    },
+    "ITAU": {
+      "BR": ["ITAUBRSP"],
+      "US": ["ITAUUS33"],
+      "AR": ["ITAUARBA"]
+    },
+    "BDOB": {
+      "BR": ["BRASBRSP"],
+      "US":["BRASUS33"]
+    },
+    "BRADESCO": {
+      "BR":["BBDCBRSP"]
+    },
+    "QNB": {
+      "QA":["QNBKQAQA"],
+      "GB": ["QNBKGB2L"]
+    },
+    "ALRAJHI": {
+      "SA": ["RJHISARI"]
+    },
+    "SNB": {
+      "SA": ["NCBKSARI"]
+    },
+    "STANBANK": {
+      "ZA": ["SBZAZAJJ"],
+      "GB": ["SBZAGB2L"]
+    },
+    "FIRSTRAND": {
+      "ZA": ["FIRNZAJJ"]
+    },
+    "ABSA": {
+      "ZA": ["ABSAZAJJ"]
+    },
+    "SBI": {
+      "IN": ["SBININBB"],
+      "US": ["SBINUS33"],
+      "GB": ["SBINGB2L"],
+      "SG": ["SBINSGSG"],
+      "AE": ["SBINAEAD"]
+    },
+    "HDFC": {
+      "IN":["HDFCINBB", "HDFCINCX"],
+      "AE": ["HDFCAEAD"],
+      "BH": ["HDFCBHBM"]
+    },
+    "PNB": {
+      "IN": ["PUNBINBB", "PUNBINB1"]
+    },
+    "BOB": {
+      "IN": ["BARBINBB"],
+      "AE":["BARBAEAD", "BARBAEDX"]
+    },
+    "BOI": {
+      "IN": ["BKIDINBB"]
+    },
+    "CANARA": {
+      "IN": ["CNRBINBB"]
+    },
+    "UBI": {
+      "IN": ["UBININBB"]
+    },
+    "IOB": {
+      "IN": ["IOBAINBB"]
+    },
+    "CENTRAL": {
+      "IN": ["CBININBB"]
+    },
+    "INDIAN": {
+      "IN": ["IDIBINBB"]
+    },
+    "UCO": {
+      "IN":["UCBAINBB"]
+    },
+    "MAHABANK": {
+      "IN":["MAHBINBB"]
+    },
+    "PSB": {
+      "IN": ["PSIBINBB"]
+    },
+    "ICICI": {
+      "IN": ["ICICINBB"],
+      "AE": ["ICICAEAD"]
+    },
+    "IDBI": {
+      "IN": ["IBKLINBB"]
+    },
+    "AXIS": {
+      "IN":["AXISINBB"],
+      "AE": ["AXISAEAD"]
+    },
+    "KOTAK": {
+      "IN": ["KKBKINBB", "KKBKINB1"],
+      "AE": ["KKBKAEAD"]
+    },
+    "INDUSIND": {
+      "IN": ["INDBINBB", "INDBINBBA"],
+      "AE":["INDBAEAD"]
+    },
+    "YES": {
+      "IN": ["YESBINBB"],
+      "AE": ["YESBAEAD"]
+    },
+    "IDFC": {
+      "IN":["IDFBINBB"]
+    },
+    "FEDERAL": {
+      "IN": ["FDRLINBB"],
+      "AE": ["FDRLAEAD"]
+    },
+    "BANDHAN": {
+      "IN": ["BDCNINCC"]
+    },
+    "SOUTHINDIAN": {
+      "IN": ["SOININBB"]
+    },
+    "RBL": {
+      "IN":["RATNINBB"]
+    },
+    "KARURVYSYA": {
+      "IN":["KVBLINBB"]
+    },
+    "CITYUNION": {
+      "IN":["CIUBINBB"]
+    },
+    "JNK": {
+      "IN": ["JAKAINBB"]
+    },
+    "KARNATAKA": {
+      "IN": ["KARBINBB"]
+    },
+    "TMB": {
+      "IN": ["TMBLINBB"]
+    },
+    "CSB": {
+      "IN": ["CSBKINTR"]
+    },
+    "FAB": {
+      "AE": ["NBADAEAD", "FGBKAEAD"]
+    },
+    "ENBD": {
+      "AE": ["EBILAEAD"]
+    },
+    "ADCB": {
+      "AE": ["ADCBAEAD"]
+    },
+    "DIB": {
+      "AE": ["DIBUAEAD"]
+    },
+    "MASHREQ": {
+      "AE":["MASHAEAD"]
+    },
+    "ADIB": {
+      "AE":["ADIBAEAD"]
+    },
+    "CBD": {
+      "AE": ["CBDUAEAD"]
+    },
+    "RAK": {
+      "AE": ["RAKBAEAD"]
+    },
+    "SIB": {
+      "AE": ["NBSHAEAD"]
+    },
+    "NBF": {
+      "AE": ["FUBJAEAD"]
+    },
+    "EIB": {
+      "AE": ["EBSUAEAD"]
+    },
+    "UAB": {
+      "AE": ["UABKAEAD"]
+    },
+    "CBI": {
+      "AE":["CBINAEAD"]
+    },
+    "BOS": {
+      "AE":["BOSHAEAD"]
+    },
+    "AJMAN": {
+      "AE": ["AJMNAEAD"]
+    },
+    "ALHILAL": {
+      "AE": ["AHBBAEAD"]
+    },
+    "NBQ": {
+      "AE": ["NBQUAEAD"]
+    },
+    "ALMASRAF": {
+      "AE": ["ARBFAEAD"]
+    },
+    "INVEST": {
+      "AE": ["INVBAEAD"]
+    },
+    "WIO": {
+      "AE": ["WIOBAEAD"]
+    },
+    "ZAND": {
+      "AE": ["ZANDAEAD"]
+    },
+    "MBANK": {
+      "AE": ["MABKAEAD"]
+    },
+    "KTB": {
+      "TH": ["KASITHBK"]
+    },
+    "KBANK": {
+      "TH": ["KASIKBKTH"]
+    },
+    "SCBTH": {
+      "TH": ["SICOTHBK"]
+    },
+    "BBL": {
+      "TH": ["BKKBTHBK"]
+    },
+    "TMB": {
+      "TH": ["TMBKTHBK"]
+    },
+    "BAY": {
+      "TH": ["BKASTHBK"]
+    },
+    "TTB": {
+      "TH": ["TMBTHBK"]
+    },
+    "LHBank": {
+      "TH": ["LHBKTHBK"]
+    },
+    "TISCO": {
+      "TH": ["TISCOTHB"]
+    },
+    "CIMBTH": {
+      "TH": ["CIBBTHBK"]
+    },
+    "UOBTH": {
+      "TH": ["UOVBTHBK"]
+    }
+  },
+  "bank_identifiers_map": {
+    "JPMorgan Chase": "JPM",
+    "J.P. Morgan": "JPM",
+    "Chase Manhattan": "JPM",
+    "jpmorganchase.com": "JPM",
+    "chase.com": "JPM",
+    "jpmorgan.com": "JPM",
+    "Morgan Stanley": "MS",
+    "morganstanley.com": "MS",
+    "Goldman Sachs": "GS",
+    "goldmansachs.com": "GS",
+    "gs.com": "GS",
+    "Bank of America": "BOA",
+    "Bank of America Merrill Lynch": "BOA",
+    "bankofamerica.com": "BOA",
+    "bofa.com": "BOA",
+    "ml.com": "BOA",
+    "Citigroup": "CITI",
+    "citi.com": "CITI",
+    "citibank.com": "CITI",
+    "citibank.co.in": "CITI",
+    "citigroup.com": "CITI",
+    "Wells Fargo Bank": "WFC",
+    "wellsfargo.com": "WFC",
+    "U.S. Bancorp": "USB",
+    "usbank.com": "USB",
+    "PNC Financial Services": "PNC",
+    "pnc.com": "PNC",
+    "Truist Bank": "TRUIST",
+    "BB&T": "TRUIST",
+    "SunTrust": "TRUIST",
+    "truist.com": "TRUIST",
+    "capitalone.com": "COF",
+    "Bank of New York Mellon": "BK",
+    "BNY Mellon": "BK",
+    "bnymellon.com": "BK",
+    "State Street": "STT",
+    "statestreet.com": "STT",
+    "Bank of Montreal": "BMO",
+    "bmo.com": "BMO",
+    "Scotiabank": "BNS",
+    "Bank of Nova Scotia": "BNS",
+    "scotiabank.com": "BNS",
+    "Toronto-Dominion Bank": "TD",
+    "td.com": "TD",
+    "Canadian Imperial Bank of Commerce": "CIBC",
+    "cibc.com": "CIBC",
+    "Royal Bank of Canada": "RBC",
+    "rbc.com": "RBC",
+    "rbcroyalbank.com": "RBC",
+    "Hongkong and Shanghai Banking Corporation": "HSBC",
+    "HSBC Holdings": "HSBC",
+    "HSBC Bank Middle East Limited": "HSBC",
+    "hsbc.com": "HSBC",
+    "hsbc.co.uk": "HSBC",
+    "hsbc.co.in": "HSBC",
+    "hsbc.ae": "HSBC",
+    "Barclays Bank PLC": "BARC",
+    "barclays.com": "BARC",
+    "barclays.co.uk": "BARC",
+    "Lloyds Banking Group": "LLOYDS",
+    "lloydsbank.com": "LLOYDS",
+    "NatWest Group": "NATWEST",
+    "National Westminster Bank": "NATWEST",
+    "natwest.com": "NATWEST",
+    "natwestgroup.com": "NATWEST",
+    "Standard Chartered Bank": "SCB",
+    "sc.com": "SCB",
+    "standardchartered.com": "SCB",
+    "Deutsche Bank AG": "DB",
+    "db.com": "DB",
+    "Commerzbank": "CBK",
+    "commerzbank.com": "CBK",
+    "commerzbank.de": "CBK",
+    "DZ Bank": "DZ",
+    "dzbank.com": "DZ",
+    "dzbank.de": "DZ",
+    "BNP Paribas": "BNP",
+    "bnpparibas.com": "BNP",
+    "mabanque.bnpparibas": "BNP",
+    "Societe Generale": "SOCGEN",
+    "Société Générale": "SOCGEN",
+    "societegenerale.com": "SOCGEN",
+    "societegenerale.fr": "SOCGEN",
+    "Credit Agricole": "CREDITAGR",
+    "Crédit Agricole": "CREDITAGR",
+    "credit-agricole.com": "CREDITAGR",
+    "credit-agricole.fr": "CREDITAGR",
+    "Groupe BPCE": "BPCE",
+    "bpce.fr": "BPCE",
+    "UBS Group AG": "UBS",
+    "Union Bank of Switzerland": "UBS",
+    "Credit Suisse": "UBS",
+    "ubs.com": "UBS",
+    "credit-suisse.com": "UBS",
+    "Intesa Sanpaolo": "ISP",
+    "intesasanpaolo.com": "ISP",
+    "UniCredit": "UCG",
+    "HypoVereinsbank": "UCG",
+    "unicredit.eu": "UCG",
+    "unicreditgroup.eu": "UCG",
+    "Banco Santander": "SAN",
+    "Santander Group": "SAN",
+    "santander.com": "SAN",
+    "bancosantander.es": "SAN",
+    "santanderbank.com": "SAN",
+    "Banco Bilbao Vizcaya Argentaria": "BBVA",
+    "bbva.com": "BBVA",
+    "bbva.es": "BBVA",
+    "bbva.mx": "BBVA",
+    "CaixaBank": "CABK",
+    "caixabank.com": "CABK",
+    "caixabank.es": "CABK",
+    "ING Group": "ING",
+    "ing.com": "ING",
+    "ing.nl": "ING",
+    "Rabobank": "RABO",
+    "rabobank.com": "RABO",
+    "rabobank.nl": "RABO",
+    "ABN AMRO": "ABN",
+    "abnamro.com": "ABN",
+    "abnamro.nl": "ABN",
+    "Nordea": "NDA",
+    "nordea.com": "NDA",
+    "Danske Bank": "DANSKE",
+    "danskebank.com": "DANSKE",
+    "danskebank.dk": "DANSKE",
+    "KBC Group": "KBC",
+    "kbc.be": "KBC",
+    "kbc.com": "KBC",
+    "Erste Group": "ERSTE",
+    "erstegroup.com": "ERSTE",
+    "Development Bank of Singapore": "DBS",
+    "DBS Bank Ltd": "DBS",
+    "The Development Bank of Singapore Limited": "DBS",
+    "DBS Co.": "DBS",
+    "POSB Bank": "DBS",
+    "Post Office Savings Bank": "DBS",
+    "dbs.com": "DBS",
+    "dbs.com.sg": "DBS",
+    "Oversea-Chinese Banking Corporation": "OCBC",
+    "ocbc.com": "OCBC",
+    "United Overseas Bank": "UOB",
+    "uobgroup.com": "UOB",
+    "uob.com.sg": "UOB",
+    "Industrial and Commercial Bank of China": "ICBC",
+    "icbc.com.cn": "ICBC",
+    "icbc-ltd.com": "ICBC",
+    "Bank of China": "BOC",
+    "boc.cn": "BOC",
+    "Agricultural Bank of China": "ABC",
+    "abchina.com": "ABC",
+    "abchina.com.cn": "ABC",
+    "China Construction Bank": "CCB",
+    "ccb.com": "CCB",
+    "Bank of Communications": "BOCOM",
+    "bankcomm.com": "BOCOM",
+    "China Merchants Bank": "CMB",
+    "cmbchina.com": "CMB",
+    "Mitsubishi UFJ Financial Group": "MUFG",
+    "Bank of Tokyo-Mitsubishi UFJ": "MUFG",
+    "mufg.jp": "MUFG",
+    "bk.mufg.jp": "MUFG",
+    "Sumitomo Mitsui Banking Corporation": "SMBC",
+    "smbc.co.jp": "SMBC",
+    "Mizuho Financial Group": "MHFG",
+    "mizuhobank.com": "MHFG",
+    "mizuho-fg.co.jp": "MHFG",
+    "Japan Post Bank": "JPOST",
+    "jp-bank.japanpost.jp": "JPOST",
+    "Commonwealth Bank of Australia": "CBA",
+    "commbank.com.au": "CBA",
+    "National Australia Bank": "NAB",
+    "nab.com.au": "NAB",
+    "Australia and New Zealand Banking Group": "ANZ",
+    "anz.com": "ANZ",
+    "anz.com.au": "ANZ",
+    "Westpac Banking Corporation": "WBC",
+    "westpac.com.au": "WBC",
+    "Macquarie Group": "MQG",
+    "macquarie.com": "MQG",
+    "macquarie.com.au": "MQG",
+    "KB Kookmin Bank": "KB",
+    "kbstar.com": "KB",
+    "Shinhan Bank": "SHINHAN",
+    "shinhan.com": "SHINHAN",
+    "KEB Hana Bank": "HANA",
+    "hanabank.com": "HANA",
+    "Woori Bank": "WOORI",
+    "wooribank.com": "WOORI",
+    "Banco Itaú Unibanco": "ITAU",
+    "Itaú": "ITAU",
+    "itau.com.br": "ITAU",
+    "Banco do Brasil": "BDOB",
+    "bb.com.br": "BDOB",
+    "Banco Bradesco": "BRADESCO",
+    "banco.bradesco": "BRADESCO",
+    "bradesco.com.br": "BRADESCO",
+    "Qatar National Bank": "QNB",
+    "qnb.com": "QNB",
+    "Al Rajhi Bank": "ALRAJHI",
+    "alrajhibank.com.sa": "ALRAJHI",
+    "Saudi National Bank": "SNB",
+    "alahli.com": "SNB",
+    "Standard Bank of South Africa": "STANBANK",
+    "standardbank.co.za": "STANBANK",
+    "FirstRand": "FIRSTRAND",
+    "First National Bank": "FIRSTRAND",
+    "firstrand.co.za": "FIRSTRAND",
+    "fnb.co.za": "FIRSTRAND",
+    "Absa Group": "ABSA",
+    "absa.co.za": "ABSA",
+    "absa.africa": "ABSA",
+    "State Bank of India": "SBI",
+    "onlinesbi.sbi": "SBI",
+    "sbi.co.in": "SBI",
+    "HDFC Bank Ltd": "HDFC",
+    "HDFC Bank Limited": "HDFC",
+    "Housing Development Finance Corporation": "HDFC",
+    "hdfcbank.com": "HDFC",
+    "Punjab National Bank": "PNB",
+    "pnbindia.in": "PNB",
+    "Bank of Baroda": "BOB",
+    "bankofbaroda.in": "BOB",
+    "Bank of India": "BOI",
+    "bankofindia.co.in": "BOI",
+    "Canara Bank": "CANARA",
+    "Syndicate Bank": "CANARA",
+    "canarabank.com": "CANARA",
+    "Union Bank of India": "UBI",
+    "Andhra Bank": "UBI",
+    "Corporation Bank": "UBI",
+    "unionbankofindia.co.in": "UBI",
+    "Indian Overseas Bank": "IOB",
+    "iob.in": "IOB",
+    "Central Bank of India": "CENTRAL",
+    "centralbankofindia.co.in": "CENTRAL",
+    "Indian Bank": "INDIAN",
+    "Allahabad Bank": "INDIAN",
+    "indianbank.in": "INDIAN",
+    "UCO Bank": "UCO",
+    "ucobank.com": "UCO",
+    "The Bank of Maharashtra": "MAHABANK",
+    "bankofmaharashtra.in": "MAHABANK",
+    "www.bankofmaharashtra.in": "MAHABANK",
+    "Punjab & Sind Bank": "PSB",
+    "punjabandsindbank.co.in": "PSB",
+    "Team ICICI Bank.": "ICICI",
+    "IDBI Bank Ltd": "IDBI",
+    "IDBI Bank Limited": "IDBI",
+    "Industrial Development Bank of India": "IDBI",
+    "idbibank.in": "IDBI",
+    "AXIS BANK LTD": "AXIS",
+    "UTI Bank": "AXIS",
+    "Kotak Mahindra Bank": "KOTAK",
+    "kotak.com": "KOTAK",
+    "IndusInd Bank": "INDUSIND",
+    "indusind.com": "INDUSIND",
+    "Yes Bank": "YES",
+    "yesbank.in": "YES",
+    "IDFC First Bank": "IDFC",
+    "idfcfirstbank.com": "IDFC",
+    "Federal Bank": "FEDERAL",
+    "federalbank.co.in": "FEDERAL",
+    "Bandhan Bank": "BANDHAN",
+    "bandhanbank.com": "BANDHAN",
+    "South Indian Bank": "SOUTHINDIAN",
+    "southindianbank.com": "SOUTHINDIAN",
+    "RBL Bank": "RBL",
+    "rblbank.com": "RBL",
+    "Karur Vysya Bank": "KARURVYSYA",
+    "kvb.co.in": "KARURVYSYA",
+    "City Union Bank": "CITYUNION",
+    "cityunionbank.com": "CITYUNION",
+    "Jammu & Kashmir Bank": "JNK",
+    "jkbank.com": "JNK",
+    "Karnataka Bank": "KARNATAKA",
+    "karnatakabank.com": "KARNATAKA",
+    "Tamilnad Mercantile Bank": "TMB",
+    "tmb.in": "TMB",
+    "CSB Bank": "CSB",
+    "Catholic Syrian Bank": "CSB",
+    "csb.co.in": "CSB",
+    "First Abu Dhabi Bank": "FAB",
+    "National Bank of Abu Dhabi": "FAB",
+    "First Gulf Bank": "FAB",
+    "bankfab.com": "FAB",
+    "Emirates NBD": "ENBD",
+    "Emirates NBD Bank (P.J.S.C.)": "ENBD",
+    "Emirates NBD Bank PJSC": "ENBD",
+    "Emirates Bank International": "ENBD",
+    "emiratesnbd.com": "ENBD",
+    "Abu Dhabi Commercial Bank": "ADCB",
+    "Union National Bank": "ADCB",
+    "adcb.com": "ADCB",
+    "Dubai Islamic Bank": "DIB",
+    "dib.ae": "DIB",
+    "Mashreq Bank": "MASHREQ",
+    "mashreqbank.com": "MASHREQ",
+    "mashreq.com": "MASHREQ",
+    "Abu Dhabi Islamic Bank": "ADIB",
+    "adib.ae": "ADIB",
+    "Commercial Bank of Dubai": "CBD",
+    "cbd.ae": "CBD",
+    "The National Bank of Ras Al Khaimah (P.S.C)": "RAK",
+    "National Bank of Ras Al Khaimah": "RAK",
+    "rakbank.ae": "RAK",
+    "Sharjah Islamic Bank": "SIB",
+    "National Bank of Sharjah": "SIB",
+    "sib.ae": "SIB",
+    "National Bank of Fujairah": "NBF",
+    "nbf.ae": "NBF",
+    "Emirates Islamic Bank": "EIB",
+    "emiratesislamic.ae": "EIB",
+    "United Arab Bank": "UAB",
+    "uab.ae": "UAB",
+    "Commercial Bank International": "CBI",
+    "cbiuae.com": "CBI",
+    "Bank of Sharjah": "BOS",
+    "bankofsharjah.com": "BOS",
+    "Ajman Bank": "AJMAN",
+    "ajmanbank.ae": "AJMAN",
+    "Al Hilal Bank": "ALHILAL",
+    "alhilalbank.ae": "ALHILAL",
+    "National Bank of Umm Al Qaiwain": "NBQ",
+    "nbq.ae": "NBQ",
+    "Arab Bank for Investment and Foreign Trade": "ALMASRAF",
+    "almasraf.ae": "ALMASRAF",
+    "Wio Bank": "WIO",
+    "investbank.ae": "INVEST",
+    "wio.io": "WIO",
+    "Zand Bank": "ZAND",
+    "zand.ae": "ZAND",
+    "Al Maryah Community Bank": "MBANK",
+    "mbank.ae": "MBANK",
+    "Krung Thai Bank": "KTB",
+    "krungthai.com": "KTB",
+    "ktb.co.th": "KTB",
+    "Kasikornbank": "KBANK",
+    "kasikornbank.com": "KBANK",
+    "kbank.co.th": "KBANK",
+    "Siam Commercial Bank": "SCBTH",
+    "SCB Thailand": "SCBTH",
+    "scb.co.th": "SCBTH",
+    "Bangkok Bank PCL": "BBL",
+    "bangkokbank.com": "BBL",
+    "bbl.co.th": "BBL",
+    "TMBThanachart": "TTB",
+    "ttb.co.th": "TTB",
+    "Bank of Ayudhya": "BAY",
+    "Krungsri": "BAY",
+    "krungsri.com": "BAY",
+    "bay.co.th": "BAY",
+    "Land and Houses Bank": "LHBank",
+    "lhbank.co.th": "LHBank",
+    "TISCO Bank": "TISCO",
+    "tisco.co.th": "TISCO",
+    "CIMB Thai": "CIMBTH",
+    "cimbthai.com": "CIMBTH",
+    "UOB Thailand": "UOBTH",
+    "uob.co.th": "UOBTH",
+    "Ayeyarwady Bank Public Company Limited": "AYA"
+  }
+
+}

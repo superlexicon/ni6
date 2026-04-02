@@ -1,0 +1,1471 @@
+import re
+import io
+from typing import Optional
+import cv2
+import numpy as np
+from PIL import Image
+from onnxtr.io import DocumentFile
+from rapidfuzz import fuzz, process
+
+from app.schemas.passport_schema import PassportData
+from app.helper.doctr.document_text_extractor import DocumentTextExtractor
+from app.helper.extractors.mrz_decoder import MRZDecoder
+from app.helper.extractors.schemas import PASSPORT_SCHEMAS
+from app.core import logger, doctr_model
+
+
+class PassportExtractor:
+    """Extract all standard fields from passport documents"""
+
+    def __init__(self):
+        self.logger = logger
+        self.text_extractor = DocumentTextExtractor()
+        self.mrz_decoder = MRZDecoder()
+
+    def _preprocess_mrz_image(self, pil_image: Image.Image) -> Image.Image:
+        """
+        Preprocess MRZ region image to improve OCR accuracy.
+        Applies grayscale conversion, CLAHE, sharpening, and binarization.
+        """
+        # Convert PIL Image to OpenCV format
+        img_array = np.array(pil_image)
+
+        # Convert to grayscale
+        if len(img_array.shape) == 3:
+            gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+        else:
+            gray = img_array
+
+        self.logger.info("  Applied grayscale conversion")
+
+        # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        enhanced = clahe.apply(gray)
+        self.logger.info("  Applied CLAHE contrast enhancement")
+
+        # Apply sharpening using unsharp mask
+        gaussian = cv2.GaussianBlur(enhanced, (0, 0), 2.0)
+        sharpened = cv2.addWeighted(enhanced, 1.5, gaussian, -0.5, 0)
+        self.logger.info("  Applied sharpening filter")
+
+        # Apply binary thresholding (Otsu's method)
+        _, binary = cv2.threshold(sharpened, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        self.logger.info("  Applied Otsu's binarization")
+
+        # Convert back to PIL Image
+        processed_pil = Image.fromarray(binary)
+
+        return processed_pil
+
+    async def extract(self, content: bytes, is_pdf: bool = False) -> PassportData:
+        """
+        Extract all standard passport fields using streamlined 5-step process:
+        1. EXIF auto-rotation (handled in DocumentTextExtractor)
+        2. DocTR OCR (single pass with geometry)
+        3. Detect document type and country/organization
+        4. Sequential schema-based field extraction
+        5. MRZ construction and validation
+
+        Args:
+            content: Document bytes
+            is_pdf: Whether content is PDF
+
+        Returns:
+            PassportData with extracted fields and confidence scores
+        """
+        try:
+            self.logger.info("="*80)
+            self.logger.info("PASSPORT EXTRACTION - 5-STEP PROCESS")
+            self.logger.info("="*80)
+
+            # Step 1 & 2: EXIF auto-rotation + DocTR OCR (single pass)
+            self.logger.info("Step 1-2: EXIF auto-rotation + DocTR OCR")
+            text_blocks = await self.text_extractor.extract_text_with_geometry(content, is_pdf=is_pdf)
+            self.logger.info(f"  Extracted {len(text_blocks)} text lines with geometry")
+
+            # Step 3: Detect country code (document type and organization)
+            self.logger.info("Step 3: Detecting document type and country")
+            country_code = self._detect_country_code(text_blocks)
+
+            if not country_code:
+                self.logger.error("Could not detect country code - extraction failed")
+                return PassportData(confidence_scores={})
+
+            self.logger.info(f"  Detected country: {country_code}")
+
+            # Step 4: Sequential schema-based extraction
+            self.logger.info("Step 4: Sequential schema-based field extraction")
+            extracted_fields = self._extract_fields_sequential(text_blocks, country_code)
+
+            if not extracted_fields:
+                self.logger.error("Sequential extraction failed - no fields extracted")
+                return PassportData(confidence_scores={})
+
+            self.logger.info(f"  Extracted {len(extracted_fields)} fields")
+
+            # Step 5a: Construct MRZ from extracted fields
+            self.logger.info("Step 5a: Constructing MRZ from extracted fields")
+            constructed_mrz = self._construct_mrz(extracted_fields, country_code)
+            self.logger.info(f"  Constructed MRZ:\n{constructed_mrz}")
+
+            # Step 5b: Fuzzy validate constructed MRZ vs DocTR MRZ
+            self.logger.info("Step 5b: Fuzzy validation of constructed vs DocTR MRZ")
+            mrz_validation = self._validate_mrz_fuzzy(constructed_mrz, text_blocks)
+            self.logger.info(f"  MRZ match score: {mrz_validation['match_score']:.1f}%")
+            self.logger.info(f"  MRZ valid: {mrz_validation['is_valid']}")
+
+            # Populate PassportData from extracted fields
+            passport_data = PassportData()
+            passport_data.passport_number = extracted_fields.get('passport_number')
+            passport_data.full_name = extracted_fields.get('full_name')
+            passport_data.sex = extracted_fields.get('sex')
+            passport_data.nationality = extracted_fields.get('nationality')
+            passport_data.date_of_birth = extracted_fields.get('date_of_birth')
+            passport_data.place_of_birth = extracted_fields.get('place_of_birth')
+            passport_data.date_of_issue = extracted_fields.get('date_of_issue')
+            passport_data.issuing_authority = extracted_fields.get('issuing_authority')
+            passport_data.date_of_expiry = extracted_fields.get('date_of_expiry')
+            passport_data.issuing_country = extracted_fields.get('country_code')
+
+            # Set MRZ data
+            passport_data.mrz_line1 = mrz_validation.get('constructed_line1')
+            passport_data.mrz_line2 = mrz_validation.get('constructed_line2')
+
+            # Calculate confidence scores based on MRZ validation
+            base_confidence = 85.0  # Base confidence from sequential extraction
+            mrz_bonus = mrz_validation['match_score'] * 0.15  # Up to 15% bonus from MRZ match
+
+            passport_data.confidence_scores = {
+                'passport_number': base_confidence + mrz_bonus if passport_data.passport_number else 0,
+                'full_name': base_confidence if passport_data.full_name else 0,
+                'sex': base_confidence if passport_data.sex else 0,
+                'nationality': base_confidence + mrz_bonus if passport_data.nationality else 0,
+                'date_of_birth': base_confidence + mrz_bonus if passport_data.date_of_birth else 0,
+                'place_of_birth': base_confidence if passport_data.place_of_birth else 0,
+                'date_of_issue': base_confidence if passport_data.date_of_issue else 0,
+                'issuing_authority': base_confidence if passport_data.issuing_authority else 0,
+                'date_of_expiry': base_confidence + mrz_bonus if passport_data.date_of_expiry else 0,
+                'issuing_country': base_confidence + mrz_bonus if passport_data.issuing_country else 0,
+            }
+
+            # Calculate overall confidence
+            passport_data.overall_confidence = passport_data.calculate_overall_confidence()
+            self.logger.info(f"Overall confidence: {passport_data.overall_confidence:.2f}%")
+
+            # Log recommendation
+            if passport_data.overall_confidence >= 85:
+                self.logger.info("✓ High confidence - extraction successful")
+            elif passport_data.overall_confidence >= 70:
+                self.logger.warning("⚠ Medium confidence - manual review recommended")
+            else:
+                self.logger.warning("✗ Low confidence - rescan required")
+
+            self.logger.info("="*80)
+            return passport_data
+
+        except Exception as e:
+            self.logger.error(f"Passport extraction failed: {str(e)}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+            return PassportData(confidence_scores={})
+
+    def _detect_country_code(self, text_blocks: list) -> Optional[str]:
+        """
+        Detect country code from OCR text blocks.
+
+        Looks for 3-letter country codes in the text.
+
+        Args:
+            text_blocks: List of dicts with 'text', 'x1', 'y1', 'x2', 'y2'
+
+        Returns:
+            3-letter country code (e.g., 'SGP') or None
+        """
+        # Get list of all supported country codes
+        supported_codes = list(PASSPORT_SCHEMAS.keys())
+
+        # Search for country code in text blocks
+        for block in text_blocks:
+            text = block['text'].strip().upper()
+            # Check if text exactly matches a country code
+            if text in supported_codes:
+                self.logger.info(f"Detected country code from OCR: {text}")
+                return text
+            # Check if text contains a country code
+            for code in supported_codes:
+                if code in text:
+                    self.logger.info(f"Detected country code in text '{text}': {code}")
+                    return code
+
+        self.logger.warning("Could not detect country code from OCR text")
+        return None
+
+    def _fuzzy_match_label(self, ocr_text: str, expected_label: str, threshold: float = 75.0) -> bool:
+        """
+        Check if OCR text contains the expected label using fuzzy matching.
+
+        This handles OCR errors like:
+        - "Date ofexpiry" → "Date of expiry"
+        - "Passport No" → "Passport No."
+        - "Modihications" → "Modifications"
+
+        Args:
+            ocr_text: Text from OCR (DocTR line)
+            expected_label: Label we're looking for from schema
+            threshold: Minimum similarity score (0-100, default 75%)
+
+        Returns:
+            True if label is found with sufficient confidence
+        """
+        # Use RapidFuzz to find best match
+        # fuzz.partial_ratio checks if expected_label is a fuzzy substring of ocr_text
+        score = fuzz.partial_ratio(expected_label.lower(), ocr_text.lower())
+
+        if score >= threshold:
+            self.logger.info(f"      Fuzzy match: '{expected_label}' in '{ocr_text}' (score: {score:.1f}%)")
+            return True
+
+        return False
+
+    def _construct_mrz(self, extracted_fields: dict, country_code: str) -> str:
+        """
+        Construct TD3 MRZ from extracted passport fields.
+
+        Args:
+            extracted_fields: Dictionary of extracted fields from sequential extraction
+            country_code: 3-letter country code
+
+        Returns:
+            String with two MRZ lines separated by newline
+        """
+        # Extract name components from full_name
+        full_name = extracted_fields.get('full_name', '')
+        surname = ''
+        given_names = ''
+
+        # Try to split full name into surname and given names
+        # Common patterns: "SURNAME, GIVEN NAMES" or "GIVEN NAMES SURNAME"
+        if ',' in full_name:
+            # Format: "SURNAME, GIVEN NAMES"
+            parts = full_name.split(',', 1)
+            surname = parts[0].strip()
+            given_names = parts[1].strip() if len(parts) > 1 else ''
+        elif ' S/O ' in full_name.upper():
+            # Singapore pattern: "GIVEN NAMES S/O SURNAME"
+            parts = full_name.upper().split(' S/O ')
+            given_names = parts[0].strip()
+            surname = parts[1].strip() if len(parts) > 1 else ''
+        else:
+            # Assume last word is surname
+            parts = full_name.strip().split()
+            if len(parts) > 1:
+                surname = parts[-1]
+                given_names = ' '.join(parts[:-1])
+            else:
+                surname = full_name
+
+        # Use MRZDecoder to construct MRZ
+        mrz_tuple = self.mrz_decoder.construct_mrz_from_fields(
+            document_type="P",
+            country_code=country_code,
+            surname=surname,
+            given_names=given_names,
+            passport_number=extracted_fields.get('passport_number', ''),
+            nationality=extracted_fields.get('nationality', ''),
+            date_of_birth=extracted_fields.get('date_of_birth', ''),
+            sex=extracted_fields.get('sex', ''),
+            date_of_expiry=extracted_fields.get('date_of_expiry', ''),
+            optional_data=''
+        )
+
+        if mrz_tuple:
+            return f"{mrz_tuple[0]}\n{mrz_tuple[1]}"
+        else:
+            return ""
+
+    def _validate_mrz_fuzzy(self, constructed_mrz: str, text_blocks: list) -> dict:
+        """
+        Fuzzy validate constructed MRZ against last 2 lines from DocTR.
+
+        Uses RapidFuzz to compare constructed MRZ with DocTR's extracted MRZ lines.
+
+        Args:
+            constructed_mrz: MRZ string (2 lines) constructed from extracted fields
+            text_blocks: List of DocTR text blocks with geometry
+
+        Returns:
+            Dict with match_score, line1_score, line2_score, is_valid, constructed_line1, constructed_line2, doctr_line1, doctr_line2
+        """
+        from rapidfuzz import fuzz
+
+        # Split constructed MRZ into lines
+        constructed_lines = constructed_mrz.strip().split('\n')
+        if len(constructed_lines) != 2:
+            self.logger.warning(f"Invalid constructed MRZ: expected 2 lines, got {len(constructed_lines)}")
+            return {
+                'match_score': 0.0,
+                'line1_score': 0.0,
+                'line2_score': 0.0,
+                'is_valid': False,
+                'constructed_line1': '',
+                'constructed_line2': '',
+                'doctr_line1': '',
+                'doctr_line2': ''
+            }
+
+        constructed_line1 = constructed_lines[0]
+        constructed_line2 = constructed_lines[1]
+
+        # Extract last 2 lines from DocTR output (likely to be MRZ)
+        text_lines = [block['text'].strip() for block in text_blocks]
+
+        if len(text_lines) < 2:
+            self.logger.warning(f"Not enough DocTR lines for MRZ validation: {len(text_lines)}")
+            return {
+                'match_score': 0.0,
+                'line1_score': 0.0,
+                'line2_score': 0.0,
+                'is_valid': False,
+                'constructed_line1': constructed_line1,
+                'constructed_line2': constructed_line2,
+                'doctr_line1': '',
+                'doctr_line2': ''
+            }
+
+        # Get last 2 lines from DocTR (MRZ is typically at the bottom)
+        doctr_line1 = text_lines[-2]
+        doctr_line2 = text_lines[-1]
+
+        self.logger.info(f"Constructed MRZ Line 1: '{constructed_line1}'")
+        self.logger.info(f"DocTR MRZ Line 1:       '{doctr_line1}'")
+        self.logger.info(f"Constructed MRZ Line 2: '{constructed_line2}'")
+        self.logger.info(f"DocTR MRZ Line 2:       '{doctr_line2}'")
+
+        # Use RapidFuzz to compare lines
+        line1_score = fuzz.ratio(constructed_line1, doctr_line1)
+        line2_score = fuzz.ratio(constructed_line2, doctr_line2)
+
+        # Calculate overall match score (average of both lines)
+        match_score = (line1_score + line2_score) / 2.0
+
+        # Consider valid if match score >= 80%
+        is_valid = match_score >= 80.0
+
+        self.logger.info(f"MRZ Validation: Line1={line1_score:.1f}%, Line2={line2_score:.1f}%, Overall={match_score:.1f}%")
+        self.logger.info(f"MRZ Valid: {is_valid}")
+
+        return {
+            'match_score': match_score,
+            'line1_score': line1_score,
+            'line2_score': line2_score,
+            'is_valid': is_valid,
+            'constructed_line1': constructed_line1,
+            'constructed_line2': constructed_line2,
+            'doctr_line1': doctr_line1,
+            'doctr_line2': doctr_line2
+        }
+
+    def _extract_fields_sequential(self, text_blocks: list, country_code: str) -> dict:
+        """
+        Extract passport fields using sequential row-by-row processing.
+
+        Algorithm:
+        1. Get schema field_rows (alternating labels and types)
+        2. Iterate through DocTR lines
+        3. For each pair of lines (label line + value line):
+           - Match labels from line against expected labels in schema
+           - Split value line based on field types
+           - Pair labels with values sequentially
+
+        Args:
+            text_blocks: List of dicts with 'text', 'x1', 'y1', 'x2', 'y2'
+            country_code: 3-letter country code
+
+        Returns:
+            dict with extracted fields using standardized field names
+        """
+        self.logger.info("="*80)
+        self.logger.info("SEQUENTIAL ROW-BY-ROW FIELD EXTRACTION")
+        self.logger.info("="*80)
+
+        # Get schema for this country
+        schema = PASSPORT_SCHEMAS.get(country_code.upper())
+        if not schema or 'field_rows' not in schema:
+            self.logger.warning(f"No field_rows schema found for country code: {country_code}")
+            return {}
+
+        field_rows = schema['field_rows']
+        field_mapping = schema['field_mapping']
+
+        self.logger.info(f"Using sequential schema for country: {country_code}")
+        self.logger.info(f"Schema defines {len(field_rows)//2} field row pairs")
+
+        # Convert text_blocks to simple list of text strings for easier processing
+        text_lines = [block['text'].strip() for block in text_blocks]
+
+        self.logger.info(f"Processing {len(text_lines)} DocTR lines")
+
+        extracted_fields = {}
+
+        # Step 1: Find the starting point by scanning for first schema row labels
+        first_schema_labels = field_rows[0]
+        doctr_idx = 0
+
+        self.logger.info(f"Scanning for first schema labels: {first_schema_labels}")
+
+        # Skip all lines until we find a line containing any of the first schema labels
+        while doctr_idx < len(text_lines):
+            line = text_lines[doctr_idx]
+            # Try exact match first, fallback to fuzzy match
+            if any(label in line or self._fuzzy_match_label(line, label) for label in first_schema_labels):
+                self.logger.info(f"Found first schema labels at DocTR line {doctr_idx}: '{line}'")
+                break
+            else:
+                self.logger.info(f"Skipping header line [{doctr_idx}]: '{line}'")
+                doctr_idx += 1
+
+        if doctr_idx >= len(text_lines):
+            self.logger.warning("Could not find first schema labels in document")
+            return extracted_fields
+
+        # Step 2: Two-pointer iteration through schema and DocTR lines
+        schema_row_idx = 0
+
+        while schema_row_idx < len(field_rows) - 1 and doctr_idx < len(text_lines):
+            # Get schema info for this row pair
+            expected_labels = field_rows[schema_row_idx]      # Even index: labels
+            expected_types = field_rows[schema_row_idx + 1]   # Odd index: types
+
+            self.logger.info(f"Processing schema row {schema_row_idx//2}: {expected_labels}")
+
+            matched_labels = []
+            schema_item_idx = 0
+
+            # Phase 1: Match all labels in this schema row
+            while schema_item_idx < len(expected_labels) and doctr_idx < len(text_lines):
+                doctr_line = text_lines[doctr_idx]
+                label = expected_labels[schema_item_idx]
+
+                self.logger.info(f"  Checking label '{label}' against DocTR line [{doctr_idx}]: '{doctr_line}'")
+
+                # Inner loop: keep matching labels while current DocTR line contains them
+                # Try exact match first (fast path), fallback to fuzzy match (handles OCR errors)
+                while label in doctr_line or self._fuzzy_match_label(doctr_line, label):
+                    self.logger.info(f"    ✓ Found '{label}' in line")
+                    matched_labels.append(label)
+                    schema_item_idx += 1
+
+                    # Get next label to check
+                    if schema_item_idx < len(expected_labels):
+                        label = expected_labels[schema_item_idx]
+                    else:
+                        break
+
+                # Current line exhausted, move to next DocTR line
+                doctr_idx += 1
+
+            self.logger.info(f"  Matched {len(matched_labels)} labels: {matched_labels}")
+
+            # Phase 2: Collect values for matched labels
+            value_lines = []
+
+            # Build list of all next row labels to detect when we hit next field
+            next_row_labels = field_rows[schema_row_idx + 2] if schema_row_idx + 2 < len(field_rows) else []
+
+            # Collect value lines until we hit next field labels
+            while doctr_idx < len(text_lines):
+                line = text_lines[doctr_idx]
+
+                # Check if this is next field label row - try exact match first, fallback to fuzzy match
+                if any(next_label in line or self._fuzzy_match_label(line, next_label) for next_label in next_row_labels):
+                    self.logger.info(f"  Stopped at DocTR line [{doctr_idx}] (next field labels)")
+                    break
+
+                self.logger.info(f"  Collecting value line [{doctr_idx}]: '{line}'")
+                value_lines.append(line)
+                doctr_idx += 1
+
+            # Split collected value lines based on types
+            combined_values = ' '.join(value_lines)
+            values = self._split_values_by_types(combined_values, expected_types, len(matched_labels))
+
+            self.logger.info(f"  Extracted {len(values)} values: {values}")
+
+            # Phase 3: Map labels to values
+            for i, label in enumerate(matched_labels):
+                if i < len(values):
+                    standardized_name = field_mapping.get(label, label)
+                    extracted_fields[standardized_name] = values[i]
+                    self.logger.info(f"  ✓ {label} ({standardized_name}) = '{values[i]}'")
+
+            # Move to next schema row pair (skip 2: labels + types)
+            schema_row_idx += 2
+
+        self.logger.info(f"Sequential extraction complete: Extracted {len(extracted_fields)} fields")
+        self.logger.info("="*80)
+
+        return extracted_fields
+
+    def _match_labels_in_line(self, line: str, expected_labels: list) -> list:
+        """
+        Extract field labels from a text line that match expected labels.
+        Handles multi-label strings like "Type Country Code Passport No"
+
+        Args:
+            line: Text line from DocTR
+            expected_labels: List of expected field labels (may include OCR variants)
+
+        Returns:
+            List of matched labels in order they appear
+        """
+        matched = []
+        for label in expected_labels:
+            if label in line:
+                # Check if we already matched this standardized field (to handle variants)
+                # For example, both "Passport No" and "Passport No." map to passport_number
+                matched.append(label)
+        return matched
+
+    def _split_values_by_types(self, value_line: str, field_types: list, num_labels: int) -> list:
+        """
+        Split value line into individual values based on field types.
+
+        Examples:
+        - "PA SGP K4001488A" with types ['code', 'code', 'alphanumeric']
+          -> ["PA", "SGP", "K4001488A"]
+
+        - "10 NOV 1982 SINGAPORE" with types ['date', 'text']
+          -> ["10 NOV 1982", "SINGAPORE"]
+
+        - "MANOGARAN, JOHN DOE" with types ['text']
+          -> ["MANOGARAN, JOHN DOE"]
+
+        Args:
+            value_line: Text line containing field values
+            field_types: List of field types corresponding to expected values
+            num_labels: Number of labels that were matched
+
+        Returns:
+            List of extracted values
+        """
+        values = []
+        tokens = value_line.split()
+        token_idx = 0
+
+        MONTH_NAMES = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
+
+        for i in range(num_labels):
+            if i >= len(field_types) or token_idx >= len(tokens):
+                break
+
+            field_type = field_types[i]
+
+            if field_type == 'code':
+                # Single token
+                values.append(tokens[token_idx])
+                token_idx += 1
+
+            elif field_type == 'date':
+                # Consume 3 tokens: "DD MMM YYYY"
+                if token_idx + 2 < len(tokens):
+                    date_value = ' '.join(tokens[token_idx:token_idx+3])
+                    values.append(date_value)
+                    token_idx += 3
+
+            elif field_type == 'alphanumeric':
+                # Single token
+                values.append(tokens[token_idx])
+                token_idx += 1
+
+            elif field_type == 'text':
+                # Special handling: determine where this text field ends
+                if i == num_labels - 1:
+                    # Last field - take everything remaining
+                    remaining = ' '.join(tokens[token_idx:])
+                    values.append(remaining)
+                    token_idx = len(tokens)
+                else:
+                    # Not last field - need to determine boundary
+                    # Look at next field type to find boundary
+                    next_type = field_types[i+1] if i+1 < len(field_types) else None
+
+                    if next_type == 'date':
+                        # Next field is a date, consume text until date pattern starts
+                        text_tokens = []
+                        while token_idx < len(tokens):
+                            # Check if current position is start of date (digit + month + year)
+                            if (token_idx + 2 < len(tokens) and
+                                tokens[token_idx].replace(',', '').isdigit() and
+                                tokens[token_idx+1].upper() in MONTH_NAMES and
+                                tokens[token_idx+2].isdigit()):
+                                break
+                            text_tokens.append(tokens[token_idx])
+                            token_idx += 1
+                        values.append(' '.join(text_tokens) if text_tokens else '')
+                    else:
+                        # Default: take all remaining tokens
+                        remaining = ' '.join(tokens[token_idx:])
+                        values.append(remaining)
+                        token_idx = len(tokens)
+
+        return values
+
+    def _split_by_field_types(self, fused_value: str, field1_type: dict, field2_type: dict) -> tuple:
+        """
+        Split a fused OCR value into two parts based on field types.
+
+        Args:
+            fused_value: The fused text containing both values
+            field1_type: Type definition for first field {'type': 'date', 'format': 'DD MMM YYYY'}
+            field2_type: Type definition for second field {'type': 'text'}
+
+        Returns:
+            Tuple of (value1, value2) or (None, None) if splitting fails
+        """
+        type1 = field1_type.get('type')
+        type2 = field2_type.get('type')
+
+        # Date + Text pattern (e.g., "12 JAN 1985SINGAPORE")
+        if type1 == 'date' and type2 == 'text':
+            # Extract date using DD MMM YYYY pattern
+            date_pattern = r'(\d{1,2}\s+(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+\d{4})'
+            match = re.search(date_pattern, fused_value, re.IGNORECASE)
+            if match:
+                date_part = match.group(1)
+                # Everything after the date is the text part
+                text_part = fused_value[match.end():].strip()
+                if text_part:  # Only split if there's actually text after the date
+                    self.logger.info(f"Split date+text: '{fused_value}' → date='{date_part}', text='{text_part}'")
+                    return (date_part, text_part)
+
+        # Text + Date pattern (e.g., "SINGAPORE12 JAN 1985")
+        elif type1 == 'text' and type2 == 'date':
+            date_pattern = r'(\d{1,2}\s+(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+\d{4})'
+            match = re.search(date_pattern, fused_value, re.IGNORECASE)
+            if match:
+                date_part = match.group(1)
+                # Everything before the date is the text part
+                text_part = fused_value[:match.start()].strip()
+                if text_part:
+                    self.logger.info(f"Split text+date: '{fused_value}' → text='{text_part}', date='{date_part}'")
+                    return (text_part, date_part)
+
+        # Date + Code pattern (e.g., "12 JAN 1985ICA")
+        elif type1 == 'date' and type2 == 'code':
+            date_pattern = r'(\d{1,2}\s+(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+\d{4})'
+            match = re.search(date_pattern, fused_value, re.IGNORECASE)
+            if match:
+                date_part = match.group(1)
+                code_part = fused_value[match.end():].strip()
+                if code_part:
+                    self.logger.info(f"Split date+code: '{fused_value}' → date='{date_part}', code='{code_part}'")
+                    return (date_part, code_part)
+
+        # Text + Code pattern (e.g., "REPUBLIC OF SINGAPORESGP")
+        elif type1 == 'text' and type2 == 'code':
+            # Try to find where text ends and code begins
+            # Look for transition from lowercase/spaces to all uppercase without spaces
+            match = re.search(r'([A-Z\s]+?)([A-Z]{2,})$', fused_value)
+            if match:
+                text_part = match.group(1).strip()
+                code_part = match.group(2).strip()
+                if text_part and code_part:
+                    self.logger.info(f"Split text+code: '{fused_value}' → text='{text_part}', code='{code_part}'")
+                    return (text_part, code_part)
+
+        self.logger.debug(f"Could not split fused value '{fused_value}' with types {type1}+{type2}")
+        return (None, None)
+
+    def _parse_date_string(self, date_str: str) -> Optional[str]:
+        """
+        Extract passport fields using schema-driven coordinate mapping.
+
+        Algorithm:
+        1. Detect country code if not provided
+        2. Get field labels schema for that country
+        3. Pass 1: Find field labels, record coordinates (x1, y2)
+        4. Pass 2: Find values by matching coordinates (x1, y1)
+
+        Args:
+            text_blocks: List of dicts with 'text', 'x1', 'y1', 'x2', 'y2'
+            country_code: Optional 3-letter country code (auto-detected if not provided)
+
+        Returns:
+            dict with extracted fields using standardized field names
+        """
+        self.logger.info("="*80)
+        self.logger.info("EXTRACTING FIELDS USING SCHEMA-DRIVEN COORDINATE MAPPING")
+        self.logger.info("="*80)
+
+        # Detect country code if not provided
+        if not country_code:
+            country_code = self._detect_country_code(text_blocks)
+
+        if not country_code:
+            self.logger.warning("No country code detected - cannot use schema extraction")
+            return {}
+
+        # Get schema for this country
+        schema = PASSPORT_SCHEMAS.get(country_code.upper())
+        if not schema:
+            self.logger.warning(f"No schema found for country code: {country_code}")
+            return {}
+
+        field_labels = schema['field_labels']
+        field_mapping = schema['field_mapping']
+        field_types = schema.get('field_types', {})
+
+        self.logger.info(f"Using schema for country: {country_code}")
+        self.logger.info(f"Schema defines {len(field_labels)} field labels")
+
+        # Coordinate rounding precision (nearest 0.05 = 5/100)
+        COORD_PRECISION = 20  # round(x * 20) / 20 gives nearest 0.05
+
+        def round_coord(value: float) -> float:
+            """Round coordinate to nearest 0.05"""
+            return round(value * COORD_PRECISION) / COORD_PRECISION
+
+        # PASS 1: Build nested coordinate maps from field labels
+        # Three indexes for different lookup patterns:
+        # 1. by_coord: {x1: {y2: field_label}} - for PASS 2 exact coordinate matching
+        # 2. by_y: {y2: [(x1, field_label)]} - for PASS 3 finding fields at same y-level
+        # 3. labels_info: {field_label: {'x1': x, 'y2': y, 'block_idx': i}} - full metadata
+        coord_map = {
+            'by_coord': {},
+            'by_y': {},
+            'labels_info': {}
+        }
+        matched_indices = set()  # Indices of blocks that matched field labels
+
+        self.logger.info("PASS 1: Mapping field labels to coordinates")
+        for i, block in enumerate(text_blocks):
+            text = block['text'].strip()
+
+            # Check if this text matches any field label in schema
+            if text in field_labels:
+                # Calculate rounded coordinates
+                x1_rounded = round_coord(block['x1'])
+                y2_rounded = round_coord(block['y2'])
+
+                # Index 1: by_coord - nested dict for exact matching
+                if x1_rounded not in coord_map['by_coord']:
+                    coord_map['by_coord'][x1_rounded] = {}
+                coord_map['by_coord'][x1_rounded][y2_rounded] = text
+
+                # Index 2: by_y - list of fields at each y-level
+                if y2_rounded not in coord_map['by_y']:
+                    coord_map['by_y'][y2_rounded] = []
+                coord_map['by_y'][y2_rounded].append((x1_rounded, text))
+
+                # Index 3: labels_info - full metadata for each label
+                coord_map['labels_info'][text] = {
+                    'x1': x1_rounded,
+                    'y2': y2_rounded,
+                    'block_idx': i
+                }
+
+                matched_indices.add(i)
+
+                self.logger.info(
+                    f"  Found field label: '{text}' at x1={x1_rounded:.2f}, y2={y2_rounded:.2f} "
+                    f"(raw: x1={block['x1']:.3f}, y2={block['y2']:.3f})"
+                )
+
+        self.logger.info(f"PASS 1 complete: Mapped {len(coord_map['labels_info'])} field labels")
+
+        # PASS 2: Match values using nested coordinate lookup
+        field_values = {}  # Maps standardized_field_name -> value
+        # Also track which text block corresponds to each field value for PASS 3
+        field_value_blocks = {}  # Maps standardized_field_name -> {'value': text, 'x1': x, 'y1': y, 'block_idx': i}
+
+        self.logger.info("PASS 2: Matching values to field labels")
+        for i, block in enumerate(text_blocks):
+            # Skip blocks that were field labels
+            if i in matched_indices:
+                continue
+
+            text = block['text'].strip()
+            if not text:
+                continue
+
+            # Calculate rounded coordinates: value's x1 should match label's x1, y1 should match label's y2
+            x1_rounded = round_coord(block['x1'])
+            y1_rounded = round_coord(block['y1'])
+
+            # Look up using nested dict: check if there's a field label at this coordinate
+            if x1_rounded in coord_map['by_coord']:
+                if y1_rounded in coord_map['by_coord'][x1_rounded]:
+                    field_label = coord_map['by_coord'][x1_rounded][y1_rounded]
+                    standardized_name = field_mapping.get(field_label, field_label)
+
+                    field_values[standardized_name] = text
+                    field_value_blocks[standardized_name] = {
+                        'value': text,
+                        'x1': x1_rounded,
+                        'y1': y1_rounded,
+                        'block_idx': i
+                    }
+
+                    self.logger.info(
+                        f"  Matched value: '{text}' to field '{field_label}' "
+                        f"(standardized: '{standardized_name}') at x1={x1_rounded:.2f}, y1={y1_rounded:.2f}"
+                    )
+
+        self.logger.info(f"PASS 2 complete: Extracted {len(field_values)} field values")
+
+        # PASS 3: Handle missing fields by detecting fused values
+        self.logger.info("PASS 3: Handling missing fields via fused value detection")
+
+        # Get all standardized field names that should exist
+        all_expected_fields = set(field_mapping.values())
+        missing_fields = all_expected_fields - set(field_values.keys())
+
+        if missing_fields:
+            self.logger.info(f"Found {len(missing_fields)} missing fields: {missing_fields}")
+
+            # For each missing field, try to find it in fused values
+            for missing_field in missing_fields:
+                if missing_field not in field_types:
+                    continue
+
+                missing_field_type = field_types[missing_field]
+
+                # Find field label for this missing field using labels_info
+                missing_field_labels = [label for label, std_name in field_mapping.items() if std_name == missing_field]
+                if not missing_field_labels:
+                    continue
+
+                # Get the expected y-coordinate from labels_info (more efficient than searching text_blocks)
+                expected_y1 = None
+                for label in missing_field_labels:
+                    if label in coord_map['labels_info']:
+                        expected_y1 = coord_map['labels_info'][label]['y2']
+                        break
+
+                if expected_y1 is None:
+                    continue
+
+                # Search extracted field values at the same y-level using field_value_blocks
+                for extracted_field, extracted_value in list(field_values.items()):
+                    if extracted_field not in field_types:
+                        continue
+
+                    if extracted_field not in field_value_blocks:
+                        continue
+
+                    extracted_field_type = field_types[extracted_field]
+                    extracted_value_info = field_value_blocks[extracted_field]
+                    extracted_y1 = extracted_value_info['y1']
+
+                    # Check if they're at the same y-level (exact match since both are already rounded to 0.05)
+                    if extracted_y1 == expected_y1:
+                        self.logger.info(
+                            f"Found potential fusion: '{extracted_field}' = '{extracted_value}' "
+                            f"at y1={extracted_y1:.2f}, missing field '{missing_field}' expected at y1={expected_y1:.2f}"
+                        )
+
+                        # Try to split the fused value
+                        value1, value2 = self._split_by_field_types(
+                            extracted_value,
+                            extracted_field_type,
+                            missing_field_type
+                        )
+
+                        if value1 and value2:
+                            # Update the extracted field with split value
+                            field_values[extracted_field] = value1
+                            # Add the missing field
+                            field_values[missing_field] = value2
+                            self.logger.info(f"Successfully split and added missing field '{missing_field}' = '{value2}'")
+                            break
+        else:
+            self.logger.info("No missing fields - all expected fields were extracted")
+
+        self.logger.info(f"PASS 3 complete: Total extracted fields = {len(field_values)}")
+        self.logger.info("Final extracted fields:")
+        for field_name, value in field_values.items():
+            self.logger.info(f"  {field_name}: {value}")
+
+        return field_values
+
+    def _extract_all_fields_from_text_OLD(self, text: str) -> dict:
+        """
+        OLD METHOD - kept for reference.
+        Extract fields from the key-value map using same logic as before.
+        """
+        # Document type
+        if 'TYPE' in key_value_map:
+            doc_type = key_value_map['TYPE'].strip().upper()
+            if doc_type in ['P', 'PASSPORT']:
+                fields['document_type'] = 'P'
+                self.logger.info(f"  Document type: P")
+
+        # Country code
+        for key in ['COUNTRY_CODE', 'COUNTRYCODE', 'COUNTRY', 'ISSUING_COUNTRY']:
+            if key in key_value_map:
+                country = key_value_map[key].strip().upper()
+                if 'SINGAPORE' in country or country == 'SGP':
+                    fields['country_code'] = 'SGP'
+                elif country in ['USA', 'GBR', 'CAN', 'AUS', 'TWN'] or len(country) == 3:
+                    fields['country_code'] = country[:3]
+                self.logger.info(f"  Country code: {fields.get('country_code', 'N/A')}")
+                break
+
+        # Passport number
+        for key in ['PASSPORT_NO', 'PASSPORT_NUMBER', 'PASSPORTNO', 'NO', 'NUMBER']:
+            if key in key_value_map:
+                passport_num = key_value_map[key].strip().upper()
+                passport_num = re.sub(r'^PA\s*', '', passport_num)
+                passport_num = passport_num.replace(' ', '')
+                if re.match(r'^[A-Z]{1,3}[0-9]{6,9}$', passport_num):
+                    fields['passport_number'] = passport_num
+                    self.logger.info(f"  Passport number: {passport_num}")
+                    break
+
+        # Name
+        if 'NAME' in key_value_map:
+            name_value = key_value_map['NAME'].strip().upper()
+            if ',' in name_value:
+                parts = name_value.split(',', 1)
+                surname = parts[0].strip()
+                given_names = parts[1].strip() if len(parts) > 1 else ''
+            else:
+                words = name_value.split()
+                if len(words) > 1:
+                    surname = words[0]
+                    given_names = ' '.join(words[1:])
+                else:
+                    surname = name_value
+                    given_names = ''
+
+            fields['surname'] = surname
+            fields['given_names'] = given_names
+            self.logger.info(f"  Surname: {surname}")
+            self.logger.info(f"  Given names: {given_names}")
+
+        # Nationality
+        if 'NATIONALITY' in key_value_map:
+            nationality = key_value_map['NATIONALITY'].strip().upper()
+            if 'SINGAPORE' in nationality or nationality == 'SGP':
+                fields['nationality'] = 'SGP'
+            elif nationality in ['USA', 'GBR', 'CAN', 'AUS', 'TWN'] or len(nationality) == 3:
+                fields['nationality'] = nationality[:3]
+            self.logger.info(f"  Nationality: {fields.get('nationality', 'N/A')}")
+
+        # Date of birth
+        for key in ['DATE_OF_BIRTH', 'DATEOFBIRTH', 'BIRTH', 'DOB']:
+            if key in key_value_map:
+                dob_str = key_value_map[key].strip()
+                parsed = self._parse_date_string(dob_str)
+                if parsed:
+                    fields['date_of_birth'] = parsed
+                    self.logger.info(f"  Date of birth: {parsed}")
+                    break
+
+        # Sex
+        if 'SEX' in key_value_map:
+            sex = key_value_map['SEX'].strip().upper()
+            if sex in ['M', 'F', 'MALE', 'FEMALE']:
+                fields['sex'] = sex[0]
+                self.logger.info(f"  Sex: {fields['sex']}")
+
+        # Date of expiry
+        for key in ['DATE_OF_EXPIRY', 'DATEOFEXPIRY', 'EXPIRY', 'EXPIRATION']:
+            if key in key_value_map:
+                expiry_str = key_value_map[key].strip()
+                parsed = self._parse_date_string(expiry_str)
+                if parsed:
+                    fields['date_of_expiry'] = parsed
+                    self.logger.info(f"  Date of expiry: {parsed}")
+                    break
+
+        fields['optional_data'] = ''
+
+        self.logger.info(f"Extracted {len([v for v in fields.values() if v])} fields using geometry")
+        self.logger.info("="*80)
+
+        return fields
+
+    def _extract_all_fields_from_text(self, text: str) -> dict:
+        """
+        Extract all passport fields from human-readable text using line-by-line parsing.
+
+        Passport structure:
+        Line 1: Type | Country Code | Passport No
+        Line 2: P    | SGP          | K4001488A
+        Line 3: Name
+        Line 4: SURNAME, GIVEN NAMES
+        ... (more key-value pairs)
+        Then MRZ section starts (P<SGP...)
+
+        Returns:
+            dict with keys: document_type, country_code, surname, given_names,
+                           passport_number, nationality, date_of_birth, sex,
+                           date_of_expiry, optional_data
+        """
+        self.logger.info("="*80)
+        self.logger.info("EXTRACTING FIELDS FROM HUMAN-READABLE TEXT (LINE-BY-LINE)")
+        self.logger.info("="*80)
+
+        fields = {}
+
+        # Split into lines and preserve original spacing
+        lines = text.split('\n')
+        self.logger.info(f"Total lines: {len(lines)}")
+
+        # Log first 30 lines for debugging
+        for i, line in enumerate(lines[:30]):
+            self.logger.info(f"  Line {i:2d}: '{line}'")
+
+        # Build a key-value map by parsing line pairs
+        # Look for lines that contain field names (keys) and their values on subsequent lines
+        key_value_map = {}
+
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+
+            # Skip empty lines
+            if not line:
+                i += 1
+                continue
+
+            # Check if this line contains multiple keys (like "Type | Country Code | Passport No")
+            # These are typically separated by | or multiple spaces
+            if '|' in line or re.search(r'\s{3,}', line):
+                # This is a header line with multiple keys
+                # Split by | or multiple spaces
+                if '|' in line:
+                    keys = [k.strip() for k in line.split('|')]
+                else:
+                    keys = [k.strip() for k in re.split(r'\s{3,}', line)]
+
+                self.logger.info(f"  Found header line with {len(keys)} keys: {keys}")
+
+                # Next line should have the corresponding values
+                if i + 1 < len(lines):
+                    value_line = lines[i + 1].strip()
+                    if '|' in value_line:
+                        values = [v.strip() for v in value_line.split('|')]
+                    else:
+                        values = [v.strip() for v in re.split(r'\s{3,}', value_line)]
+
+                    self.logger.info(f"  Found value line with {len(values)} values: {values}")
+
+                    # Map keys to values
+                    for j, key in enumerate(keys):
+                        if j < len(values) and values[j]:
+                            key_normalized = key.upper().replace(' ', '_')
+                            key_value_map[key_normalized] = values[j]
+                            self.logger.info(f"    Mapped: {key_normalized} = {values[j]}")
+
+                    i += 2  # Skip both header and value lines
+                    continue
+
+            # Check if this line is a single key (like "Name", "Nationality", etc.)
+            # followed by value on next line
+            line_upper = line.upper()
+            if any(keyword in line_upper for keyword in ['NAME', 'NATIONALITY', 'SEX', 'BIRTH', 'EXPIRY', 'DATE']):
+                # This might be a key line
+                if i + 1 < len(lines):
+                    next_line = lines[i + 1].strip()
+                    # Check if next line looks like a value (not another key)
+                    next_upper = next_line.upper()
+                    if next_line and not any(k in next_upper for k in ['TYPE', 'COUNTRY', 'PASSPORT', 'NAME', 'NATIONALITY', 'SEX', 'BIRTH', 'EXPIRY', 'DATE']):
+                        key_normalized = line_upper.replace(' ', '_').replace(':', '')
+                        key_value_map[key_normalized] = next_line
+                        self.logger.info(f"    Mapped: {key_normalized} = {next_line}")
+                        i += 2  # Skip both key and value lines
+                        continue
+
+            i += 1
+
+        self.logger.info(f"Extracted key-value map with {len(key_value_map)} entries")
+        for k, v in key_value_map.items():
+            self.logger.info(f"  {k}: {v}")
+
+        # Extract document type
+        if 'TYPE' in key_value_map:
+            doc_type = key_value_map['TYPE'].strip().upper()
+            if doc_type in ['P', 'PASSPORT']:
+                fields['document_type'] = 'P'
+                self.logger.info(f"  Document type: P")
+        elif 'PASSPORT' in text.upper():
+            fields['document_type'] = 'P'
+            self.logger.info(f"  Document type: P (inferred)")
+
+        # Extract country code
+        for key in ['COUNTRY_CODE', 'COUNTRYCODE', 'COUNTRY', 'ISSUING_COUNTRY']:
+            if key in key_value_map:
+                country = key_value_map[key].strip().upper()
+                # Convert country names to codes
+                if 'SINGAPORE' in country or country == 'SGP':
+                    fields['country_code'] = 'SGP'
+                elif country in ['USA', 'GBR', 'CAN', 'AUS', 'TWN'] or len(country) == 3:
+                    fields['country_code'] = country[:3]
+                self.logger.info(f"  Country code: {fields.get('country_code', 'N/A')}")
+                break
+
+        # Extract passport number
+        for key in ['PASSPORT_NO', 'PASSPORT_NUMBER', 'PASSPORTNO', 'NUMBER']:
+            if key in key_value_map:
+                passport_num = key_value_map[key].strip().upper()
+                # Remove any prefix like "PA" or spaces
+                passport_num = re.sub(r'^PA\s*', '', passport_num)
+                passport_num = passport_num.replace(' ', '')
+                # Validate format (typically starts with letter(s) followed by digits)
+                if re.match(r'^[A-Z]{1,3}[0-9]{6,9}$', passport_num):
+                    fields['passport_number'] = passport_num
+                    self.logger.info(f"  Passport number: {passport_num}")
+                    break
+
+        # Extract name (surname and given names)
+        if 'NAME' in key_value_map:
+            name_value = key_value_map['NAME'].strip().upper()
+            # Format: SURNAME, GIVEN NAMES or SURNAME GIVEN NAMES
+            if ',' in name_value:
+                parts = name_value.split(',', 1)
+                surname = parts[0].strip()
+                given_names = parts[1].strip() if len(parts) > 1 else ''
+            else:
+                # Try to split by multiple spaces or just take first word as surname
+                words = name_value.split()
+                if len(words) > 1:
+                    surname = words[0]
+                    given_names = ' '.join(words[1:])
+                else:
+                    surname = name_value
+                    given_names = ''
+
+            fields['surname'] = surname
+            fields['given_names'] = given_names
+            self.logger.info(f"  Surname: {surname}")
+            self.logger.info(f"  Given names: {given_names}")
+
+        # Extract nationality
+        if 'NATIONALITY' in key_value_map:
+            nationality = key_value_map['NATIONALITY'].strip().upper()
+            if 'SINGAPORE' in nationality or nationality == 'SGP':
+                fields['nationality'] = 'SGP'
+            elif nationality in ['USA', 'GBR', 'CAN', 'AUS', 'TWN'] or len(nationality) == 3:
+                fields['nationality'] = nationality[:3]
+            self.logger.info(f"  Nationality: {fields.get('nationality', 'N/A')}")
+
+        # Extract date of birth
+        for key in ['DATE_OF_BIRTH', 'DATEOFBIRTH', 'BIRTH', 'DOB']:
+            if key in key_value_map:
+                dob_str = key_value_map[key].strip()
+                parsed = self._parse_date_string(dob_str)
+                if parsed:
+                    fields['date_of_birth'] = parsed
+                    self.logger.info(f"  Date of birth: {parsed}")
+                    break
+
+        # Extract sex
+        if 'SEX' in key_value_map:
+            sex = key_value_map['SEX'].strip().upper()
+            if sex in ['M', 'F', 'MALE', 'FEMALE']:
+                fields['sex'] = sex[0]  # Take first letter
+                self.logger.info(f"  Sex: {fields['sex']}")
+
+        # Extract date of expiry
+        for key in ['DATE_OF_EXPIRY', 'DATEOFEXPIRY', 'EXPIRY', 'EXPIRATION', 'VALID_UNTIL']:
+            if key in key_value_map:
+                expiry_str = key_value_map[key].strip()
+                parsed = self._parse_date_string(expiry_str)
+                if parsed:
+                    fields['date_of_expiry'] = parsed
+                    self.logger.info(f"  Date of expiry: {parsed}")
+                    break
+
+        # If no expiry found, use heuristic with DOB
+        if not fields.get('date_of_expiry') and fields.get('date_of_birth'):
+            self.logger.info("  No expiry found, searching all dates with heuristic...")
+            # Find all dates in the entire text
+            all_dates = re.findall(r'\b(\d{1,2}\s*(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s*\d{4})\b', text, re.IGNORECASE)
+            for date_str in all_dates:
+                parsed = self._parse_date_string(date_str)
+                if parsed and parsed != fields['date_of_birth']:
+                    try:
+                        from datetime import datetime
+                        date_obj = datetime.strptime(parsed, '%Y-%m-%d')
+                        dob_obj = datetime.strptime(fields['date_of_birth'], '%Y-%m-%d')
+                        age_diff = (date_obj - dob_obj).days / 365.25
+                        # Expiry typically 25-60 years after birth
+                        if 25 <= age_diff <= 60:
+                            fields['date_of_expiry'] = parsed
+                            self.logger.info(f"  Date of expiry (heuristic): {parsed}")
+                            break
+                    except:
+                        pass
+
+        # Optional data (could be national ID or other data)
+        fields['optional_data'] = ''
+
+        self.logger.info(f"Extracted {len([v for v in fields.values() if v])} fields from human-readable text")
+        self.logger.info("="*80)
+
+        return fields
+
+    async def _extract_from_text(self, text: str) -> PassportData:
+        """Extract passport fields from OCR text using enhanced pattern matching"""
+        passport_data = PassportData()
+
+        self.logger.info("Extracting passport fields from human-readable text")
+        self.logger.debug(f"OCR text length: {len(text)} characters")
+
+        # Normalize text for better matching
+        text_normalized = re.sub(r'\s+', ' ', text)  # Normalize whitespace
+
+        # Extract passport number - multiple patterns (ordered by specificity)
+        passport_patterns = [
+            r'(?:Passport\s*(?:No\.?|Number)|No\.?)\s*[:\s]*(TWN\s*)?([0-9]{8,10})',  # With label and possible TWN prefix
+            r'\b([0-9]{9})\b(?!.*(?:NOV|DEC|JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|1992|2015|2025))',  # 9-digit number (most common passport length)
+        ]
+
+        for pattern in passport_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                # Get the last group (the actual number)
+                number = match.group(match.lastindex).strip()
+                # Validate it's actually a number
+                if number.isdigit() and 8 <= len(number) <= 10:
+                    passport_data.passport_number = number
+                    passport_data.confidence_scores['passport_number'] = 80.0
+                    masked_number = f"{passport_data.passport_number[:4]}****" if len(passport_data.passport_number) > 4 else "****"
+                    self.logger.debug(f"Extracted passport number: {masked_number}")
+                    break
+
+        # Extract name - handle various formats (ordered by reliability)
+        # Strategy: Find all name-like patterns, then filter out emergency contact and other noise
+        name_patterns = [
+            r'([A-Z]{2,}),\s*([A-Z][A-Z\-]+(?:\s+[A-Z\-]+)*)',  # SURNAME, GIVEN-NAMES format (most reliable)
+            r'Name\s*[:\s]*([A-Z]+),\s*([A-Z\-\s]+)',  # Name: Surname, Given names
+            r'(?:Surname|Name)[:\s]+([A-Z]+)',  # Surname only
+        ]
+
+        # Find all potential name matches
+        for pattern in name_patterns:
+            matches = list(re.finditer(pattern, text, re.IGNORECASE))
+            for match in matches:
+                surname = match.group(1).strip()
+                # Check if we have given names (group 2 exists)
+                given_names = match.group(2).strip().replace('-', ' ') if match.lastindex >= 2 and match.group(2) else ''
+
+                # Clean up names
+                surname_clean = re.sub(r'[^A-Z\s]', '', surname.upper())
+                given_names_clean = re.sub(r'[^A-Z\s\-]', '', given_names.upper()) if given_names else ''
+
+                # Skip if this looks like emergency contact text
+                full_match_text = match.group(0).upper()
+                if any(keyword in full_match_text for keyword in ['EMERGENCY', 'NOTIFY', 'INDIVIDUAL', 'BELOW', 'CONTACT', 'AUTHORITY', 'MINISTRY', 'FOREIGN', 'AFFAIRS', 'REPUBLIC']):
+                    continue
+
+                # Skip if surname is too long (likely not a real surname)
+                if len(surname_clean) > 20:
+                    continue
+
+                # Clean given names - remove common OCR artifacts and passport field labels
+                if given_names_clean:
+                    # Remove common passport field labels that might appear in OCR
+                    given_names_clean = re.sub(r'\b(NATIONALITY|PERSONLLD|PERSON|LLD|AF|DATE|BIRTH|SEX|EXPIRY|PASSPORT|NUMBER|P)\b', '', given_names_clean)
+                    # Remove standalone single letters (likely OCR artifacts) except valid initials
+                    words = given_names_clean.split()
+                    # Keep only words that are 2+ chars OR are valid Chinese/Western name patterns
+                    filtered_words = [w for w in words if len(w) >= 2]
+                    given_names_clean = ' '.join(filtered_words)
+
+                # Only accept if surname is 2-15 characters and looks like a real name
+                if 2 <= len(surname_clean) <= 15 and surname_clean.isalpha():
+                    # Validate given names don't contain too many words (max 4)
+                    given_name_words = given_names_clean.split()
+                    if len(given_name_words) > 4:
+                        # Keep only first 4 words
+                        given_names_clean = ' '.join(given_name_words[:4])
+
+                    passport_data.surname = surname_clean
+                    passport_data.given_names = given_names_clean
+                    passport_data.full_name = f"{given_names_clean} {surname_clean}".strip()
+                    passport_data.confidence_scores['surname'] = 80.0
+                    if given_names_clean:
+                        passport_data.confidence_scores['given_names'] = 80.0
+                        passport_data.confidence_scores['full_name'] = 80.0
+                    self.logger.info(f"Extracted name: {passport_data.surname}, {passport_data.given_names}")
+                    break
+
+            # If we found a valid name, stop trying other patterns
+            if passport_data.surname:
+                break
+
+        # Extract nationality - multiple approaches
+        nationality_patterns = [
+            r'Nationality\s*[:\s]*([A-Z]{3})\b',  # 3-letter code near "Nationality"
+            r'\b(TWN|USA|GBR|CAN|AUS|FRA|DEU|JPN|KOR|CHN|IND|BRA|MEX)\b',  # Common country codes
+            r'REPUBLIC\s*OF\s*([A-Z]+)',  # "REPUBLIC OF X" format
+        ]
+
+        for pattern in nationality_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                nationality = match.group(1).upper()
+                # Convert full names to codes
+                if nationality == 'CHINA' and 'TAIWAN' in text.upper():
+                    nationality = 'TWN'
+                elif nationality in ['UNITED STATES', 'AMERICA']:
+                    nationality = 'USA'
+
+                if len(nationality) <= 3:  # Only accept 3-letter codes
+                    passport_data.nationality = nationality
+                    passport_data.confidence_scores['nationality'] = 75.0
+                    self.logger.info(f"Extracted nationality: {passport_data.nationality}")
+                    break
+
+        # Extract sex/gender
+        sex_patterns = [
+            r'Sex\s*[:\s]*(M|F)\b',  # M or F near "Sex"
+            r'Gender\s*[:\s]*(M|F|Male|Female)',  # Near "Gender"
+            r'\b(Male|Female)\b(?=\s*\d{2}\s*[A-Z]{3}\s*\d{4})',  # Before date of birth
+            r'Sex\s*[:\s]*([MF5])',  # Include OCR error: 5 instead of M
+        ]
+
+        for pattern in sex_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                sex_raw = match.group(1).upper()
+                # Correct common OCR errors
+                if sex_raw == '5':
+                    sex = 'M'  # 5 is often misread M
+                else:
+                    sex = sex_raw[0]  # Get first letter (M or F)
+                passport_data.sex = sex
+                passport_data.confidence_scores['sex'] = 80.0
+                self.logger.info(f"Extracted sex: {passport_data.sex}")
+                break
+
+        # Extract date of birth - multiple formats
+        dob_patterns = [
+            r'(?:Date\s*of\s*)?Birth\s*[:\s]*(\d{1,2}\s*[A-Z]{3}\s*\d{4})',  # 12 NOV 1992
+            r'(?:Date\s*of\s*)?Birth\s*[:\s]*(\d{1,2}[/-]\d{1,2}[/-]\d{4})',  # 12/11/1992
+            r'(?:Date\s*of\s*)?Birth\s*[:\s]*(\d{4}[/-]\d{1,2}[/-]\d{1,2})',  # 1992-11-12
+            r'\b(\d{1,2}\s*(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s*\d{4})\b',  # Standalone date
+        ]
+
+        for pattern in dob_patterns:
+            match = re.search(pattern, text_normalized, re.IGNORECASE)
+            if match:
+                dob_str = match.group(1).strip()
+                # Parse and normalize date format
+                parsed_date = self._parse_date_string(dob_str)
+                if parsed_date:
+                    passport_data.date_of_birth = parsed_date
+                    passport_data.confidence_scores['date_of_birth'] = 80.0
+                    self.logger.debug(f"Extracted date of birth: {passport_data.date_of_birth}")
+                    break
+
+        # Extract date of expiry
+        expiry_patterns = [
+            r'(?:Date\s*of\s*)?(?:Expiry|Expiration)\s*[:\s-]*(\d{1,2}\s*[A-Z]{3}\s*\d{4})',
+            r'(?:Valid\s*until|Expires)\s*[:\s]*(\d{1,2}\s*[A-Z]{3}\s*\d{4})',
+            r'(?:Date\s*of\s*)?(?:Expiry|Expiration)\s*[:\s]*(\d{1,2}[/-]\d{1,2}[/-]\d{4})',
+        ]
+
+        for pattern in expiry_patterns:
+            match = re.search(pattern, text_normalized, re.IGNORECASE)
+            if match:
+                expiry_str = match.group(1).strip()
+                parsed_date = self._parse_date_string(expiry_str)
+                if parsed_date:
+                    # Validate it's a future date (not issue date)
+                    try:
+                        from datetime import datetime
+                        expiry_date = datetime.strptime(parsed_date, '%Y-%m-%d')
+                        # If DOB is available, expiry must be after DOB + 10 years
+                        if passport_data.date_of_birth:
+                            dob_date = datetime.strptime(passport_data.date_of_birth, '%Y-%m-%d')
+                            # Expiry should be at least DOB + 10 years
+                            if expiry_date < dob_date:
+                                self.logger.warning(f"Rejected expiry date {parsed_date} (before DOB)")
+                                continue
+
+                        passport_data.date_of_expiry = parsed_date
+                        passport_data.confidence_scores['date_of_expiry'] = 80.0
+                        self.logger.info(f"Extracted date of expiry: {passport_data.date_of_expiry}")
+                        break
+                    except:
+                        # If validation fails, still accept the date
+                        passport_data.date_of_expiry = parsed_date
+                        passport_data.confidence_scores['date_of_expiry'] = 80.0
+                        self.logger.info(f"Extracted date of expiry: {passport_data.date_of_expiry}")
+                        break
+
+        # If no expiry found, look for dates after the DOB that could be expiry
+        if not passport_data.date_of_expiry and passport_data.date_of_birth:
+            # Find all dates in the text
+            all_dates = re.findall(r'\b(\d{1,2}\s*(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s*\d{4})\b', text_normalized, re.IGNORECASE)
+            for date_str in all_dates:
+                parsed_date = self._parse_date_string(date_str)
+                if parsed_date and parsed_date != passport_data.date_of_birth:
+                    # Check if it's a plausible expiry date (after DOB, in the future or recent past)
+                    try:
+                        from datetime import datetime
+                        date_obj = datetime.strptime(parsed_date, '%Y-%m-%d')
+                        dob_obj = datetime.strptime(passport_data.date_of_birth, '%Y-%m-%d')
+                        # Expiry should be after DOB + 16 years and within 30 years from DOB
+                        age_at_expiry = (date_obj - dob_obj).days / 365.25
+                        if 16 <= age_at_expiry <= 50:  # Reasonable range for passport expiry
+                            passport_data.date_of_expiry = parsed_date
+                            passport_data.confidence_scores['date_of_expiry'] = 70.0
+                            self.logger.info(f"Extracted date of expiry (heuristic): {passport_data.date_of_expiry}")
+                            break
+                    except:
+                        pass
+
+        # Extract issuing country - from nationality or document header
+        if not passport_data.issuing_country:
+            if passport_data.nationality:
+                passport_data.issuing_country = passport_data.nationality
+                self.logger.info(f"Set issuing country from nationality: {passport_data.issuing_country}")
+
+        self.logger.info(f"Text extraction complete - extracted {len([v for v in passport_data.confidence_scores.values() if v > 0])} fields")
+
+        return passport_data
+
+    def _parse_date_string(self, date_str: str) -> Optional[str]:
+        """Parse various date formats and return YYYY-MM-DD"""
+        from datetime import datetime
+        import re
+
+        date_str = date_str.strip().upper()
+
+        # Month name mapping
+        months = {
+            'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04',
+            'MAY': '05', 'JUN': '06', 'JUL': '07', 'AUG': '08',
+            'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12'
+        }
+
+        try:
+            # Try DD MMM YYYY format (e.g., "12 NOV 1992")
+            match = re.match(r'(\d{1,2})\s*([A-Z]{3})\s*(\d{4})', date_str)
+            if match:
+                day, month_name, year = match.groups()
+                month = months.get(month_name)
+                if month:
+                    return f"{year}-{month}-{day.zfill(2)}"
+
+            # Try DD/MM/YYYY or DD-MM-YYYY
+            match = re.match(r'(\d{1,2})[/-](\d{1,2})[/-](\d{4})', date_str)
+            if match:
+                day, month, year = match.groups()
+                return f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+
+            # Try YYYY-MM-DD or YYYY/MM/DD
+            match = re.match(r'(\d{4})[/-](\d{1,2})[/-](\d{1,2})', date_str)
+            if match:
+                year, month, day = match.groups()
+                return f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+
+        except Exception as e:
+            self.logger.warning(f"Failed to parse date '{date_str}': {str(e)}")
+
+        return None

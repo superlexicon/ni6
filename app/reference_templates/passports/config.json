@@ -1,0 +1,117 @@
+{
+  "version": "2.2",
+  "description": "Passport reference templates configuration (v2.2 - Country-Specific Field Labels). Supports native language labels for field extraction.",
+  "default": {
+    "threshold": 0.5,
+    "weights": {
+      "guilloche": 0.50,
+      "color_profile": 0.50
+    }
+  },
+  "countries": {
+    "SG": {
+      "name": "Singapore",
+      "threshold": 0.5,
+      "regions": {
+        "guilloche": {"x1": 0.15, "y1": 0.15, "x2": 0.85, "y2": 0.85}
+      },
+      "weights": {
+        "guilloche": 0.50,
+        "color_profile": 0.50
+      },
+      "field_labels": {
+        "passport_number": ["passport no", "passport number", "no", "passport no."],
+        "full_name": ["name", "full name", "given names", "surname", "given name", "last name", "first name"],
+        "date_of_birth": ["date of birth", "dob", "birth date", "born"],
+        "date_of_expiry": ["date of expiry", "expiry date", "valid until", "expiration", "exp date"],
+        "sex": ["sex", "gender"],
+        "nationality": ["nationality", "country code"],
+        "place_of_birth": ["place of birth", "birth place", "pob"]
+      }
+    },
+    "MM": {
+      "name": "Myanmar",
+      "threshold": 0.5,
+      "field_labels": {
+        "passport_number": ["passport no", "passport number", "နိုင်ငံကူးလက်မှတ်အမှတ်", "no"],
+        "full_name": ["name", "full name", "အမည်", "given names", "surname"],
+        "date_of_birth": ["date of birth", "dob", "မွေးသက္ကရာဇ်", "birth date"],
+        "date_of_expiry": ["date of expiry", "expiry date", "ကုန်ဆုံးသည့်ရက်စွဲ", "valid until"],
+        "sex": ["sex", "gender", "လိင်"],
+        "nationality": ["nationality", "နိုင်ငံသား"],
+        "place_of_birth": ["place of birth", "မွေးဖွားရာနေရာ"]
+      }
+    },
+    "IN": {
+      "name": "India",
+      "threshold": 0.5,
+      "weights": {
+        "guilloche": 0.0,
+        "color_profile": 1.0
+      },
+      "field_labels": {
+        "passport_number": ["passport no", "passport number", "पासपोर्ट नंबर", "no"],
+        "full_name": ["name", "full name", "पूरा नाम", "given names", "surname"],
+        "date_of_birth": ["date of birth", "dob", "जन्म तिथि", "birth date"],
+        "date_of_expiry": ["date of expiry", "expiry date", "समाप्ति तिथि", "valid until"],
+        "sex": ["sex", "gender", "लिंग"],
+        "nationality": ["nationality"],
+        "place_of_birth": ["place of birth", "जन्म स्थान"]
+      },
+      "name_extraction": {
+        "separate_surname_given_names": true,
+        "surname_labels": ["surname", "sur name"],
+        "given_names_labels": ["given name", "given names", "given name(s)", "given names(s)"],
+        "require_both_parts": true
+      }
+    },
+    "TH": {
+      "name": "Thailand",
+      "threshold": 0.5,
+      "field_labels": {
+        "passport_number": ["passport no", "passport number", "หมายเลขหนังสือเดินทาง", "no"],
+        "full_name": ["name", "full name", "ชื่อ", "given names", "surname", "นามสกุล"],
+        "date_of_birth": ["date of birth", "dob", "วันเกิด", "birth date"],
+        "date_of_expiry": ["date of expiry", "expiry date", "วันหมดอายุ", "valid until"],
+        "sex": ["sex", "gender", "เพศ"],
+        "nationality": ["nationality", "สัญชาติ"],
+        "place_of_birth": ["place of birth", "สถานที่เกิด"]
+      }
+    },
+    "ID": {
+      "name": "Indonesia",
+      "threshold": 0.5,
+      "field_labels": {
+        "passport_number": ["passport no", "passport number", "no. paspor", "no paspor", "nomor paspor"],
+        "full_name": ["name", "full name", "nama", "nama lengkap", "given names", "surname"],
+        "date_of_birth": ["date of birth", "dob", "tanggal lahir", "tgl lahir", "birth date"],
+        "date_of_expiry": ["date of expiry", "expiry date", "tanggal kedaluwarsa", "berlaku hingga", "valid until"],
+        "sex": ["sex", "gender", "jenis kelamin"],
+        "nationality": ["nationality", "kewarganegaraan"],
+        "place_of_birth": ["place of birth", "tempat lahir"]
+      }
+    },
+    "MY": {
+      "name": "Malaysia",
+      "threshold": 0.5,
+      "field_labels": {
+        "passport_number": ["passport no", "passport number", "no. pasport", "no"],
+        "full_name": ["name", "full name", "nama", "given names", "surname"],
+        "date_of_birth": ["date of birth", "dob", "tarikh lahir", "birth date"],
+        "date_of_expiry": ["date of expiry", "expiry date", "tarikh tamat tempoh", "valid until"],
+        "sex": ["sex", "gender", "jantina"],
+        "nationality": ["nationality", "kewarganegaraan"],
+        "place_of_birth": ["place of birth", "tempat lahir"]
+      }
+    }
+  },
+  "notes": [
+    "v2.2: Added country-specific field_labels for passport extraction (supports native language labels)",
+    "v2.1: Ghost photo and security thread checks removed (presence-only, not reliable)",
+    "v2.0: Regions are detected dynamically via DocTR (text/MRZ) and DeepFace (face)",
+    "Place template images in the same directory as this config file",
+    "Template images should be named with ISO 2-letter country code (e.g., TH.jpg, SG.png)",
+    "Template images should be sanitized (no real personal data)",
+    "Countries inherit default threshold unless overridden"
+  ]
+}
