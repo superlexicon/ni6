@@ -442,8 +442,9 @@ class SequentialPassportService:
             # Store OSINT result
             self.user_identity_repo.update_osint_result(user_identity_id, osint_result)
 
-            # Check if World-Check is available
+            # Check if World-Check is available and should run for this key
             worldcheck_available = self._is_worldcheck_available()
+            should_run_worldcheck = self._should_run_worldcheck_for_key(client_public_key)
             osint_failed = False
             worldcheck_failed = False
             worldcheck_result = None
@@ -453,8 +454,8 @@ class SequentialPassportService:
                 osint_failed = True
                 self.logger.warning(f"OSINT risk score exceeds threshold: {osint_result['overall_risk_score']}")
 
-            # Run World-Check if available
-            if worldcheck_available:
+            # Run World-Check if available and key is registered with Fraxn API
+            if worldcheck_available and should_run_worldcheck:
                 self.logger.info(f"World-Check API key configured, performing World-Check screening for: {masked_screening_name}")
                 # Convert country code to ISO 3166-1 alpha-3 format required by World Check
                 from app.utils.country_code_converter import convert_to_alpha3
@@ -475,6 +476,12 @@ class SequentialPassportService:
                 elif worldcheck_result.get('is_match'):
                     worldcheck_failed = True
                     self.logger.warning(f"World-Check match found for: {screening_name}")
+            else:
+                # Log why World-Check was skipped
+                if not worldcheck_available:
+                    self.logger.info(f"World-Check not performed: API key not configured")
+                elif not should_run_worldcheck:
+                    self.logger.info(f"World-Check not performed: Public key not registered with Fraxn API")
 
             # Apply decision logic: FAIL if either failed
             if osint_failed or worldcheck_failed:
@@ -1048,6 +1055,38 @@ class SequentialPassportService:
                        worldcheck_settings.api_secret and
                        worldcheck_settings.api_secret.strip())
         except Exception:
+            return False
+
+    def _should_run_worldcheck_for_key(self, client_public_key: str) -> bool:
+        """
+        Check if World-Check screening should run for a given public key.
+
+        World-Check screening is restricted to only run for passport submissions
+        that come from a public key registered with api_url == 'https://api.fraxn.ai:443'.
+
+        Args:
+            client_public_key: The client's public key
+
+        Returns:
+            True if World-Check should run for this key, False otherwise
+        """
+        try:
+            user_key = self.user_key_repo.get_key_by_public_key(client_public_key)
+            if not user_key:
+                self.logger.info(f"World-Check skipped: User key not found for public key: {client_public_key[:16]}...")
+                return False
+
+            api_url = user_key.get('api_url')
+            if api_url == 'https://api.fraxn.ai:443':
+                self.logger.info(f"World-Check enabled: Public key registered with Fraxn API URL")
+                return True
+            else:
+                self.logger.info(
+                    f"World-Check skipped: Public key registered with non-Fraxn API URL: {api_url or 'None'}"
+                )
+                return False
+        except Exception as e:
+            self.logger.error(f"Error checking if World-Check should run for key: {e}")
             return False
 
     # =========================================================================

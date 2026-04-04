@@ -77,7 +77,7 @@ class UserKeyRepository(BaseRepository):
         """
         from app.core.db.database import get_db_connection_context
         query = """
-            SELECT id, mobile_number, country_code, user_public_key, encrypted_secret_share, user_identity_id, created_at, updated_at
+            SELECT id, mobile_number, country_code, user_public_key, encrypted_secret_share, user_identity_id, device_id, api_url, created_at, updated_at
             FROM user_keys
             WHERE user_public_key = %s
         """
