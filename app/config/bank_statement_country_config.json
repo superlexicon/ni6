@@ -15,8 +15,8 @@
       },
       "subdivisions": {
         "type": "emirates",
-        "list": ["Dubai", "Abu Dhabi", "Sharjah", "Ajman", "Umm Al Quwain", "Ras Al Khaimah", "Fujairah"],
-        "additional_cities": ["Al Ain"]
+        "list": [],
+        "additional_cities": ["Dubai", "Abu Dhabi", "Sharjah", "Ajman", "Umm Al Quwain", "Ras Al Khaimah", "Fujairah", "Al Ain"]
       },
       "address_patterns": {
         "building": [
@@ -239,14 +239,13 @@
       "country_name": "Myanmar",
       "name_aliases": ["myanmar", "burma"],
       "postal_code": {
-        "required": true,
+        "required": false,
         "pattern": "\\b\\d{5}\\b",
         "length": 5
       },
       "subdivisions": {
-        "type": "states",
-        "list": [],
-        "use_dynamic": true
+        "type": "none",
+        "list": []
       },
       "unit_patterns": ["^[\\d]+", "^(NO|NUM|NUMBER)\\s*\\d+"],
       "inference_patterns": ["myanmar", "rangoon", "mandalay"]

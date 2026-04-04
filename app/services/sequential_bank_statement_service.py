@@ -2,12 +2,31 @@
 Sequential Bank Statement Service - Handles bank statement processing in sequential mode.
 
 REFACTORED: Now uses DocumentProcessorBase for unified validation pipeline.
-Uses Spatial extractor (PyMuPDF geometry-based) for bank statement field extraction.
+Uses HYBRID GLiNER2 + Spatial extraction for bank statement field extraction.
+
+HYBRID STRATEGY:
+1. Always run GLiNER2 extraction (primary, semantic understanding)
+2. Always run Spatial extraction IN FULL (backup, geometry-based)
+3. Merge results at field level based on confidence:
+   - Use GLiNER result if confidence >= threshold (50%)
+   - Otherwise use spatial result (if available)
+4. Account numbers always come from spatial (requires label proximity)
+5. Statement date uses post-processing to select the largest/latest date
+
+GLiNER2 provides:
+- Semantic understanding of bank statement fields
+- Works on raw text (OCR or PDF-extracted)
+- Validated against SWIFT bank database
+
+Spatial extractor provides:
+- Geometry-based extraction (60-85% confidence)
+- Backup for missing or low-confidence GLiNER fields
 
 State is tracked via verification_state column in user_identity_index.
 """
 
 import asyncio
+import re
 from typing import Dict, Any, Optional, Tuple, List
 from datetime import date
 from app.services.sequential_document_processor_base import DocumentProcessorBase
@@ -15,6 +34,7 @@ from app.core.key_injection.simple_bank_analyzer import simple_bank_analyzer
 from app.core.key_injection.key_injection_manager import key_injection_manager
 from app.core.key_injection import DocumentType
 from app.helper.extractors.spatial_bank_statement_extractor import SpatialBankStatementExtractor
+from app.helper.extractors import get_gliner_bank_statement_extractor
 from app.dto import DocumentErrorCode
 
 
@@ -50,23 +70,112 @@ class SequentialBankStatementService(DocumentProcessorBase):
         self, text_blocks: list, raw_text: str, image_bytes: bytes, is_pdf: bool
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """
-        Extract bank statement fields using Spatial extractor (PyMuPDF geometry-based).
+        Extract bank statement fields using hybrid GLiNER2 + Spatial approach.
 
-        Spatial extractor provides robust extraction using:
-        - Three-pass algorithm for label and value detection
-        - Geometric proximity for spatial relationships
-        - Direct PDF parsing without OCR dependency
+        HYBRID STRATEGY:
+        1. Always run GLiNER2 extraction (primary, semantic understanding)
+        2. Always run Spatial extraction IN FULL (backup, geometry-based)
+        3. Merge results at field level:
+           - Use GLiNER result if confidence >= threshold (50%)
+           - Otherwise use spatial result (if available)
+        4. Account numbers always come from spatial (requires label proximity)
+        5. Statement date uses post-processing to select the largest/latest date
 
-        Note: Only works with PDF files. For images, this method will raise an error.
-        The raw_text and text_blocks parameters are kept for compatibility but not used.
+        IMPORTANT:
+        - Spatial extraction runs completely (all fields) because its logic depends
+          on analyzing the entire document structure
+        - The merge happens as a post-processing step, not by selectively running
+          spatial for missing fields
+
+        Args:
+            text_blocks: OCR text blocks with geometry (not used by GLINER2, kept for compatibility)
+            raw_text: Raw OCR text or PDF-extracted text (used by GLINER2)
+            image_bytes: Raw file bytes (used for spatial extraction)
+            is_pdf: True if input is a PDF file
 
         Returns:
             (extracted_data, confidence_data)
         """
-        # Use Spatial bank statement extractor - processes PDF bytes directly
-        # Avoids OCR overhead and uses PyMuPDF for accurate geometric extraction
+        try:
+            # Step 1: Always run GLiNER extraction
+            self.logger.info("Step 1: Running GLiNER2 extraction...")
+            gliner_extractor = get_gliner_bank_statement_extractor()
+            gliner_data = await gliner_extractor.extract(
+                ocr_text=raw_text,
+                text_blocks=text_blocks if text_blocks else None
+            )
+
+            self.logger.info(
+                f"GLiNER2 extracted: confidence={gliner_data.overall_confidence:.1f}%, "
+                f"source={gliner_data.extraction_source}"
+            )
+
+            # Step 2: Always run spatial extraction IN FULL (extracts all fields)
+            # Spatial must run completely - its logic depends on full document analysis
+            self.logger.info("Step 2: Running Spatial extraction (full mode)...")
+            spatial_data = await self._extract_spatial_result(image_bytes, is_pdf)
+
+            self.logger.info(
+                f"Spatial extracted: confidence={spatial_data.overall_confidence:.1f}%, "
+                f"source={spatial_data.extraction_source}"
+            )
+
+            # Step 3: Merge results (GLiNER优先，spatial填充缺失字段)
+            self.logger.info("Step 3: Merging GLiNER and Spatial results...")
+            merged_data = self._merge_extraction_results(
+                gliner_data=gliner_data,
+                spatial_data=spatial_data,
+                confidence_threshold=50.0
+            )
+
+            # Log merge summary
+            for field in ['account_holder_name', 'bank_name', 'address', 'account_number']:
+                field_conf = merged_data.confidence_scores.get(field, {})
+                if isinstance(field_conf, dict):
+                    sources = field_conf.get('sources', [])
+                    conf = field_conf.get('overall_confidence', 0)
+                else:
+                    sources = ['unknown']
+                    conf = float(field_conf) if field_conf else 0
+                self.logger.info(f"  {field}: {conf:.1f}% confidence, sources={sources}")
+
+            # Step 4: Apply statement date fix
+            largest_date = self._get_largest_date_from_text(raw_text)
+            if largest_date:
+                old_date = merged_data.statement_date
+                merged_data.statement_date = largest_date
+                if old_date != largest_date:
+                    self.logger.info(f"Statement date updated: {old_date} -> {largest_date} (largest date)")
+
+            return self._build_gliner_response(merged_data, is_pdf)
+
+        except Exception as e:
+            self.logger.error(f"Extraction error: {str(e)}, falling back to spatial only")
+            return await self._extract_with_spatial(image_bytes, is_pdf, text_blocks)
+
+    async def _extract_spatial_result(self, file_bytes: bytes, is_pdf: bool):
+        """Extract using Spatial extractor and return BankStatementData"""
         extractor = SpatialBankStatementExtractor()
-        result = await extractor.extract_from_bytes(image_bytes)
+        result = await extractor.extract_from_bytes(file_bytes, is_pdf=is_pdf)
+
+        # Set extraction source if not already set
+        if not result.extraction_source:
+            result.extraction_source = 'spatial_ocr' if not is_pdf else 'spatial_geometry'
+        if not result.account_number_extraction_method:
+            result.account_number_extraction_method = 'spatial_geometry'
+
+        return result
+
+    async def _extract_with_spatial(
+        self, image_bytes: bytes, is_pdf: bool, text_blocks: list
+    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """Extract using Spatial extractor (error fallback only).
+
+        NOTE: This is only used when the primary hybrid extraction flow fails.
+        Normal processing uses the hybrid approach in extract_fields_from_ocr.
+        """
+        extractor = SpatialBankStatementExtractor()
+        result = await extractor.extract_from_bytes(image_bytes, is_pdf=is_pdf)
 
         # Build extracted_data from BankStatementData
         extracted_data = {
@@ -99,6 +208,9 @@ class SequentialBankStatementService(DocumentProcessorBase):
                 )
 
         # Build confidence_data from BankStatementData
+        # Determine extraction source: 'spatial_geometry' for PDF, 'spatial_ocr' for images
+        extraction_source = 'spatial_ocr' if not is_pdf else 'spatial_geometry'
+
         confidence_data = {}
         for field, confidence in result.confidence_scores.items():
             # Map normalized field names to required field names
@@ -107,14 +219,14 @@ class SequentialBankStatementService(DocumentProcessorBase):
                 conf_value = confidence / 100 if confidence > 1 else confidence
                 confidence_data[normalized_field] = {
                     'overall_confidence': conf_value,
-                    'sources': ['spatial_geometry']
+                    'sources': [extraction_source]
                 }
 
         # Add overall confidence if available
         if result.overall_confidence:
             confidence_data['overall'] = {
                 'overall_confidence': result.overall_confidence / 100,
-                'sources': ['spatial_geometry']
+                'sources': [extraction_source]
             }
 
         # Fallback: Populate missing field confidences using overall_confidence
@@ -128,29 +240,305 @@ class SequentialBankStatementService(DocumentProcessorBase):
                     # Field was extracted but has no confidence score - use overall as fallback
                     confidence_data[field] = {
                         'overall_confidence': result.overall_confidence / 100,
-                        'sources': ['spatial_fallback']
+                        'sources': [extraction_source]
                     }
 
         self.logger.info(
-            f"Spatial bank statement extraction: "
+            f"Spatial bank statement extraction ({'OCR' if not is_pdf else 'direct'}): "
             f"bank={result.bank_name}, "
             f"account_holder={result.account_holder_name}, "
             f"overall_confidence={result.overall_confidence:.2f}%"
         )
 
-        # Extract extraction_method from text_blocks metadata marker
-        # The first element contains the extraction metadata added by document_text_extractor
-        extraction_method = 'unknown'
-        if text_blocks and len(text_blocks) > 0:
+        # Set extraction_method based on actual source
+        # For images: 'ocr', for text-based PDFs: 'direct'
+        extraction_method = 'ocr' if not is_pdf else 'direct'
+
+        # Check text_blocks metadata for PDFs (may have come from image-based PDF)
+        if is_pdf and text_blocks and len(text_blocks) > 0:
             first_block = text_blocks[0]
             if first_block.get('text') == '__EXTRACTION_METADATA__':
-                extraction_method = first_block.get('extraction_method', 'unknown')
-                self.logger.info(f"Extraction method detected: {extraction_method}")
+                detected_method = first_block.get('extraction_method', 'unknown')
+                if detected_method == 'ocr':
+                    # This was an image-based PDF processed via OCR
+                    extraction_method = 'ocr'
+                    self.logger.info("PDF was image-based, processed via OCR")
+                else:
+                    self.logger.info(f"PDF extraction method: {detected_method}")
 
         # Add extraction_method to extracted_data for validation
         extracted_data['extraction_method'] = extraction_method
 
         return extracted_data, confidence_data
+
+    def _has_required_fields(self, bank_data) -> bool:
+        """Check if bank data has all required fields"""
+        required = ['account_holder_name', 'account_number', 'bank_name', 'address']
+        for field in required:
+            value = getattr(bank_data, field, None)
+            if not value or not str(value).strip():
+                return False
+        return True
+
+    def _has_required_fields_excluding_account(self, bank_data) -> bool:
+        """Check if bank data has all required fields EXCEPT account number.
+
+        NOTE: This method is kept for informational purposes and potential
+        fallback scenarios. The primary extraction flow now uses the hybrid
+        merge strategy in _merge_extraction_results.
+
+        Account number is always handled via spatial extraction due to
+        the need for label proximity detection.
+        """
+        required = ['account_holder_name', 'bank_name', 'address']  # No 'account_number'
+        for field in required:
+            value = getattr(bank_data, field, None)
+            if not value or not str(value).strip():
+                return False
+        return True
+
+    def _get_largest_date_from_text(self, raw_text: str) -> Optional[str]:
+        """
+        Extract all dates from text and return the largest (latest) one.
+
+        This ensures statement_date is always the closing/end date of the statement period,
+        not a random date from transaction history or other fields.
+
+        Args:
+            raw_text: Raw OCR or PDF text
+
+        Returns:
+            Latest date as ISO string (YYYY-MM-DD) or None
+        """
+        import re
+        from datetime import datetime
+
+        # Date patterns to match
+        date_patterns = [
+            # DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY
+            r'\b(\d{2})[\/\-\.](\d{2})[\/\-\.](\d{4})\b',
+            # YYYY-MM-DD, YYYY/MM/DD, YYYY.MM.DDD
+            r'\b(\d{4})[\/\-\.](\d{2})[\/\-\.](\d{2})\b',
+            # DD MMM YYYY, DD-MMM-YYYY (e.g., 31 Dec 2025)
+            r'\b(\d{2})\s+([A-Za-z]{3})\s+(\d{4})\b',
+            # MMM DD, YYYY (e.g., Dec 31, 2025)
+            r'\b([A-Za-z]{3})\s+(\d{2}),?\s+(\d{4})\b',
+        ]
+
+        dates_found = []
+
+        for pattern in date_patterns:
+            matches = re.finditer(pattern, raw_text)
+            for match in matches:
+                try:
+                    groups = match.groups()
+                    parsed_date = None
+
+                    # Handle different formats
+                    if len(groups[0]) == 4:  # Year first
+                        year, month, day = groups
+                        parsed_date = datetime.strptime(f"{year}-{month}-{day}", "%Y-%m-%d")
+                    elif len(groups[2]) == 4:  # Year last
+                        if groups[1].isalpha():  # Month is text
+                            day, month_str, year = groups
+                            parsed_date = datetime.strptime(f"{day} {month_str} {year}", "%d %b %Y")
+                        else:  # Day/Month/Year
+                            day, month, year = groups
+                            parsed_date = datetime.strptime(f"{day}-{month}-{year}", "%d-%m-%Y")
+
+                    if parsed_date:
+                        dates_found.append(parsed_date)
+                except (ValueError, IndexError):
+                    continue
+
+        if dates_found:
+            # Return the largest (latest) date
+            latest_date = max(dates_found)
+            return latest_date.strftime('%Y-%m-%d')
+
+        return None
+
+    def _has_account_number_label(self, text_blocks: List[Dict]) -> bool:
+        """Check if document contains an account number label.
+
+        This early detection helps reject documents like credit card statements
+        that don't have proper account number labels.
+
+        Args:
+            text_blocks: List of text blocks from OCR extraction
+
+        Returns:
+            True if an account number label is found, False otherwise
+        """
+        from app.helper.validators.bank_statement_validator import get_bank_statement_validator
+
+        validator = get_bank_statement_validator()
+        account_number_labels = validator.get_account_number_labels()
+
+        for block in text_blocks:
+            text = block.get('text', '').strip().upper()
+            for label in account_number_labels:
+                if re.search(r'\b' + re.escape(label) + r'\b', text):
+                    return True
+        return False
+
+    def _build_gliner_response(self, bank_data, is_pdf: bool) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """Build response from GLiNER extractor result (or hybrid merged result)"""
+        # Determine extraction method based on source
+        if bank_data.extraction_source == 'hybrid_gliner_spatial':
+            extraction_method = 'hybrid_gliner_spatial'
+        elif is_pdf:
+            extraction_method = 'gliner'
+        else:
+            extraction_method = 'gliner_ocr'
+
+        extracted_data = {
+            "account_holder_name": bank_data.account_holder_name,
+            "account_number": bank_data.account_number,
+            "bank_name": bank_data.bank_name,
+            "bank_code": bank_data.bank_code,
+            "bank_branch": bank_data.bank_branch,
+            "bank_country": bank_data.bank_country,
+            "address": bank_data.address,
+            "address_city": bank_data.address_city,
+            "address_state": bank_data.address_state,
+            "address_postal": bank_data.address_postal,
+            "address_country": bank_data.address_country,
+            "currency": bank_data.currency,
+            "statement_date": self._normalize_date_to_iso(bank_data.statement_date) or "",
+            "account_number_extraction_method": bank_data.account_number_extraction_method or "gliner_ner",
+            "extraction_method": extraction_method,
+        }
+
+        confidence_data = {}
+        for field, confidence_info in bank_data.confidence_scores.items():
+            # Handle both legacy (float) and new (dict) formats
+            if isinstance(confidence_info, dict):
+                # Already in new format - just copy
+                confidence_data[field] = confidence_info
+            elif isinstance(confidence_info, (int, float)):
+                # Legacy format - convert to new format
+                confidence_data[field] = {
+                    'overall_confidence': float(confidence_info) / 100 if confidence_info > 1 else float(confidence_info),
+                    'sources': ['gliner']
+                }
+            else:
+                # Unknown format - copy as-is
+                confidence_data[field] = confidence_info
+
+        if bank_data.overall_confidence:
+            # Determine sources based on extraction_source
+            if bank_data.extraction_source == 'hybrid_gliner_spatial':
+                sources = ['gliner', 'spatial']
+            else:
+                sources = ['gliner']
+
+            confidence_data['overall'] = {
+                'overall_confidence': bank_data.overall_confidence / 100,
+                'sources': sources
+            }
+
+        return extracted_data, confidence_data
+
+    def _update_confidence_source(
+        self,
+        merged_data: 'BankStatementData',
+        field: str,
+        source_data: 'BankStatementData',
+        source_name: str
+    ) -> None:
+        """Update confidence_scores to track which extraction method provided the field."""
+        if field not in merged_data.confidence_scores:
+            merged_data.confidence_scores[field] = {}
+
+        # Handle both legacy (float) and new (dict) formats
+        current = merged_data.confidence_scores[field]
+        if isinstance(current, dict):
+            current['overall_confidence'] = current.get('overall_confidence', source_data.overall_confidence or 85.0)
+            if 'sources' not in current:
+                current['sources'] = []
+            if source_name not in current['sources']:
+                current['sources'].append(source_name)
+        else:
+            # Convert legacy float to dict format
+            merged_data.confidence_scores[field] = {
+                'overall_confidence': float(current) if current else (source_data.overall_confidence or 85.0),
+                'sources': [source_name]
+            }
+
+    def _merge_extraction_results(
+        self,
+        gliner_data: 'BankStatementData',
+        spatial_data: 'BankStatementData',
+        confidence_threshold: float = 50.0
+    ) -> 'BankStatementData':
+        """
+        Merge GLiNER and spatial extraction results.
+
+        For each field:
+        - Use GLiNER result if confidence >= threshold
+        - Otherwise use spatial result (if available)
+
+        Tracks sources in confidence_scores for debugging.
+        """
+        merged = gliner_data.model_copy()
+
+        # Fields to check (all extracted fields)
+        fields_to_merge = [
+            'account_holder_name', 'bank_name', 'address', 'currency',
+            'account_number', 'statement_date', 'bank_branch', 'bank_code',
+            'bank_country', 'address_city', 'address_state', 'address_country',
+            'account_holder_country'
+        ]
+
+        for field in fields_to_merge:
+            gliner_value = getattr(gliner_data, field, None)
+            gliner_conf = gliner_data.confidence_scores.get(field, 0)
+
+            # Handle both legacy (float) and new (dict) confidence formats
+            if isinstance(gliner_conf, dict):
+                gliner_conf = gliner_conf.get('overall_confidence', 0)
+
+            # Special case: account_number - always use spatial if available
+            if field == 'account_number' and spatial_data.account_number:
+                setattr(merged, field, spatial_data.account_number)
+                merged.account_number_extraction_method = spatial_data.account_number_extraction_method
+                self._update_confidence_source(merged, field, spatial_data, 'spatial')
+                continue
+
+            # For other fields: use GLiNER if confident, else spatial
+            if not gliner_value or gliner_conf < confidence_threshold:
+                spatial_value = getattr(spatial_data, field, None)
+                if spatial_value:
+                    setattr(merged, field, spatial_value)
+                    # Also copy related metadata for address fields
+                    if field == 'address' and hasattr(spatial_data, 'address_postal') and spatial_data.address_postal:
+                        merged.address_postal = spatial_data.address_postal
+                    self._update_confidence_source(merged, field, spatial_data, 'spatial')
+
+        # Recalculate overall confidence based on merged results
+        merged_confidence = 0.0
+        field_count = 0
+        for field in ['account_holder_name', 'bank_name', 'address', 'currency']:
+            field_conf = merged.confidence_scores.get(field, {})
+            if isinstance(field_conf, dict):
+                conf = field_conf.get('overall_confidence', 0)
+            else:
+                conf = float(field_conf) if field_conf else 0
+            if conf > 0:
+                merged_confidence += conf
+                field_count += 1
+
+        if field_count > 0:
+            merged.overall_confidence = merged_confidence / field_count
+        else:
+            # Fallback to spatial overall confidence if no fields have confidence
+            merged.overall_confidence = spatial_data.overall_confidence or 85.0
+
+        # Set extraction source to reflect hybrid approach
+        merged.extraction_source = 'hybrid_gliner_spatial'
+
+        return merged
 
     def _normalize_field_name(self, field: str) -> Optional[str]:
         """Normalize extractor field names to service field names.
@@ -194,7 +582,7 @@ class SequentialBankStatementService(DocumentProcessorBase):
         Perform bank statement specific validations.
 
         Validations:
-        - Extraction method validation (must be 'direct', not 'ocr')
+        - Extraction method tracking (supports both 'direct' for text-based PDFs and 'ocr' for images)
         - Statement age check (max 90 days old)
         - Address components validation
         - Bank SWIFT lookup validation
@@ -204,6 +592,9 @@ class SequentialBankStatementService(DocumentProcessorBase):
 
         NOTE: Collects ALL validation errors before returning (no fail-fast).
         This provides complete feedback on all issues with the document.
+
+        NOTE: Both text-based PDFs and images (including image-based PDFs) are now supported.
+        The extraction method will be 'direct' for text-based PDFs and 'ocr' for images/image-based PDFs.
         """
         from app.helper.validators.bank_statement_validator import get_bank_statement_validator
 
@@ -211,29 +602,15 @@ class SequentialBankStatementService(DocumentProcessorBase):
         validation_results = {}
         validation_errors = []  # Collect all errors
 
-        # 1. Extraction method validation - bank statements must use direct PDF extraction
-        # DISABLED: Extraction method validation was incorrectly rejecting valid text-based PDFs
-        # TODO: Fix pdf_analyzer content type detection before re-enabling
+        # 1. Extraction method tracking - for informational purposes, no validation rejection
+        # Both 'direct' (text-based PDF) and 'ocr' (images/image-based PDFs) are now supported
         extraction_method = extracted_data.get('extraction_method', 'unknown')
-        extraction_method_valid = True  # Assume valid - validation disabled
+        extraction_method_valid = True  # Always valid now
 
         validation_results['extraction_method'] = {
             'method': extraction_method,
             'valid': extraction_method_valid
         }
-
-        # if not extraction_method_valid:
-        #     if extraction_method == 'ocr':
-        #         validation_errors.append(
-        #             "Bank statement must be a text-based PDF with extractable text. "
-        #             "Image-based or scanned PDFs processed via OCR are not accepted."
-        #         )
-        #     else:
-        #         validation_errors.append(
-        #             f"Bank statement extraction method verification failed. "
-        #             f"Detected method: '{extraction_method}'. "
-        #             "Please ensure you are uploading a valid digital bank statement PDF."
-        #         )
 
         # 2. Statement age check
         statement_date = self._parse_statement_date(extracted_data.get('statement_date'))
@@ -330,10 +707,10 @@ class SequentialBankStatementService(DocumentProcessorBase):
         account_number = extracted_data.get('account_number', '')
         extraction_method = extracted_data.get('account_number_extraction_method', '')
 
-        # Account number MUST be extracted via spatial methods (with nearby label)
-        # Accept both spatial_label (legacy) and spatial_geometry (new spatial extractor)
+        # Account number MUST be extracted via validated methods
+        # Accept: spatial_label (legacy), spatial_geometry (spatial extractor), gliner_ner (GLINER2)
         # This prevents random numbers from being accepted as account numbers
-        valid_methods = {'spatial_label', 'spatial_geometry'}
+        valid_methods = {'spatial_label', 'spatial_geometry', 'gliner_ner'}
         extraction_valid = extraction_method in valid_methods
         validation_results['account_extraction'] = {
             'method': extraction_method,
@@ -409,6 +786,67 @@ class SequentialBankStatementService(DocumentProcessorBase):
 
         # All validations passed
         return True, None, {'validation_results': validation_results}
+
+    def _get_failed_field_names(self, validation_results: dict) -> set:
+        """Get the set of field names that failed validation.
+
+        Maps validation result keys to actual extracted_data field names.
+        Only filters fields with data quality issues, not business rule failures.
+
+        Business rule failures (e.g., statement too old) do NOT remove the field.
+        Data quality issues (e.g., invalid format, not found) DO remove the field.
+
+        Args:
+            validation_results: Validation results from document_specific validations
+
+        Returns:
+            Set of field names that should be removed from extracted_data
+        """
+        failed_fields = set()
+
+        doc_specific = validation_results.get('document_specific', {})
+
+        # Account number validation failed (data quality issue - format/length)
+        if 'account_number' in doc_specific and not doc_specific['account_number'].get('valid', True):
+            failed_fields.add('account_number')
+
+        # Bank lookup validation failed (data quality issue - bank not recognized)
+        if 'bank_lookup' in doc_specific and not doc_specific['bank_lookup'].get('valid', True):
+            failed_fields.add('bank_name')
+            failed_fields.add('bank_code')
+            failed_fields.add('bank_branch')
+
+        # Address components validation failed (data quality issue - missing components)
+        if 'address_components' in doc_specific and not doc_specific['address_components'].get('valid', True):
+            failed_fields.add('address')
+            failed_fields.add('address_city')
+            failed_fields.add('address_state')
+            failed_fields.add('address_country')
+            failed_fields.add('address_postal_code')
+
+        # NOTE: statement_age is a business rule (max 90 days), NOT a data quality issue.
+        # We keep the statement_date even if it's too old - the rejection is for age, not extraction.
+
+        return failed_fields
+
+    def _filter_failed_validation_fields(self, extracted_data: dict, validation_results: dict) -> dict:
+        """Remove fields that failed validation from extracted_data.
+
+        Args:
+            extracted_data: The raw extracted data
+            validation_results: Validation results containing which fields failed
+
+        Returns:
+            Filtered extracted_data with failed fields removed
+        """
+        failed_fields = self._get_failed_field_names(validation_results)
+
+        filtered_data = {}
+        for key, value in extracted_data.items():
+            if key not in failed_fields:
+                filtered_data[key] = value
+
+        return filtered_data
 
     def should_increment_state(self) -> bool:
         """Bank statement processing increments state from 2 to 3."""
@@ -862,9 +1300,16 @@ class SequentialBankStatementService(DocumentProcessorBase):
         consistent behavior.
 
         This method:
-        1. Extracts all fields using Spatial extractor (PyMuPDF geometry-based)
+        1. Extracts all fields using GLINER2 (primary) with Spatial fallback
+           - GLINER2: Semantic understanding, 50%+ confidence threshold
+           - Spatial: PyMuPDF geometry-based, 60-85% accuracy for structured documents
         2. Validates required fields
         3. Performs bank statement specific validations
+
+        Supports:
+        - Text-based PDFs (direct extraction)
+        - Image-based PDFs (OCR extraction)
+        - Regular images (JPG, PNG, etc. via OCR)
 
         Args:
             file_bytes: Raw file bytes (PDF or image)
@@ -891,9 +1336,17 @@ class SequentialBankStatementService(DocumentProcessorBase):
         Unified validation entry point for bank statements.
 
         This method does everything from file bytes to full validation:
-        1. Field extraction using Spatial extractor (PyMuPDF geometry-based)
-        2. Required fields validation
-        3. Document-specific validations
+        1. Text extraction (direct PDF or OCR)
+        2. Field extraction using GLINER2 (primary) with Spatial fallback
+           - GLINER2: Semantic understanding, 50%+ confidence threshold
+           - Spatial: PyMuPDF geometry-based, 60-85% accuracy for structured documents
+        3. Required fields validation
+        4. Document-specific validations
+
+        Supports:
+        - Text-based PDFs (direct extraction)
+        - Image-based PDFs (OCR extraction)
+        - Regular images (JPG, PNG, etc. via OCR)
 
         Both the test script and API should use this method to ensure
         consistent validation behavior.
@@ -931,12 +1384,13 @@ class SequentialBankStatementService(DocumentProcessorBase):
 
         try:
             # Step 1: Text extraction with geometry
-            # Uses intelligent routing: direct PDF text extraction for text-based PDFs
+            # Uses intelligent routing: direct PDF text extraction for text-based PDFs, OCR for images
             # This is the EXACT SAME CODE PATH used by both the API and test script
             self.logger.info("=" * 80)
             self.logger.info("UNIFIED BANK STATEMENT EXTRACTION PATH")
             self.logger.info("Both API and test script use this exact code path")
-            self.logger.info("Using intelligent PDF routing: direct extraction for text-based PDFs")
+            self.logger.info(f"Processing {'PDF' if is_pdf else 'image'}: "
+                           f"{'direct extraction' if is_pdf else 'OCR extraction'}")
             self.logger.info("=" * 80)
 
             ocr = DocumentTextExtractor()
@@ -953,32 +1407,27 @@ class SequentialBankStatementService(DocumentProcessorBase):
 
             raw_text = "\n".join([block.get('text', '') for block in text_blocks])
 
-            # Step 2: Field extraction using Spatial extractor
-            # Uses PyMuPDF for direct PDF parsing with geometric extraction
-            extractor = SpatialBankStatementExtractor()
-            extraction_result = await extractor.extract_from_bytes(file_bytes)
+            # Early check: Verify document contains an account number label
+            # This rejects credit card statements and other unsupported documents early
+            if not self._has_account_number_label(text_blocks):
+                self.logger.warning("No account number label found in document - rejecting as unsupported document type")
+                result['error_message'] = "Document rejected: No account number label found. This may be a credit card statement or unsupported document type."
+                result['elapsed_seconds'] = time.time() - start_time
+                return result
 
-            # Build extracted_data
-            # Normalize statement_date to ISO format
-            statement_date_normalized = self._normalize_date_to_iso(extraction_result.statement_date)
+            # Step 2: Field extraction using GLINER2 with Spatial fallback
+            # GLINER2 provides semantic understanding of bank statement fields
+            # Falls back to Spatial extractor (PyMuPDF geometry-based) if confidence < 50%
+            extracted_data, confidence_data = await self.extract_fields_from_ocr(
+                text_blocks=text_blocks,
+                raw_text=raw_text,
+                image_bytes=file_bytes,
+                is_pdf=is_pdf
+            )
 
-            extracted_data = {
-                'account_holder_name': extraction_result.account_holder_name,
-                'account_number': extraction_result.account_number,
-                'bank_name': extraction_result.bank_name,
-                'bank_code': extraction_result.bank_code,
-                'bank_branch': extraction_result.bank_branch,
-                'bank_country': extraction_result.bank_country,
-                'address': extraction_result.address,
-                # Address components (decomposed from full address)
-                'address_city': extraction_result.address_city,
-                'address_state': extraction_result.address_state,
-                'address_postal': extraction_result.address_postal,
-                'address_country': extraction_result.address_country,
-                'currency': extraction_result.currency,
-                'statement_date': statement_date_normalized,  # ISO format (YYYY-MM-DD)
-                'account_number_extraction_method': extraction_result.account_number_extraction_method,
-            }
+            # Log extraction method used
+            extraction_method = extracted_data.get('extraction_method', 'unknown')
+            self.logger.info(f"Extraction method: {extraction_method}")
 
             # Fallback: Infer currency from bank_country if not extracted
             if not extracted_data.get("currency") and extracted_data.get("bank_country"):
@@ -990,27 +1439,6 @@ class SequentialBankStatementService(DocumentProcessorBase):
                     self.logger.info(
                         f"Inferred currency '{inferred_currency}' from bank_country '{extracted_data['bank_country']}'"
                     )
-
-            # Build confidence_data
-            confidence_data = {}
-            for field, confidence in extraction_result.confidence_scores.items():
-                conf_value = confidence / 100 if confidence > 1 else confidence
-                confidence_data[field] = {'overall_confidence': conf_value}
-
-            if extraction_result.overall_confidence:
-                confidence_data['overall'] = {
-                    'overall_confidence': extraction_result.overall_confidence / 100
-                }
-
-            # Populate missing field confidences using overall_confidence (matches API behavior)
-            if extraction_result.overall_confidence:
-                required_fields = self.get_required_fields()
-                for field in required_fields:
-                    if field not in confidence_data and extracted_data.get(field):
-                        confidence_data[field] = {
-                            'overall_confidence': extraction_result.overall_confidence / 100,
-                            'sources': ['spatial_fallback']
-                        }
 
             result['extracted_data'] = extracted_data
             result['confidence_data'] = confidence_data
@@ -1040,6 +1468,11 @@ class SequentialBankStatementService(DocumentProcessorBase):
 
             if not doc_valid:
                 result['error_message'] = doc_error
+                # Filter out fields that failed validation from extracted_data
+                result['extracted_data'] = self._filter_failed_validation_fields(
+                    result['extracted_data'],
+                    result['validation_results']
+                )
                 result['elapsed_seconds'] = time.time() - start_time
                 return result
 

@@ -25,6 +25,9 @@ class PassportData(BaseModel):
     # Individual field confidence scores from OCR
     field_confidences: Optional[Dict[str, float]] = None
 
+    # Extraction source tracking
+    extraction_source: Optional[str] = None  # 'gliner_ner', 'logic_based', etc.
+
     def calculate_overall_confidence(self) -> float:
         """
         Calculate aggregate confidence score based on OCR quality when available.

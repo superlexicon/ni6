@@ -1,12 +1,17 @@
 """
 Spatial Bank Statement Extractor - Three-Pass Algorithm
 
-Uses geometry and proximity for robust extraction across various PDF layouts.
+Uses geometry and proximity for robust extraction across various PDF layouts and images.
 
 Three-Pass Algorithm:
 - Pass 1: Label and Initial Value Detection - Find labels and populate unified map
 - Pass 2: Value Extraction via Spatial Proximity - Extract values by geometric relationships
 - Pass 3: Full Address Extraction - Build complete address from address anchor blocks (states)
+
+Supports:
+- Text-based PDFs (direct PyMuPDF extraction)
+- Image-based PDFs (OCR via DocTR)
+- Regular images (JPG, PNG, etc. via OCR)
 """
 
 import fitz  # PyMuPDF
@@ -18,6 +23,7 @@ import string
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
+from io import BytesIO
 
 from app.core.key_injection.bank_lookup import get_bank_lookup, BankInfo
 from app.helper.validators.bank_statement_validator import (
@@ -25,6 +31,7 @@ from app.helper.validators.bank_statement_validator import (
 )
 from app.config.bank_statement_country_loader import get_country_config_loader
 from app.schemas.bank_statement_schema import BankStatementData
+from app.helper.doctr.document_text_extractor import DocumentTextExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -193,8 +200,10 @@ def build_unified_map(config: Dict) -> Dict[str, str]:
         unified_map[label.upper()] = "closing_balance_label"
 
     # 8. Bank identifiers (names OR URLs, never both - analyzed per bank)
+    # Filter out very short patterns (< 4 chars) to avoid false matches like "YES", "ING", "US"
     for identifier, abbrev in config.get("bank_identifiers_map", {}).items():
-        unified_map[identifier.upper()] = "bank_name"
+        if len(identifier) >= 4:
+            unified_map[identifier.upper()] = "bank_name"
 
     # 9. Country names from config (most reliable anchors for address detection)
     # Countries are distinctive and rarely appear in street names or other content
@@ -240,12 +249,14 @@ def extract_spans_from_pdf(pdf_path: str, max_pages: int = 1) -> List[Dict]:
     """
     Extract text grouped into spans using PyMuPDF.
 
+    All coordinates are normalized to 0-1 range to match OCR output format.
+
     Args:
         pdf_path: Path to PDF file
         max_pages: Maximum pages to process
 
     Returns:
-        List of span dictionaries with text and coordinates
+        List of span dictionaries with text and normalized coordinates (0-1)
     """
     try:
         doc = fitz.open(pdf_path)
@@ -256,6 +267,11 @@ def extract_spans_from_pdf(pdf_path: str, max_pages: int = 1) -> List[Dict]:
         for page_num in range(pages_to_process):
             page = doc[page_num]
             blocks = page.get_text("dict")
+
+            # Get page dimensions for normalization
+            page_rect = page.rect
+            page_width = page_rect.width
+            page_height = page_rect.height
 
             for block in blocks.get("blocks", []):
                 if "lines" in block:
@@ -269,12 +285,13 @@ def extract_spans_from_pdf(pdf_path: str, max_pages: int = 1) -> List[Dict]:
                             bbox = span.get("bbox", [0, 0, 0, 0])
                             x0, y0, x1, y1 = bbox
 
+                            # Normalize coordinates to 0-1 range
                             spans.append({
                                 "text": span_text,
-                                "x1": x0,
-                                "y1": y0,
-                                "x2": x1,
-                                "y2": y1,
+                                "x1": x0 / page_width,
+                                "y1": y0 / page_height,
+                                "x2": x1 / page_width,
+                                "y2": y1 / page_height,
                                 "page_num": page_num + 1,
                                 "font_size": span.get("size", 12),
                                 "flags": span.get("flags", 0)
@@ -288,9 +305,12 @@ def extract_spans_from_pdf(pdf_path: str, max_pages: int = 1) -> List[Dict]:
         return []
 
 
-def extract_spans_from_bytes(pdf_bytes: bytes, max_pages: int = 1) -> List[Dict]:
+async def extract_spans_from_bytes(pdf_bytes: bytes, max_pages: int = 1) -> List[Dict]:
     """
-    Extract text grouped into spans using PyMuPDF directly from bytes.
+    Extract text grouped into spans from PDF bytes (async wrapper).
+
+    For text-based PDFs, uses PyMuPDF directly.
+    For image-based PDFs, falls back to OCR.
 
     Args:
         pdf_bytes: Raw PDF file bytes
@@ -298,6 +318,66 @@ def extract_spans_from_bytes(pdf_bytes: bytes, max_pages: int = 1) -> List[Dict]
 
     Returns:
         List of span dictionaries with text and coordinates
+    """
+    try:
+        # Try direct PDF extraction first
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+
+        # Check if PDF has extractable text
+        has_text = False
+        for page_num in range(min(max_pages, doc.page_count)):
+            page = doc[page_num]
+            text_blocks = page.get_text("blocks")
+            if text_blocks:
+                has_text = True
+                break
+
+        doc.close()
+
+        if has_text:
+            # Use direct extraction for text-based PDFs
+            return _extract_spans_from_pdf_bytes_direct(pdf_bytes, max_pages)
+        else:
+            # Use OCR for image-based PDFs
+            logger.info("PDF appears to be image-based, using OCR extraction")
+            return await _extract_spans_from_ocr(pdf_bytes, is_pdf=True, max_pages=max_pages)
+
+    except Exception as e:
+        logger.error(f"Failed to extract spans from PDF bytes: {e}")
+        # Fallback to OCR
+        try:
+            return await _extract_spans_from_ocr(pdf_bytes, is_pdf=True, max_pages=max_pages)
+        except Exception as ocr_error:
+            logger.error(f"OCR fallback also failed: {ocr_error}")
+            return []
+
+
+async def extract_spans_from_image(image_bytes: bytes, max_pages: int = 1) -> List[Dict]:
+    """
+    Extract text grouped into spans from image bytes using OCR.
+
+    Args:
+        image_bytes: Raw image file bytes (JPG, PNG, etc.)
+        max_pages: Maximum pages to process (for multi-page formats)
+
+    Returns:
+        List of span dictionaries with text and coordinates
+    """
+    return await _extract_spans_from_ocr(image_bytes, is_pdf=False, max_pages=max_pages)
+
+
+def _extract_spans_from_pdf_bytes_direct(pdf_bytes: bytes, max_pages: int = 1) -> List[Dict]:
+    """
+    Extract text grouped into spans using PyMuPDF directly from bytes (sync).
+
+    All coordinates are normalized to 0-1 range to match OCR output format.
+
+    Args:
+        pdf_bytes: Raw PDF file bytes
+        max_pages: Maximum pages to process
+
+    Returns:
+        List of span dictionaries with text and normalized coordinates (0-1)
     """
     try:
         # Open PDF directly from bytes
@@ -309,6 +389,11 @@ def extract_spans_from_bytes(pdf_bytes: bytes, max_pages: int = 1) -> List[Dict]
         for page_num in range(pages_to_process):
             page = doc[page_num]
             blocks = page.get_text("dict")
+
+            # Get page dimensions for normalization
+            page_rect = page.rect
+            page_width = page_rect.width
+            page_height = page_rect.height
 
             for block in blocks.get("blocks", []):
                 if "lines" in block:
@@ -322,23 +407,85 @@ def extract_spans_from_bytes(pdf_bytes: bytes, max_pages: int = 1) -> List[Dict]
                             bbox = span.get("bbox", [0, 0, 0, 0])
                             x0, y0, x1, y1 = bbox
 
+                            # Normalize coordinates to 0-1 range
                             spans.append({
                                 "text": span_text,
-                                "x1": x0,
-                                "y1": y0,
-                                "x2": x1,
-                                "y2": y1,
+                                "x1": x0 / page_width,
+                                "y1": y0 / page_height,
+                                "x2": x1 / page_width,
+                                "y2": y1 / page_height,
                                 "page_num": page_num + 1,
                                 "font_size": span.get("size", 12),
                                 "flags": span.get("flags", 0)
                             })
 
         doc.close()
+
+        logger.info(f"Extracted {len(spans)} spans from PDF, line spacing: 0.01")
+        # Log ALL spans for debugging bank name detection
+        for i, span in enumerate(spans):
+            logger.debug(f"  Span {i}: '{span.get('text', '')}'")
         return spans
 
     except Exception as e:
-        logger.error(f"Failed to extract spans from PDF bytes: {e}")
+        logger.error(f"Failed to extract spans from PDF bytes (direct): {e}")
         return []
+
+
+async def _extract_spans_from_ocr(file_bytes: bytes, is_pdf: bool, max_pages: int = 1) -> List[Dict]:
+    """
+    Extract text spans using OCR (DocTR).
+
+    This function provides a common interface for OCR-based extraction,
+    used for both image-based PDFs and regular images.
+
+    Args:
+        file_bytes: Raw file bytes (PDF or image)
+        is_pdf: Whether the input is a PDF
+        max_pages: Maximum pages to process
+
+    Returns:
+        List of span dictionaries with text and coordinates (normalized 0-1)
+    """
+    try:
+        # Use DocumentTextExtractor for OCR
+        text_extractor = DocumentTextExtractor()
+        ocr_result = await text_extractor.extract_text_with_geometry_enhanced(
+            file_bytes, is_pdf=is_pdf, max_pages=max_pages
+        )
+
+        # Convert OCR result to span format
+        spans = []
+        for line in ocr_result:
+            span_text = line.get("text", "").strip()
+            if not span_text:
+                continue
+
+            # OCR provides normalized coordinates (0-1), keep them consistent
+            spans.append({
+                "text": span_text,
+                "x1": line.get("x1", 0.0),
+                "y1": line.get("y1", 0.0),
+                "x2": line.get("x2", 0.0),
+                "y2": line.get("y2", 0.0),
+                "page_num": 1,  # OCR treats first page as page 1
+                "font_size": 12,  # OCR doesn't provide font size, use default
+                "flags": 0,
+                "confidence": line.get("confidence", 0.9)  # Store confidence for potential filtering
+            })
+
+        logger.info(f"OCR extracted {len(spans)} spans from {'PDF' if is_pdf else 'image'}")
+        # Log first 15 spans at INFO level for bank name debugging
+        for i, span in enumerate(spans[:15]):
+            logger.info(f"  Span {i}: '{span.get('text', '')}'")
+        # Log remaining spans at DEBUG level
+        for i, span in enumerate(spans[15:], start=15):
+            logger.debug(f"  Span {i}: '{span.get('text', '')}'")
+        return spans
+
+    except Exception as e:
+        logger.error(f"Failed to extract spans via OCR: {e}")
+        raise
 
 
 def _is_span_printable(text: str, min_printable_ratio: float = 0.5) -> bool:
@@ -422,10 +569,21 @@ class SpatialBankStatementExtractor:
         'CURRENT ACCOUNT', 'SAVINGS ACCOUNT', 'ACCOUNT TYPE',
         'ACCOUNT NUMBER', 'A/C NO', 'AC NO',
         'CENTRAL BANK', 'BANK NAME', 'BRANCH NAME',
-        'BRANCH CODE', 'BRANCH EMAIL', 'BRANCH PHONE',
+        'BRANCH CODE', 'BRANCH EMAIL', 'BRANCH PHONE', 'BRANCH NUMBER',
+        'BRANCH ADDRESS', 'REGISTERED OFFICE', 'CORPORATE OFFICE',
+        'HEAD OFFICE', 'REGD OFFICE', 'REGISTERED OFFICE',
         'IFSC CODE', 'MICR CODE', 'RTGS', 'NEFT',
         'ADHAR', 'AADHAAR', 'PAN', 'KYC',
-        'MOBILE', 'PHONE', 'EMAIL', 'CONTACT'
+        'MOBILE', 'PHONE', 'EMAIL', 'CONTACT',
+        'CUSTOMER DETAILS', 'CUSTOMER NAME', 'CUSTOMER ID',
+        'NAME', 'PRIMARY ID TYPE', 'ID TYPE',
+        'PAGE', 'STATEMENT DETAILS', 'STATEMENT SUMMARY',
+        'TRANSACTION DATE', 'VALUE DATE', 'CHEQUE NO',
+        'DESCRIPTION', 'CR/DR', 'BALANCE',
+        'DATE ISSUED', 'ISSUE DATE', 'EXPIRY DATE',
+        'CARD TYPE', 'CARD NUMBER',
+        'WEBSITE', 'WWW', 'HTTP', 'HTTPS',
+        'YOUR BASE BRANCH', 'BASE BRANCH'
     }
 
     def __init__(self):
@@ -490,26 +648,43 @@ class SpatialBankStatementExtractor:
     async def extract_from_bytes(
         self,
         file_bytes: bytes,
-        max_pages: int = 1
+        max_pages: int = 1,
+        is_pdf: Optional[bool] = None
     ) -> BankStatementData:
         """
-        Extract bank statement data from PDF bytes (async for compatibility with service layer).
+        Extract bank statement data from file bytes (async for compatibility with service layer).
+
+        Supports:
+        - Text-based PDFs (direct PyMuPDF extraction)
+        - Image-based PDFs (OCR via DocTR)
+        - Regular images (JPG, PNG, etc. via OCR)
 
         Returns BankStatementData (same as GLiNER extractor) for compatibility.
         Note: Wraps synchronous PyMuPDF operations (event loop blocked during extraction,
         matching GLiNER's pattern which also wraps sync PyTorch inference).
 
         Args:
-            file_bytes: Raw PDF file bytes
+            file_bytes: Raw file bytes (PDF or image)
             max_pages: Maximum pages to process
+            is_pdf: Whether the file is a PDF (auto-detected if None)
 
         Returns:
             BankStatementData with extracted fields (Pydantic BaseModel)
         """
-        # Extract spans from bytes (synchronous - blocks event loop like GLiNER)
-        raw_spans = extract_spans_from_bytes(file_bytes, max_pages)
+        # Auto-detect file type if not specified
+        if is_pdf is None:
+            is_pdf = self._detect_file_type(file_bytes)
+
+        # Extract spans using the appropriate method
+        if is_pdf:
+            self.logger.info("Processing PDF: attempting direct extraction first")
+            raw_spans = await extract_spans_from_bytes(file_bytes, max_pages)
+        else:
+            self.logger.info("Processing image: using OCR extraction")
+            raw_spans = await extract_spans_from_image(file_bytes, max_pages)
+
         if not raw_spans:
-            raise ValueError("No text extracted from PDF")
+            raise ValueError("No text extracted from file")
 
         # Convert to SpanInfo
         spans = convert_spans_to_span_info(raw_spans)
@@ -522,12 +697,27 @@ class SpatialBankStatementExtractor:
         standard_line_spacing = calculate_standard_line_spacing(spans)
         multi_line_threshold = standard_line_spacing * 1.5
 
-        self.logger.info(f"Extracted {len(spans)} spans from bytes, line spacing: {standard_line_spacing:.2f}")
+        self.logger.info(f"Extracted {len(spans)} spans from {'PDF' if is_pdf else 'image'}, "
+                        f"line spacing: {standard_line_spacing:.2f}")
 
         # PASS 1: Label and Initial Value Detection
         first_pass_results, first_pass_addresses, list_for_second_pass, currency_spans = self._pass_1_label_detection(
             spans, standard_line_spacing
         )
+
+        # OCR Fallback: If bank_name is missing, try OCR-based detection
+        # This handles cases where bank name/logo is embedded as an image
+        if "bank_name" not in first_pass_results and is_pdf:
+            self.logger.info("Bank name not found in direct text extraction, trying OCR fallback")
+            bank_abbrev = await self._detect_bank_name_from_ocr(file_bytes, is_pdf)
+            if bank_abbrev:
+                # Add bank_name to first_pass_results
+                first_pass_results["bank_name"] = SpanInfo(
+                    x1=0, y1=0, x2=0, y2=0,
+                    text="",
+                    value=bank_abbrev
+                )
+                self.logger.info(f"OCR fallback successfully detected bank: {bank_abbrev}")
 
         # Validate Pass 1 results
         self._validate_pass_1(first_pass_results, first_pass_addresses)
@@ -550,6 +740,42 @@ class SpatialBankStatementExtractor:
 
         # Convert to BankStatementData (GLiNER-compatible format)
         return self._convert_to_bank_statement_data(internal_result)
+
+    def _detect_file_type(self, file_bytes: bytes) -> bool:
+        """
+        Detect if the file bytes represent a PDF or an image.
+
+        Args:
+            file_bytes: Raw file bytes
+
+        Returns:
+            True if PDF, False if image
+        """
+        # Check for PDF magic bytes
+        if file_bytes.startswith(b'%PDF'):
+            return True
+
+        # Check for common image signatures
+        # JPEG: FF D8 FF
+        if file_bytes.startswith(b'\xFF\xD8\xFF'):
+            return False
+        # PNG: 89 50 4E 47
+        if file_bytes.startswith(b'\x89PNG'):
+            return False
+        # GIF: 47 49 46 38
+        if file_bytes.startswith(b'GIF8'):
+            return False
+        # WebP: 52 49 46 46 ... 57 45 42 50
+        if file_bytes.startswith(b'RIFF') and len(file_bytes) > 11:
+            if file_bytes[8:12] == b'WEBP':
+                return False
+        # BMP: 42 4D
+        if file_bytes.startswith(b'BM'):
+            return False
+
+        # Default to PDF if we can't determine
+        self.logger.warning("Could not determine file type from magic bytes, defaulting to PDF")
+        return True
 
     def _pass_1_label_detection(
         self,
@@ -647,6 +873,10 @@ class SpatialBankStatementExtractor:
                         elif category == "account_holder_name_label":
                             # Account holder name might be in same span or split (title + name)
                             holder_name = self._extract_holder_name_from_span(span, spans)
+                            # If the extracted value looks like a label (contains label keywords), clear it
+                            # This allows Pass 2 to extract the actual value spatially
+                            if holder_name and self._looks_like_label(holder_name):
+                                holder_name = None
                             span.value = holder_name
                             first_pass_results["account_holder_name_label"] = span
                             matched = True
@@ -690,11 +920,15 @@ class SpatialBankStatementExtractor:
 
                         elif category == "bank_name":
                             # Bank name requires value to be populated
+                            self.logger.debug(f"Bank name pattern matched in span: '{span.text}'")
                             bank_info = self._match_bank_from_text(span.text)
                             if bank_info:
                                 span.value = bank_info.abbreviation
                                 first_pass_results["bank_name"] = span
+                                self.logger.info(f"Bank name detected: {bank_info.abbreviation} from '{span.text}'")
                                 matched = True
+                            else:
+                                self.logger.warning(f"Bank pattern matched but lookup failed for: '{span.text}'")
 
                     if matched:
                         break
@@ -750,6 +984,13 @@ class SpatialBankStatementExtractor:
 
         for req in required:
             if req not in first_pass_results:
+                # Provide diagnostic info for missing bank_name
+                if req == "bank_name":
+                    self.logger.error("Bank name not found in Pass 1 - providing diagnostic info")
+                    # Log available bank patterns from config
+                    bank_patterns = [k for k, v in self.unified_map.items() if v == "bank_name"]
+                    self.logger.info(f"Available bank patterns in config ({len(bank_patterns)}): "
+                                   f"{', '.join(sorted(bank_patterns)[:20])}...")
                 raise ValueError(f"Pass 1 validation failed: Missing required '{req}'")
 
         # first_pass_addresses is now empty (we no longer collect address blocks in Pass 1)
@@ -983,9 +1224,9 @@ class SpatialBankStatementExtractor:
         # Combine both lists to search for city spans
         all_spans_for_city_search = list_for_second_pass + first_pass_addresses
 
-        # Always require postal code validation to filter out non-address spans
-        # since we're now searching the entire page for city anchors
-        require_postal_code = True
+        # Check if postal code is required for this country
+        # UAE, Myanmar, HK, etc. have optional postal codes
+        require_postal_code = country_loader.is_postal_code_required(country_code)
 
         # Store all candidate city matches with their scores
         # Score = (Y position preference, city name coverage)
@@ -995,7 +1236,12 @@ class SpatialBankStatementExtractor:
         # Bank-specific keywords that indicate a span is part of bank address, not customer address
         bank_address_keywords = [
             "BRANCH ADDRESS", "REGISTERED OFFICE", "CORPORATE OFFICE",
-            "HEAD OFFICE", "REGISTERED OFFICE", "BRANCH", "AXIS BANK LTD"
+            "HEAD OFFICE", "REGD OFFICE", "REGD. OFFICE", "REGD OFFICE:",
+            "BRANCH", "AXIS BANK LTD", "IDBI BANK LTD", "IDBI BANK LIMITED",
+            "WEBSITE:WWW", "WEBSITE:", "WWW.", "HTTP", "HTTPS",
+            "REGISTERED OFFICE", "CORPORATE OFFICE", "HQ",
+            "STATEMENT OF ACCOUNT", "STATEMENT DETAILS", "STATEMENT PERIOD",
+            "ACCOUNT TYPE", "ACCOUNT NUMBER", "CURRENCY", "INTEREST PAYOUT"
         ]
 
         # HYBRID APPROACH: Two-pass city detection
@@ -1048,9 +1294,10 @@ class SpatialBankStatementExtractor:
                             best_city_coverage = city_coverage
 
             if best_city_for_span:
-                # Calculate score: prefer leftmost X, then later Y (closer to threshold), then better coverage
+                # Calculate score: prefer leftmost X, then EARLIER Y (customer address is at top), then better coverage
                 # -span.x1 is negated so smaller X values sort first when using reverse=True
-                score = (-span.x1, span.y1, best_city_coverage)
+                # -span.y1 is negated so smaller Y (earlier in doc) sorts first when using reverse=True
+                score = (-span.x1, -span.y1, best_city_coverage)
                 city_candidates.append((score, span, best_city_for_span))
 
         # Select best city candidate: prefer leftmost X, then highest Y (latest in document), then best coverage
@@ -1081,8 +1328,9 @@ class SpatialBankStatementExtractor:
             # Minimum coverage threshold to filter out cities that are just small parts of longer text
             # This prevents matching "NAGAR" in "JP NAGAR APARTMENTS" while still matching standalone city names
             # Use lower threshold when span contains country name (handles "CITY, COUNTRY" format)
-            MIN_COVERAGE_THRESHOLD = 0.5
-            MIN_COVERAGE_THRESHOLD_WITH_COUNTRY = 0.20  # Lower threshold when country name is present
+            # UAE-specific: Use even lower threshold because UAE addresses often have city names embedded in longer text
+            MIN_COVERAGE_THRESHOLD = 0.15 if country_code == "AE" else 0.5
+            MIN_COVERAGE_THRESHOLD_WITH_COUNTRY = 0.15 if country_code == "AE" else 0.20  # Lower threshold when country name is present
 
             # Get country name(s) for span filtering
             country_name_in_span = None
@@ -1169,6 +1417,8 @@ class SpatialBankStatementExtractor:
             if country_span:
                 self.logger.warning("No city span found, using country span as anchor")
                 city_span = country_span
+                # Clear the value to avoid using bank name or other previous values
+                city_span.value = None
                 matched_city = country_code
             elif first_pass_addresses:
                 self.logger.warning("No city span found, falling back to topmost address anchor")
@@ -1316,6 +1566,57 @@ class SpatialBankStatementExtractor:
         # Only check exact match with period to avoid false positives
         # e.g., "REV." should match, but "REV" would match "PREVIOUS"
         return text_upper in self.TITLE_PATTERNS
+
+    def _looks_like_label(self, text: str) -> bool:
+        """Check if text looks like a label rather than a name value."""
+        if not text:
+            return False
+
+        text_stripped = text.strip()
+        text_upper = text_stripped.upper()
+
+        # Check if starts with special characters (addresses, etc.)
+        if text_stripped and text_stripped[0] in '#-*@':
+            return True
+
+        # Specific label patterns (exact phrases, not substrings)
+        label_patterns = [
+            "ACCOUNT TYPE",
+            "ACCOUNT HOLDER",
+            "CUSTOMER NAME",
+            "PRIMARY ACCOUNT",
+            "CARD TYPE",
+            "CARD NUMBER",
+            "DATE ISSUED",
+            "ISSUE DATE",
+            "EXPIRY DATE",
+            "BRANCH NAME",
+            "YOUR BASE",
+            "BASE BRANCH",
+            "GSTIN",
+            "PRIMARY GSTIN",
+            "SEQUENCE NUMBER",
+            "PAGE",
+            "STATEMENT",
+            "CUSTOMER DETAILS",
+            "ACCOUNT DETAILS"
+        ]
+
+        # Check if text matches or starts with any label pattern
+        for pattern in label_patterns:
+            if text_upper == pattern or text_upper.startswith(pattern + " ") or text_upper.startswith(pattern + ":"):
+                return True
+
+        # Check if text contains "BANK" and is not a person's name
+        # Bank names like "Ayeyarwady Bank" should not be treated as account holder names
+        if " BANK" in text_upper or text_upper.endswith(" BANK"):
+            return True
+
+        # Check for email addresses
+        if self._is_email(text_stripped):
+            return True
+
+        return False
 
 
     def _is_email(self, text: str) -> bool:
@@ -1607,6 +1908,64 @@ class SpatialBankStatementExtractor:
         """Match bank from text using bank lookup."""
         bank_info = self.bank_lookup.detect_bank_in_text(text)
         return bank_info
+
+    async def _detect_bank_name_from_ocr(self, file_bytes: bytes, is_pdf: bool) -> Optional[str]:
+        """
+        Detect bank name using OCR when direct text extraction fails.
+
+        This handles cases where the bank name/logo is embedded as an image
+        (e.g., HSBC logo in scanned PDFs).
+
+        Args:
+            file_bytes: Raw file bytes
+            is_pdf: Whether the file is a PDF
+
+        Returns:
+            Bank abbreviation if found, None otherwise
+        """
+        try:
+            from app.helper.doctr.document_text_extractor import ImageProcessor
+            from app.core import get_doctr_model
+
+            def get_document_file():
+                from doctr.io import DocumentFile
+                return DocumentFile
+
+            self.logger.info("OCR fallback: Converting PDF page to image for OCR")
+
+            # Convert PDF to image for OCR (bypasses direct extraction)
+            img_bytes = await ImageProcessor.convert_to_png(file_bytes, max_pages=1)
+
+            # Run OCR on the image
+            DocumentFile = get_document_file()
+            doc = DocumentFile.from_images(img_bytes[:1])
+            model = get_doctr_model()
+            result = model(doc)
+
+            # Collect all OCR text from the image
+            all_text_parts = []
+            for page in result.pages:
+                for block in page.blocks:
+                    for line in block.lines:
+                        line_text = " ".join([word.value for word in line.words])
+                        all_text_parts.append(line_text)
+
+            all_text = " ".join(all_text_parts)
+            self.logger.info(f"OCR fallback extracted {len(all_text_parts)} text elements")
+            self.logger.debug(f"Combined OCR text: '{all_text[:500]}'")
+
+            # Try to match bank name from OCR text
+            bank_info = self._match_bank_from_text(all_text)
+            if bank_info:
+                self.logger.info(f"Bank name detected from OCR fallback: {bank_info.abbreviation}")
+                return bank_info.abbreviation
+
+            self.logger.warning(f"Bank name not found in OCR text")
+            return None
+
+        except Exception as e:
+            self.logger.error(f"OCR fallback failed: {e}")
+            return None
 
     def _load_country_locations(self, country_code: str) -> Set[str]:
         """
@@ -1993,6 +2352,8 @@ class SpatialBankStatementExtractor:
             if is_same_line and delta_x >= 0:
                 text = span.text.strip()
                 if text:
+                    # Clean leading punctuation (colons, dashes, etc.)
+                    text = text.lstrip(':,-–— ')
                     # If this span is the label itself (matches a label pattern), skip it
                     # Only skip if it's a pure title and we're not looking for a title-based label
                     if self._is_title(text) and not self._is_title_label(label_span.text):
@@ -2016,10 +2377,13 @@ class SpatialBankStatementExtractor:
 
             if delta_y > 0 and delta_y < standard_line_spacing * 2 and abs(delta_x) < standard_line_spacing * 2:
                 text = span.text.strip()
-                if text:  # Any non-empty text is acceptable
-                    if delta_y < best_distance:
-                        best_distance = delta_y
-                        best_match = text
+                if text:
+                    # Clean leading punctuation (colons, dashes, etc.)
+                    text = text.lstrip(':,-–— ')
+                    if text:  # Any non-empty text is acceptable
+                        if delta_y < best_distance:
+                            best_distance = delta_y
+                            best_match = text
 
         return best_match
 
@@ -2437,6 +2801,21 @@ class SpatialBankStatementExtractor:
                     # Skip email addresses - they're not part of the physical address
                     if self._is_email(span.text):
                         continue
+                    # Skip date patterns (e.g., "01 JAN, 2026", "27 JAN 2026")
+                    import re
+                    date_pattern = r'^\d{1,2}\s+(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[a-z]*[,\.]?\s*\d{4}$'
+                    if re.match(date_pattern, span.text.strip(), re.IGNORECASE):
+                        self.logger.debug(f"Skipping span with date pattern: '{span.text}'")
+                        continue
+                    # Skip spans that contain bank-specific keywords (these are bank headers, not customer address)
+                    bank_address_keywords = [
+                        "STATEMENT OF ACCOUNT", "STATEMENT DETAILS", "STATEMENT PERIOD",
+                        "ACCOUNT TYPE", "ACCOUNT NUMBER", "CURRENCY", "INTEREST PAYOUT",
+                        "BRANCH", "BRANCH ADDRESS", "WEBSITE:", "HTTP", "HTTPS"
+                    ]
+                    if any(keyword in span.text.upper() for keyword in bank_address_keywords):
+                        self.logger.debug(f"Skipping span with bank keyword: '{span.text}'")
+                        continue
                     # Check horizontal alignment
                     if abs(span.x1 - city_span.x1) > max_x_delta:
                         continue
@@ -2511,6 +2890,21 @@ class SpatialBankStatementExtractor:
                         continue  # Span is entirely above anchor
                     if self._is_email(span.text):
                         continue
+                    # Skip date patterns (e.g., "01 JAN, 2026", "27 JAN 2026")
+                    import re
+                    date_pattern = r'^\d{1,2}\s+(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[a-z]*[,\.]?\s*\d{4}$'
+                    if re.match(date_pattern, span.text.strip(), re.IGNORECASE):
+                        self.logger.debug(f"  Skipping below span with date pattern: '{span.text}'")
+                        continue
+                    # Skip spans that contain bank-specific keywords (these are bank headers, not customer address)
+                    bank_address_keywords = [
+                        "STATEMENT OF ACCOUNT", "STATEMENT DETAILS", "STATEMENT PERIOD",
+                        "ACCOUNT TYPE", "ACCOUNT NUMBER", "CURRENCY", "INTEREST PAYOUT",
+                        "BRANCH", "BRANCH ADDRESS", "WEBSITE:", "HTTP", "HTTPS"
+                    ]
+                    if any(keyword in span.text.upper() for keyword in bank_address_keywords):
+                        self.logger.debug(f"  Skipping below span with bank keyword: '{span.text}'")
+                        continue
                     # Check horizontal alignment first
                     x_delta = abs(span.x1 - city_span.x1)
                     in_correct_column = x_delta <= max_x_delta
@@ -2523,14 +2917,18 @@ class SpatialBankStatementExtractor:
                         self.logger.debug(f"  Span in correct column is too far: gap={delta_y:.1f}px exceeds {max_gap_below:.1f}px, stopping collection")
                         break
 
-                    # Collect this span
-                    self.logger.debug(f"  Adding span below: Y=[{span.y1:.1f}, {span.y2:.1f}], gap={delta_y:.1f}px (from prev Y2={most_recent_span_below.y2:.1f}), text='{span.text}'")
-                    address_spans.append(span)
-                    collected.append(span)
-                    most_recent_span_below = span  # Update for iterative gap calculation
-                    lines_below_collected += 1
-                    if lines_below_collected >= max_lines_below:
-                        break
+                    # Collect this span (if not already collected)
+                    # Note: address_spans and collected point to the same list (line 2855)
+                    # Only append once to avoid duplication
+                    if span not in collected:
+                        self.logger.debug(f"  Adding span below: Y=[{span.y1:.1f}, {span.y2:.1f}], gap={delta_y:.1f}px (from prev Y2={most_recent_span_below.y2:.1f}), text='{span.text}'")
+                        collected.append(span)
+                        most_recent_span_below = span  # Update for iterative gap calculation
+                        lines_below_collected += 1
+                        if lines_below_collected >= max_lines_below:
+                            break
+                    else:
+                        self.logger.debug(f"  Skipping span below (already in address_spans): Y=[{span.y1:.1f}, {span.y2:.1f}], text='{span.text}'")
             else:
                 self.logger.debug(f"City span already has postal code, skipping spans below collection")
         else:
@@ -2559,6 +2957,19 @@ class SpatialBankStatementExtractor:
                             continue  # Already collected
                         # Skip email addresses - they're not part of the physical address
                         if self._is_email(span.text):
+                            continue
+                        # Skip date patterns (e.g., "01 JAN, 2026", "27 JAN 2026")
+                        import re
+                        date_pattern = r'^\d{1,2}\s+(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[a-z]*[,\.]?\s*\d{4}$'
+                        if re.match(date_pattern, span.text.strip(), re.IGNORECASE):
+                            continue
+                        # Skip spans that contain bank-specific keywords (these are bank headers, not customer address)
+                        bank_address_keywords = [
+                            "STATEMENT OF ACCOUNT", "STATEMENT DETAILS", "STATEMENT PERIOD",
+                            "ACCOUNT TYPE", "ACCOUNT NUMBER", "CURRENCY", "INTEREST PAYOUT",
+                            "BRANCH", "BRANCH ADDRESS", "WEBSITE:", "HTTP", "HTTPS"
+                        ]
+                        if any(keyword in span.text.upper() for keyword in bank_address_keywords):
                             continue
                         # Check horizontal alignment - must be in same column as anchor
                         x_delta = abs(span.x1 - city_span.x1)
@@ -2726,6 +3137,25 @@ class SpatialBankStatementExtractor:
                 self.logger.debug(f"First span above city looks like address line, skipping name extraction: '{name_text}'")
                 return None
 
+            # Skip if the text looks like a label, address, or account number
+            if self._looks_like_label(name_text):
+                self.logger.debug(f"First span above city looks like a label, skipping name extraction: '{name_text}'")
+                return None
+
+            # Skip if the text looks like an address (contains address keywords)
+            address_keywords = ["BLK", "BLOCK", "STREET", "ROAD", "CRESCENT", "AVENUE", "LANE", "DRIVE", "JALAN", "ROAD"]
+            name_upper = name_text.upper()
+            for keyword in address_keywords:
+                if keyword in name_upper:
+                    self.logger.debug(f"First span above city contains address keyword '{keyword}', skipping name extraction: '{name_text}'")
+                    return None
+
+            # Skip if the text is mostly digits (account number)
+            digit_ratio = sum(c.isdigit() for c in name_text) / len(name_text) if name_text else 0
+            if digit_ratio > 0.5:
+                self.logger.debug(f"First span above city is mostly digits (ratio: {digit_ratio:.2f}), skipping name extraction: '{name_text}'")
+                return None
+
             # If the name is only a title, try to find the full name
             if self._is_title(name_text):
                 # Use _find_name_after_title to get the combined name
@@ -2883,6 +3313,8 @@ class SpatialBankStatementExtractor:
             full_address = f"{full_address}, {', '.join(street_address_lines)}"
 
         # Get city name from city_span (raw value for parsing)
+        # Use .value if set (contains normalized city name from detection), otherwise use .text
+        # Note: When country_span is used as fallback, .value is cleared to avoid using bank name
         city_name_raw = city_span.value if hasattr(city_span, 'value') and city_span.value else city_span.text
 
         # CRITICAL: Parse address components FIRST to get the actual city name
@@ -2909,17 +3341,23 @@ class SpatialBankStatementExtractor:
             )
             self.logger.info(f"Cleaned street address (multi-span): '{street_address}'")
 
-        # SPECIAL CASE: Single-span address - extract street from city span text
-        # Only do this if street_address_lines is empty AND we have a city span
-        if not street_address and city_span and city_span.text and parsed_city:
-            street_address = self._extract_street_from_single_span(
+        # Extract street portion from city span if it contains more than just the city name
+        # This handles cases where the city span contains the full address (e.g., "24B,Wasl Squa,.,.,AlSafa1,DUBAI,")
+        if city_span and city_span.text and parsed_city:
+            city_span_street = self._extract_street_from_single_span(
                 city_span.text,
                 parsed_city,  # Use the PARSED city name, not the raw span text
                 components.get("state"),  # Pass the parsed state
                 components.get("postal_code"),  # Pass the parsed postal code
                 country_code
             )
-            self.logger.info(f"Extracted street address from single span: '{street_address}'")
+            if city_span_street:
+                self.logger.info(f"Extracted street portion from city span: '{city_span_street}'")
+                # Prepend the city span's street portion to the existing street_address
+                if street_address:
+                    street_address = f"{city_span_street}, {street_address}"
+                else:
+                    street_address = city_span_street
 
         return {
             "full_address": full_address,
@@ -3008,6 +3446,12 @@ class SpatialBankStatementExtractor:
                 components.update(parsed)
                 self.logger.info(f"Updated components with parsed result (country was not set)")
             else:
+                # Country is already set, but ALWAYS use the validator's parsed city if available
+                parsed_city = parsed.get("city")
+                if parsed_city:
+                    components["city"] = parsed_city
+                    self.logger.info(f"Updated city with validator result: '{parsed_city}' (country was already set)")
+
                 # Only update postal_code from parsed result
                 # But avoid PO Box numbers being treated as postal codes
                 parsed_postal = parsed.get("postal_code")
@@ -3093,16 +3537,23 @@ class SpatialBankStatementExtractor:
                 text = re.sub(re.escape(state_upper), '', text, flags=re.IGNORECASE).strip()
                 text_upper = text.upper()
 
-        # Remove city name
+        # Remove city name - only remove the last occurrence (typically at end of address)
         if city:
             city_upper = city.upper()
-            # Try with word boundary first
+            # Find all matches and remove only the last one (at the end of address)
             pattern = r'\b' + re.escape(city_upper) + r'\b'
-            if re.search(pattern, text_upper):
-                text = re.sub(pattern, '', text, flags=re.IGNORECASE).strip()
+            matches = list(re.finditer(pattern, text_upper))
+            if matches:
+                # Remove the last occurrence (typically at the end)
+                last_match = matches[-1]
+                text = text[:last_match.start()] + text[last_match.end():]
+                text = text.strip()
             else:
-                # Fallback: try without word boundary
-                text = re.sub(re.escape(city_upper), '', text, flags=re.IGNORECASE).strip()
+                # Fallback: remove without word boundary (last occurrence)
+                parts = re.split(r'(?i)' + re.escape(city_upper), text)
+                if len(parts) > 1:
+                    text = ''.join(parts[:-1]).strip()
+                    text = re.sub(r',\s*$', '', text).strip()
 
         # Clean up: remove extra commas and whitespace
         text = re.sub(r',\s*,', ',', text)  # Double commas
@@ -3167,10 +3618,22 @@ class SpatialBankStatementExtractor:
             state_upper = state.upper()
             text = re.sub(r'\b' + re.escape(state_upper) + r'\b', '', text, flags=re.IGNORECASE).strip()
 
-        # Remove city
+        # Remove city - only remove the last occurrence (typically at end of address)
         if city:
             city_upper = city.upper()
-            text = re.sub(r'\b' + re.escape(city_upper) + r'\b', '', text, flags=re.IGNORECASE).strip()
+            pattern = r'\b' + re.escape(city_upper) + r'\b'
+            matches = list(re.finditer(pattern, text.upper()))
+            if matches:
+                # Remove the last occurrence (typically at the end)
+                last_match = matches[-1]
+                text = text[:last_match.start()] + text[last_match.end():]
+                text = text.strip()
+            else:
+                # Fallback: remove without word boundary (last occurrence)
+                parts = re.split(r'(?i)' + re.escape(city_upper), text)
+                if len(parts) > 1:
+                    text = ''.join(parts[:-1]).strip()
+                    text = re.sub(r',\s*$', '', text).strip()
 
         # Clean up: remove extra commas and whitespace
         text = re.sub(r',\s*,', ',', text)

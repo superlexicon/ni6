@@ -535,19 +535,11 @@ class DocumentTextExtractor:
                        f"(recommended: {pdf_analysis['recommended_extraction']})")
 
             # ============================================================
-            # BANK STATEMENT VALIDATION: Require text-based PDF only
+            # BANK STATEMENT: Support both text-based and image-based PDFs
             # ============================================================
             if document_type == DocumentType.BANK_STATEMENT:
-                if pdf_analysis['content_type'] != PDFContentType.TEXT_BASED:
-                    error_msg = (
-                        "Bank statement must be a text-based PDF with extractable text. "
-                        "Image-based or scanned PDFs are not accepted. "
-                        f"Detected type: {pdf_analysis['content_type']}"
-                    )
-                    logger.error(f"Bank statement validation failed: {error_msg}")
-                    raise ValueError(error_msg)
-
-                logger.info("Bank statement: validated as text-based PDF, using direct extraction only")
+                logger.info(f"Bank statement: {pdf_analysis['content_type']} PDF - will use "
+                           f"{'direct extraction' if pdf_analysis['content_type'] == PDFContentType.TEXT_BASED else 'OCR'}")
 
             geometry_data = None
             extraction_method = None

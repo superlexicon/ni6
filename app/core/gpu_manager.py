@@ -36,6 +36,7 @@ class ModelType(Enum):
     DOCTR_OCR = "doctr_ocr"
     BERT_NER = "bert_ner"
     GLINER_NER = "gliner_ner"
+    LAYOUTLM_NER = "layoutlm_ner"
 
 
 @dataclass

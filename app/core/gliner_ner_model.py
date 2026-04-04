@@ -379,8 +379,8 @@ class GLiNERNERModel:
 
             bl = BankLookup.get_instance()
 
-            # Get all bank names from alternate_names_map (these are the full names)
-            all_names = list(bl._alternate_names_lower.keys())
+            # Get all bank names from unified_bank_map (contains all identifiers)
+            all_names = list(bl._unified_bank_map.keys())
 
             # Also add abbreviations
             all_names.extend(bl._abbreviations)
@@ -463,6 +463,95 @@ class GLiNERNERModel:
             "currency": "The 3-letter ISO 4217 currency code. For DBS: SGD. For Indian banks: INR. For international: USD EUR GBP etc. This is ONLY a 3-letter code like SGD INR USD EUR. Do NOT extract serial numbers like S/N: EN05301101135929 or similar identification numbers. Do NOT extract the word Currency itself.",
             "statement_date": "The statement date appearing as a date in formats like DD MMM YYYY or DD/MM/YYYY or MM/DD/YYYY. When a date RANGE appears, extract the LATEST/END date. This appears near labels like 'Statement Date' 'as at' 'Statement for the period'.",
         }
+
+    def _get_passport_schema(self) -> Dict[str, str]:
+        """
+        Get GLiNER2 schema for passport extraction.
+
+        Returns a dict where keys are field names and values are natural language descriptions.
+
+        Returns:
+            Dictionary mapping field names to description strings
+        """
+        return {
+            "passport_number": "The unique passport document number, typically 8-9 alphanumeric characters with at least 6 digits",
+            "full_name": "The passport holder's full legal name including both surname and given names",
+            "date_of_birth": "The passport holder's date of birth in formats like DD MMM YYYY, DD/MM/YYYY, or YYYY-MM-DD",
+            "sex": "The passport holder's gender/sex, typically M or F",
+            "nationality": "The passport holder's nationality as a full text description (e.g., 'SINGAPORE CITIZEN', 'UNITED STATES OF AMERICA', 'MYANMAR', 'INDIAN') typically found near the 'Nationality' label",
+            "passport_country": "The issuing country of the passport as a 3-letter ISO country code",
+            "place_of_birth": "The passport holder's place of birth, typically a city or country name",
+            "issuing_authority": "The government authority that issued the passport",
+            "date_of_issue": "The date when the passport was issued in formats like DD MMM YYYY, DD/MM/YYYY, or YYYY-MM-DD",
+            "date_of_expiry": "The passport expiration date in formats like DD MMM YYYY, DD/MM/YYYY, or YYYY-MM-DD",
+        }
+
+    async def extract_passport_with_schema_async(
+        self,
+        text: str,
+    ) -> Dict[str, Any]:
+        """
+        Extract passport entities using GLiNER2 schema-based extraction.
+
+        Args:
+            text: Raw OCR text from passport document
+
+        Returns:
+            Dict mapping field names to extracted values with confidence scores
+        """
+        try:
+            model = await self.get_model_with_gpu()
+            GLiNERClass, gliner_version = get_gliner_classes()
+
+            if gliner_version != "gliner2":
+                raise NotImplementedError("Schema-based extraction requires GLiNER2")
+
+            # Build schema
+            entity_types = self._get_passport_schema()
+            schema = model.create_schema().entities(entity_types)
+
+            # Run extraction
+            entities_dict = model.extract(
+                text,
+                schema=schema,
+                threshold=0.3,
+                include_confidence=True,
+                include_spans=True
+            )
+
+            # Process results - get best match per field
+            results = {}
+            entities_data = entities_dict.get("entities", entities_dict)
+
+            for field_name, values in entities_data.items():
+                if values is None:
+                    results[field_name] = None
+                    continue
+
+                if isinstance(values, list) and len(values) > 0:
+                    best = max(values, key=lambda v: v.get('confidence', v.get('score', 0)))
+                    results[field_name] = {
+                        'value': best.get('text', ''),
+                        'confidence': best.get('confidence', best.get('score', 0.0))
+                    }
+                elif isinstance(values, dict):
+                    results[field_name] = {
+                        'value': values.get('text', ''),
+                        'confidence': values.get('confidence', values.get('score', 0.0))
+                    }
+                elif isinstance(values, str):
+                    results[field_name] = {
+                        'value': values,
+                        'confidence': 0.5
+                    }
+
+            self.logger.info(f"GLiNER2 passport schema extracted {len(results)} entity types")
+
+            return results
+
+        except Exception as e:
+            self.logger.error(f"GLiNER2 passport schema extraction failed: {e}")
+            return {}
 
     async def extract_bank_statement_entities_async(
         self,

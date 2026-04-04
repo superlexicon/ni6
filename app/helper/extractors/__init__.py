@@ -41,11 +41,50 @@ class _GLiNERBankStatementExtractorLazy:
 
 GLiNERBankStatementExtractor = _GLiNERBankStatementExtractorLazy()
 
+class _GLiNERPassportExtractorLazy:
+    _class = None
+
+    @classmethod
+    def _load_class(cls):
+        if cls._class is None:
+            from .gliner_passport_extractor import GLiNERPassportExtractor as _Class
+            cls._class = _Class
+        return cls._class
+
+    def __getattr__(self, name):
+        return getattr(self._load_class(), name)
+
+    def __call__(self, *args, **kwargs):
+        return self._load_class()(*args, **kwargs)
+
+GLiNERPassportExtractor = _GLiNERPassportExtractorLazy()
+
+
+def get_gliner_bank_statement_extractor():
+    """Get singleton GLiNER bank statement extractor."""
+    if not hasattr(get_gliner_bank_statement_extractor, '_instance'):
+        get_gliner_bank_statement_extractor._instance = GLiNERBankStatementExtractor()
+    return get_gliner_bank_statement_extractor._instance
+
+
+_gliner_passport_extractor_instance = None
+
+def get_gliner_passport_extractor():
+    """Get singleton GLiNER passport extractor."""
+    global _gliner_passport_extractor_instance
+    if _gliner_passport_extractor_instance is None:
+        _gliner_passport_extractor_instance = GLiNERPassportExtractor()
+    return _gliner_passport_extractor_instance
+
+
 __all__ = [
     "PassportExtractor",
     "SelfieOTPExtractor",
     "TaxStatementExtractor",
     "BertNerResumeExtractor",
     "GLiNERIDCardExtractor",
-    "GLiNERBankStatementExtractor"
+    "GLiNERBankStatementExtractor",
+    "GLiNERPassportExtractor",
+    "get_gliner_bank_statement_extractor",
+    "get_gliner_passport_extractor"
 ]

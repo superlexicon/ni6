@@ -47,6 +47,10 @@ class BankStatementData(BaseModel):
     # Extraction metadata
     account_number_extraction_method: Optional[str] = None
 
+    # Extraction source tracking
+    extraction_source: Optional[str] = None  # 'gliner', 'spatial_ocr', 'spatial_geometry'
+    llm_model_used: Optional[str] = None  # Reserved for future LLM-based extraction
+
     # Overall confidence score (0-100) for the extracted data
     overall_confidence: Optional[float] = None
 

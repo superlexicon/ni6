@@ -213,23 +213,22 @@ class UnifiedIDExtractor:
 
         return None
 
-    async def extract(self, content: bytes, is_pdf: bool = False) -> DocumentExtractionResult:
+    async def extract(self, content: bytes, is_pdf: bool = False):
         """
-        Extract identity document fields without relying on layout.
+        Extract identity document fields using GLINER2 with logic-based fallback.
 
-        Process:
-        1. Extract all text with OCR (DocTR)
-        2. Detect document country from text
-        3. Detect document type (passport/id_card) from patterns
-        4. Extract fields using pattern matching
-        5. Validate and score results
+        For passport documents, GLINER2 is tried first. Falls back to logic-based
+        extraction if confidence < 50% or if GLINER2 fails.
+
+        For other documents, uses logic-based extraction.
 
         Args:
             content: Document bytes
             is_pdf: Whether content is PDF
 
         Returns:
-            DocumentExtractionResult with extracted fields and confidence score
+            PassportData (for passports with good GLINER2 result) or
+            DocumentExtractionResult (for all other cases)
         """
         try:
             self.logger.info("=" * 80)
@@ -261,39 +260,36 @@ class UnifiedIDExtractor:
             document_type = detect_document_type_from_patterns(all_text, country_code)
             self.logger.info(f"  Detected document type: {document_type}")
 
-            # Step 4: Extract fields
-            self.logger.info("Step 4: Extracting fields")
-            extracted_fields = await self._extract_fields_from_text(
-                text_blocks, all_text, country_code, document_type
-            )
+            # Step 4: For passports, try GLINER2 first
+            if document_type == 'passport':
+                self.logger.info("Step 4: Trying GLINER2 extraction for passport")
+                try:
+                    from app.helper.extractors import get_gliner_passport_extractor
 
-            # Step 5: Validate and score
-            self.logger.info("Step 5: Validating and scoring")
-            validation_result = self._validate_extraction(
-                extracted_fields, country_code, document_type
-            )
+                    gliner_extractor = get_gliner_passport_extractor()
+                    result = await gliner_extractor.extract(content, is_pdf=is_pdf)
 
-            # Calculate overall confidence
-            confidence = self._calculate_overall_confidence(
-                extracted_fields, validation_result, country_code, document_type
-            )
+                    # Log what GLINER2 extracted
+                    self.logger.info(
+                        f"GLINER2 extracted: confidence={result.overall_confidence:.1f}%, "
+                        f"source={result.extraction_source}"
+                    )
 
-            self.logger.info(f"  Overall confidence: {confidence:.2f}%")
-            self.logger.info(f"  Extracted {len(extracted_fields)} fields: {list(extracted_fields.keys())}")
-            self.logger.info("=" * 80)
+                    # Check if GLINER2 result is good enough
+                    if result.overall_confidence and result.overall_confidence >= 50:
+                        if self._has_required_fields(result):
+                            self.logger.info("GLINER2 result accepted - using GLINER2 extraction")
+                            return result
 
-            # Remove country_code from extracted_fields if it exists to avoid duplicate argument
-            extracted_fields_copy = extracted_fields.copy()
-            if 'country_code' in extracted_fields_copy:
-                del extracted_fields_copy['country_code']
+                    # Fallback to logic-based
+                    self.logger.info(
+                        f"GLINER2 fallback triggered: confidence={result.overall_confidence or 0:.1f}%"
+                    )
+                except Exception as e:
+                    self.logger.error(f"GLINER2 extraction error: {str(e)}, falling back to logic-based")
 
-            return DocumentExtractionResult(
-                document_type=document_type,
-                country_code=country_code,
-                confidence=confidence,
-                text_blocks=text_blocks,
-                **extracted_fields_copy
-            )
+            # Step 5: Logic-based extraction (fallback or non-passport documents)
+            return await self._extract_with_logic_based(content, is_pdf, text_blocks, all_text, country_code, document_type)
 
         except Exception as e:
             self.logger.error(f"Extraction failed: {type(e).__name__}")
@@ -305,6 +301,60 @@ class UnifiedIDExtractor:
                 confidence=0.0,
                 error=str(e)
             )
+
+    def _has_required_fields(self, passport_data) -> bool:
+        """Check if passport data has all required fields."""
+        required = ['passport_number', 'full_name', 'date_of_birth', 'nationality']
+        for field in required:
+            value = getattr(passport_data, field, None)
+            if not value or not str(value).strip():
+                return False
+        return True
+
+    async def _extract_with_logic_based(
+        self,
+        content: bytes,
+        is_pdf: bool,
+        text_blocks: List[Dict[str, Any]],
+        all_text: str,
+        country_code: str,
+        document_type: str
+    ) -> DocumentExtractionResult:
+        """
+        Extract using logic-based algorithm (original implementation).
+        """
+        self.logger.info("Step 4: Extracting fields (logic-based)")
+        extracted_fields = await self._extract_fields_from_text(
+            text_blocks, all_text, country_code, document_type
+        )
+
+        # Step 5: Validate and score
+        self.logger.info("Step 5: Validating and scoring")
+        validation_result = self._validate_extraction(
+            extracted_fields, country_code, document_type
+        )
+
+        # Calculate overall confidence
+        confidence = self._calculate_overall_confidence(
+            extracted_fields, validation_result, country_code, document_type
+        )
+
+        self.logger.info(f"  Overall confidence: {confidence:.2f}%")
+        self.logger.info(f"  Extracted {len(extracted_fields)} fields: {list(extracted_fields.keys())}")
+        self.logger.info("=" * 80)
+
+        # Remove country_code from extracted_fields if it exists to avoid duplicate argument
+        extracted_fields_copy = extracted_fields.copy()
+        if 'country_code' in extracted_fields_copy:
+            del extracted_fields_copy['country_code']
+
+        return DocumentExtractionResult(
+            document_type=document_type,
+            country_code=country_code,
+            confidence=confidence,
+            text_blocks=text_blocks,
+            **extracted_fields_copy
+        )
 
     async def _extract_fields_from_text(
         self,

@@ -1552,8 +1552,10 @@ class GLiNERBankStatementExtractor:
 
         # Skip common label patterns (key:value format)
         # Increased limit to 25 to catch more labels like "Statement Period:"
-        if ':' in text_upper and len(text_upper.split(':')[0]) <= 25:
-            return True
+        # Only filter explicit labels, not values starting with colon (OCR artifact)
+        if ':' in text_upper and not text_upper.startswith(':'):
+            if len(text_upper.split(':')[0]) <= 25:
+                return True
 
         # Skip email patterns
         if '@' in text and '.' in text:
@@ -3285,7 +3287,41 @@ class GLiNERBankStatementExtractor:
         formatted = re.sub(r'\s+', ' ', formatted)
         formatted = re.sub(r',\s*,', ',', formatted)
 
+        # Clean up any OCR artifacts (leading colons, etc.)
+        formatted = self._clean_address_assembly(formatted)
+
         return formatted
+
+    def _clean_address_assembly(self, address: str) -> str:
+        """Clean up assembled address by removing invalid prefix/postfix characters.
+
+        Removes leading/trailing colons, dashes, and other separators that are
+        OCR artifacts from label:value formatting.
+
+        Args:
+            address: Raw assembled address
+
+        Returns:
+            Cleaned address
+        """
+        if not address:
+            return address
+
+        lines = address.split('\n')
+        cleaned_lines = []
+
+        for line in lines:
+            # Remove leading colons, dashes, and separators
+            line = re.sub(r'^[:\-]\s*', '', line)
+            # Remove trailing separators
+            line = re.sub(r'\s*[:\-]$', '', line)
+            # Clean up extra whitespace
+            line = ' '.join(line.split())
+
+            if line:
+                cleaned_lines.append(line)
+
+        return '\n'.join(cleaned_lines)
 
     def _extract_address_from_gliner_only(
         self, gliner_result: Dict[str, Any]
