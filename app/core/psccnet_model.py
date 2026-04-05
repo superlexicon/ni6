@@ -23,7 +23,6 @@ class PSCCNetModel:
     _initialized: bool = False
 
     ARCH_CONFIG = "pretrained"
-    # Use integrated photoholmes weights paths
     FENET_WEIGHTS = "app/photoholmes/weights/psccnet/FENet.pth"
     SEGNET_WEIGHTS = "app/photoholmes/weights/psccnet/SegNet.pth"
     CLSNET_WEIGHTS = "app/photoholmes/weights/psccnet/ClsNet.pth"

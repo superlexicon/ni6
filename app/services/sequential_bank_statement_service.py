@@ -35,6 +35,7 @@ from app.core.key_injection.key_injection_manager import key_injection_manager
 from app.core.key_injection import DocumentType
 from app.helper.extractors.spatial_bank_statement_extractor import SpatialBankStatementExtractor
 from app.helper.extractors import get_gliner_bank_statement_extractor
+from app.helper.utils.address_cleaner import clean_gliner_address
 from app.dto import DocumentErrorCode
 
 
@@ -495,9 +496,12 @@ class SequentialBankStatementService(DocumentProcessorBase):
             gliner_value = getattr(gliner_data, field, None)
             gliner_conf = gliner_data.confidence_scores.get(field, 0)
 
-            # Handle both legacy (float) and new (dict) confidence formats
+            # Handle both dict format (new) and float format (from GLiNER)
             if isinstance(gliner_conf, dict):
                 gliner_conf = gliner_conf.get('overall_confidence', 0)
+            elif isinstance(gliner_conf, (int, float)):
+                # GLiNER returns raw float - use directly
+                gliner_conf = float(gliner_conf)
 
             # Special case: account_number - always use spatial if available
             if field == 'account_number' and spatial_data.account_number:
@@ -511,10 +515,48 @@ class SequentialBankStatementService(DocumentProcessorBase):
                 spatial_value = getattr(spatial_data, field, None)
                 if spatial_value:
                     setattr(merged, field, spatial_value)
-                    # Also copy related metadata for address fields
-                    if field == 'address' and hasattr(spatial_data, 'address_postal') and spatial_data.address_postal:
-                        merged.address_postal = spatial_data.address_postal
+                    # Also copy related address components when spatial address is used
+                    # This ensures consistency: all address components come from the same source
+                    if field == 'address':
+                        if hasattr(spatial_data, 'address_city') and spatial_data.address_city:
+                            merged.address_city = spatial_data.address_city
+                        if hasattr(spatial_data, 'address_state') and spatial_data.address_state:
+                            merged.address_state = spatial_data.address_state
+                        if hasattr(spatial_data, 'address_postal') and spatial_data.address_postal:
+                            merged.address_postal = spatial_data.address_postal
+                        if hasattr(spatial_data, 'address_country') and spatial_data.address_country:
+                            merged.address_country = spatial_data.address_country
+                        self.logger.info(
+                            f"Copied spatial address components: "
+                            f"city={spatial_data.address_city}, "
+                            f"state={spatial_data.address_state}, "
+                            f"postal={spatial_data.address_postal}, "
+                            f"country={spatial_data.address_country}"
+                        )
                     self._update_confidence_source(merged, field, spatial_data, 'spatial')
+            else:
+                # GLiNER value is being used - apply cleaning for address field
+                if field == 'address' and gliner_value:
+                    # Get address components from GLiNER data for cleaning
+                    city = gliner_data.address_city
+                    state = gliner_data.address_state
+                    postal_code = gliner_data.address_postal
+                    country_code = gliner_data.address_country
+
+                    # Clean the address using spatial extractor's cleaning logic
+                    cleaned_address = clean_gliner_address(
+                        gliner_value,
+                        city=city,
+                        state=state,
+                        postal_code=postal_code,
+                        country_code=country_code
+                    )
+                    setattr(merged, field, cleaned_address)
+                    self.logger.info(
+                        f"Cleaned GLiNER address: original='{gliner_value[:50]}...', "
+                        f"cleaned='{cleaned_address[:50]}...', "
+                        f"city={city}, state={state}, postal={postal_code}"
+                    )
 
         # Recalculate overall confidence based on merged results
         merged_confidence = 0.0
@@ -523,8 +565,10 @@ class SequentialBankStatementService(DocumentProcessorBase):
             field_conf = merged.confidence_scores.get(field, {})
             if isinstance(field_conf, dict):
                 conf = field_conf.get('overall_confidence', 0)
+            elif isinstance(field_conf, (int, float)):
+                conf = float(field_conf)
             else:
-                conf = float(field_conf) if field_conf else 0
+                conf = 0
             if conf > 0:
                 merged_confidence += conf
                 field_count += 1
@@ -544,7 +588,7 @@ class SequentialBankStatementService(DocumentProcessorBase):
         """Normalize extractor field names to service field names.
 
         Handles both underscore-cased names (from confidence_scores) and
-        space-separated names (legacy format from labels-based extraction).
+        space-separated names (from GLiNER2 schema extraction).
         """
         field_lower = field.lower()
 
@@ -562,7 +606,7 @@ class SequentialBankStatementService(DocumentProcessorBase):
             'bank_branch': 'bank_branch',
             'branch': 'bank_branch',
 
-            # Space-separated format (legacy)
+            # Space-separated format (from GLiNER2 schema extraction)
             'bank name': 'bank_name',
             'bank or financial institution name': 'bank_name',
             'account holder name': 'account_holder_name',

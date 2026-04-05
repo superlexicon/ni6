@@ -428,19 +428,3 @@ class SequentialSelfieService:
                 error_code=DocumentErrorCode.PROCESSING_ERROR,
                 user_identity_id=user_identity_id
             )
-
-    def _store_user_key(self, mobile_number: str, country_code: str,
-                       client_public_key: str, secret_share: str, user_identity_id: str):
-        """
-        DEPRECATED: User keys are now created during selfie submission (after verification).
-        This method is kept for backward compatibility but should not be called.
-        """
-        self.logger.warning("_store_user_key is deprecated - user keys are created during selfie submission")
-
-    def _validate_share_format(self, share: str) -> bool:
-        """
-        DEPRECATED: Share format validation is now done during OTP request.
-        This method is kept for backward compatibility but should not be called.
-        """
-        self.logger.warning("_validate_share_format is deprecated - validation is done during OTP request")
-        return True

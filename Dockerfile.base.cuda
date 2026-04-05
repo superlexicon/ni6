@@ -24,7 +24,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     POETRY_CACHE_DIR=/tmp/poetry_cache \
     TF_CPP_MIN_LOG_LEVEL=2 \
     TF_USE_LEGACY_KERAS=1 \
-    PYTHON="/usr/bin/python3.11"
+    PYTHON="/usr/bin/python3.11" \
+    TORCH_HOME=/app/app/models
 
 # Install system dependencies - Python 3.11
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -94,11 +95,16 @@ RUN pip3 install --upgrade pip && \
     echo "PyTorch CUDA installed successfully"
 
 # Copy pre-downloaded weights (5.1 GB - rarely change)
-COPY app/deepface_weights/ /root/.deepface/weights/
+COPY app/deepface/.deepface/weights/ /root/.deepface/weights/
 COPY app/photoholmes/weights/ /app/app/photoholmes/weights/
 COPY app/spacy_models/ /app/app/spacy_models/
-COPY app/nltk_data/ /app/app/nltk_data/
-COPY app/finbert_weights/ /app/app/finbert_weights/
+COPY app/models/nltk/ /app/app/models/nltk/
+COPY app/models/finbert/ /app/app/models/finbert/
+COPY app/models/gliner2/ /app/app/models/gliner2/
+COPY app/models/mediapipe/ /app/app/models/mediapipe/
+
+# Copy DocTR OCR model weights (PyTorch hub cache)
+COPY app/models/hub/checkpoints/ /root/.cache/torch/hub/checkpoints/
 
 # Create runtime directories
 RUN mkdir -p /app/logs /app/temp /var/run/mysqld

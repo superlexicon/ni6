@@ -129,9 +129,23 @@ logs/
 data/
 temp/
 uploads/
-models/
 *.db
 *.sqlite
+
+# Model weights (will be copied separately or mounted as volume)
+app/models/
+app/photoholmes/weights/
+app/deepface/.deepface/
+app/.cache/  # PyTorch hub cache (includes DocTR weights)
+
+# Individual model directories (for reference - all covered by app/models/ above):
+# - app/deepface/.deepface/weights/ - DeepFace face detection models
+# - app/models/mediapipe/ - MediaPipe hand landmarker models
+# - app/models/nltk/ - NLTK data
+# - app/models/finbert/ - FinBERT financial sentiment model
+# - app/photoholmes/weights/ - PhotoHolmes forgery detection models
+# - app/spacy_models/ - spaCy NLP models
+# All copied separately in base Docker images to reduce layer size
 
 # IDE files
 .vscode/
@@ -157,7 +171,7 @@ Thumbs.db
 *.msp
 *.lnk
 
-# Large files and datasets (excluding PhotoHolmes weights)
+# Large files and datasets
 *.h5
 *.hdf5
 *.pkl
@@ -167,22 +181,13 @@ Thumbs.db
 *.bin
 *.ckpt
 
-# PhotoHolmes weights should be included, not ignored
-# All .pth files in integrated weights directory are needed for PhotoHolmes
-!app/photoholmes/weights/
-!app/photoholmes/weights/*.pth
-!app/photoholmes/weights/**/*.pth
-
-# DeepFace weights should be included to avoid runtime downloads
-!app/deepface_weights/
-!app/deepface_weights/*.h5
-!app/deepface_weights/*.pth
-
-# FinBERT weights should be included to avoid runtime downloads
-!app/finbert_weights/
-
-app/doctr_weights
-app/gliner2_weights
+# Model weights locations:
+# - app/deepface/.deepface/weights/ - DeepFace face detection models
+# - app/models/nltk/ - NLTK data
+# - app/models/finbert/ - FinBERT financial sentiment model
+# - app/photoholmes/weights/ - PhotoHolmes forgery detection models
+# - app/spacy_models/ - spaCy NLP models
+# All copied separately in base Docker images to reduce layer size
 
 # Development files that Poetry will handle
 requirements/

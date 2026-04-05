@@ -28,7 +28,7 @@ scripts/test_data/
 cache/
 
 # Model weights and binary files (use Git LFS instead)
-app/deepface_weights/
+app/models/
 app/photoholmes/weights/
 *.pth
 *.pt
@@ -41,21 +41,11 @@ app/photoholmes/weights/
 *.dylib
 *.dll
 
-# Spacy models (downloaded separately)
+# NLTK data
+app/models/nltk/
+
+# spaCy models (downloaded, not tracked)
 app/spacy_models/
-
-# Model files (downloaded separately)
-app/models/
-
-# FinBERT weights (downloaded separately)
-app/finbert_weights/
-app/nltk_data/
-
-# Doctr weights (downloaded separately)
-app/doctr_weights/
-
-# GLiNER2 weights (downloaded separately)
-app/gliner2_weights/
 
 # Wheels directory
 wheels/

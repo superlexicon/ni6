@@ -38,16 +38,6 @@ def download_weights_if_necessary(
     Returns
         target_file (str): exact path for the target file
     """
-    # FIRST: Check if weights exist in app/deepface_weights (pre-downloaded)
-    # Get project root (app/deepface/deepface/commons -> project root)
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
-    bundled_weights_path = os.path.join(project_root, "app", "deepface_weights", file_name)
-
-    if os.path.isfile(bundled_weights_path):
-        logger.debug(f"{file_name} found in bundled weights at {bundled_weights_path}")
-        return bundled_weights_path
-
-    # THEN: Fall back to original behavior (download to ~/.deepface/weights)
     home = folder_utils.get_deepface_home()
 
     target_file = os.path.normpath(os.path.join(home, ".deepface/weights", file_name))

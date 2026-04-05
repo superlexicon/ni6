@@ -11,7 +11,6 @@ class AdaptiveModel:
     _initialized: bool = False
 
     ARCH_CONFIG = "pretrained"
-    # Use integrated photoholmes weights path
     ADAPTIVE_WEIGHTS = "app/photoholmes/weights/adaptive_cfa_net/weights.pth"
 
     def __new__(cls):

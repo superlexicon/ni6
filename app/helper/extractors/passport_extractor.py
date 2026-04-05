@@ -1,21 +1,7 @@
 import re
-import io
 import bisect
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
-import cv2
-import numpy as np
-from PIL import Image
-try:
-    from doctr.io import DocumentFile
-except ImportError:
-    # Fallback - create a minimal DocumentFile interface
-    class DocumentFile:
-        @staticmethod
-        def from_images(images):
-            # This would need proper implementation based on actual usage
-            raise ImportError("DocumentFile not available due to dependency conflicts")
-from rapidfuzz import fuzz, process
 
 from app.schemas.passport_schema import PassportData
 from app.helper.doctr.document_text_extractor import DocumentTextExtractor

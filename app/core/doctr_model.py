@@ -57,6 +57,13 @@ class DoctrModel:
         os.makedirs(cache_dir, exist_ok=True)
         os.environ['ONNXRUNTIME_CACHE_DIR'] = cache_dir
 
+        # Configure PyTorch hub cache directory for DocTR weights
+        torch_home = os.getenv('TORCH_HOME', os.path.join(os.path.dirname(__file__), '..', 'models'))
+        torch_home = os.path.abspath(torch_home)
+        os.makedirs(torch_home, exist_ok=True)
+        os.environ['TORCH_HOME'] = torch_home
+        self.logger.info(f"PyTorch hub cache directory set to: {torch_home}")
+
         # Configure ONNX Runtime for GPU acceleration
         self._configure_onnx_runtime()
 

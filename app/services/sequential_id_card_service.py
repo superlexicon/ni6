@@ -8,7 +8,6 @@ State is tracked via verification_state column in user_identity_index.
 """
 
 from typing import Dict, Any, Optional, Tuple, List
-from datetime import date
 from app.services.sequential_document_processor_base import DocumentProcessorBase
 from app.helper.extractors.gliner_id_card_extractor import GLiNERIDCardExtractor
 

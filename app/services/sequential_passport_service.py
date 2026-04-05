@@ -37,7 +37,6 @@ from app.repositories.user_key_repository import UserKeyRepository
 from app.repositories.user_identity_repository import UserIdentityRepository
 from app.repositories.face_biometrics_repository import FaceBiometricsRepository
 from app.services.osint_screening_service import osint_screening_service
-from app.utils.orientation_validator import OrientationValidator
 from app.services.worldcheck_service import worldcheck_service
 from app.config.osint_config import osint_settings
 from app.dto import DocumentErrorCode
@@ -59,7 +58,6 @@ class SequentialPassportService:
         self.passport_extractor = PassportExtractor()
         self.unified_extractor = UnifiedIDExtractor()
         self.detailed_analysis_service = DetailedAnalysisService()
-        self.orientation_validator = OrientationValidator()
 
     # =========================================================================
     # Image Manipulation Helpers for Dynamic Region Exclusion
@@ -1567,64 +1565,6 @@ class SequentialPassportService:
                 "text_regions": []
             }
 
-    def _step3_field_extraction(
-        self,
-        ocr_result: Dict[str, Any],
-        document_type: str
-    ) -> Dict[str, Any]:
-        """
-        STEP 3: Label/Value extraction validation.
-
-        Validates that minimum required fields were extracted with good confidence.
-        """
-        document_data = ocr_result.get('document_data')
-
-        if not document_data:
-            return {
-                "passed": False,
-                "reason": "No document data extracted from OCR",
-                "extracted_data": {}
-            }
-
-        # Build extracted data
-        extracted_data = self._build_extracted_data(document_data, document_type)
-
-        # Determine required fields based on document type
-        country_field = 'document_country' if document_type == 'id_card' else 'passport_country'
-        number_field = 'number'
-
-        # Check required fields
-        country = extracted_data.get(country_field) or extracted_data.get('country_code')
-        number = extracted_data.get(number_field)
-
-        if not country:
-            return {
-                "passed": False,
-                "reason": "Could not extract country code from document",
-                "extracted_data": extracted_data
-            }
-
-        if not number:
-            return {
-                "passed": False,
-                "reason": "Could not extract document number from document",
-                "extracted_data": extracted_data
-            }
-
-        # Check for name (required)
-        full_name = extracted_data.get('full_name')
-        if not full_name:
-            return {
-                "passed": False,
-                "reason": "Could not extract name from document",
-                "extracted_data": extracted_data
-            }
-
-        return {
-            "passed": True,
-            "data": extracted_data
-        }
-
     def _step3_process_ocr_and_remove_regions(
         self,
         image_bytes: bytes,
@@ -2097,100 +2037,6 @@ class SequentialPassportService:
             "osint_result": osint_result,
             "worldcheck_result": worldcheck_result
         }
-
-    async def _step6_face_matching(
-        self,
-        image_bytes: bytes,
-        user_identity_id: str
-    ) -> Dict[str, Any]:
-        """
-        STEP 6: Face matching (selfie vs passport).
-
-        Retrieves selfie embedding and compares with passport face.
-        """
-        face_match_threshold = verification_settings.face_match_threshold
-
-        # Extract face from passport
-        try:
-            passport_face_result = await self.face_extraction_service.extract_face_embedding(
-                image_bytes=image_bytes,
-                public_key=None,
-                user_identity_id=user_identity_id,
-                document_type="passport"
-            )
-
-            passport_face_embedding = None
-            if passport_face_result:
-                if isinstance(passport_face_result, dict):
-                    passport_face_embedding = passport_face_result.get('face_embedding')
-                elif hasattr(passport_face_result, 'face_embedding'):
-                    passport_face_embedding = passport_face_result.face_embedding
-
-            if not passport_face_embedding:
-                return {
-                    "passed": False,
-                    "reason": "No face detected in passport image"
-                }
-
-        except Exception as e:
-            self.logger.error(f"Passport face extraction failed: {e}")
-            return {
-                "passed": False,
-                "reason": f"Face extraction failed: {str(e)}"
-            }
-
-        # Get selfie embedding from database
-        selfie_embeddings = self.face_biometrics_repo.get_embeddings_by_user_identity_ordered(
-            user_identity_id,
-            limit=1
-        )
-
-        if not selfie_embeddings:
-            return {
-                "passed": False,
-                "reason": "No selfie face embedding found - selfie step may not be complete"
-            }
-
-        selfie_face_embedding = selfie_embeddings[0].get('embedding')
-
-        if not selfie_face_embedding:
-            return {
-                "passed": False,
-                "reason": "Selfie face embedding is invalid"
-            }
-
-        # Compare faces
-        try:
-            match_result = await self._perform_face_matching(
-                selfie_face_embedding,
-                passport_face_embedding
-            )
-            face_match_confidence = match_result.get("face_match_confidence")
-
-            if face_match_confidence is None:
-                return {
-                    "passed": False,
-                    "reason": "Face matching failed - no confidence score"
-                }
-
-            if face_match_confidence < face_match_threshold:
-                return {
-                    "passed": False,
-                    "reason": f"Face match confidence {face_match_confidence}% below threshold {face_match_threshold}%",
-                    "face_match_confidence": face_match_confidence
-                }
-
-            return {
-                "passed": True,
-                "face_match_confidence": face_match_confidence
-            }
-
-        except Exception as e:
-            self.logger.error(f"Face matching error: {e}")
-            return {
-                "passed": False,
-                "reason": f"Face matching error: {str(e)}"
-            }
 
     async def _step7_web_search_sentiment(
         self,

@@ -12,9 +12,6 @@ from typing import Dict, Any, Optional, Tuple, List
 from datetime import date
 from app.services.sequential_document_processor_base import DocumentProcessorBase
 from app.helper.extractors.unified_id_extractor import UnifiedIDExtractor
-from app.services.face_extraction_service import FaceExtractionService
-from app.repositories.face_biometrics_repository import FaceBiometricsRepository
-from app.helper.deepface_helper import DeepfaceHelper
 
 
 class SequentialNationalIdService(DocumentProcessorBase):
@@ -23,8 +20,6 @@ class SequentialNationalIdService(DocumentProcessorBase):
     def __init__(self):
         super().__init__()
         self.unified_extractor = UnifiedIDExtractor()
-        self.face_extraction_service = FaceExtractionService()
-        self.face_biometrics_repo = FaceBiometricsRepository()
 
     # ============================================================
     # ABSTRACT METHOD IMPLEMENTATIONS

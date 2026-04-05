@@ -23,7 +23,6 @@ class ExifAsLanguageMethod:
     def __init__(self):
         self.logger = get_logger()
         self.device = self._get_device()
-        # Use integrated photoholmes weights path
         weights_path = "app/photoholmes/weights/exif_as_language/weights.pth"
         try:
             # Use optimized configuration for 512x512 images to reduce computational load

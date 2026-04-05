@@ -36,7 +36,7 @@ from app.helper import (key_helper,
                         prepare_verification_data,
                         exif_validator,
                         document_type_detector,
-                        bank_statement_validator
+                        bank_statement_validator,
                         )
 
 # Initialize services

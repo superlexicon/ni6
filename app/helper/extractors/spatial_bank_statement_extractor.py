@@ -1698,6 +1698,8 @@ class SpatialBankStatementExtractor:
         Returns:
             Cleaned address text
         """
+        self.logger.info(f"_clean_address_text INPUT: text='{text}', holder_name='{holder_name}'")
+
         if not text:
             return text
 
@@ -1746,7 +1748,9 @@ class SpatialBankStatementExtractor:
         # Collapse multiple spaces
         cleaned = re.sub(r'\s+', ' ', cleaned)
 
-        return cleaned.strip()
+        result = cleaned.strip()
+        self.logger.info(f"_clean_address_text OUTPUT: '{result}'")
+        return result
 
     def _normalize_name_for_matching(self, name: str) -> str:
         """
@@ -3359,6 +3363,20 @@ class SpatialBankStatementExtractor:
                 else:
                     street_address = city_span_street
 
+        # Clean the final concatenated address to remove any duplicates or location components
+        # that may have been introduced by the city span extraction
+        if street_address and parsed_city:
+            self.logger.info(f"Final address BEFORE cleaning: '{street_address}'")
+            final_cleaned = self._clean_street_address(
+                street_address,
+                parsed_city,
+                components.get("state"),
+                components.get("postal_code"),
+                country_code
+            )
+            self.logger.info(f"Final address AFTER _clean_street_address: '{final_cleaned}'")
+            street_address = final_cleaned
+
         return {
             "full_address": full_address,
             "street_address": street_address,
@@ -3588,6 +3606,8 @@ class SpatialBankStatementExtractor:
         Returns:
             Cleaned street address
         """
+        self.logger.info(f"_clean_street_address INPUT: '{street_address}', city='{city}', state='{state}', postal='{postal_code}'")
+
         if not street_address:
             return ""
 
@@ -3613,27 +3633,36 @@ class SpatialBankStatementExtractor:
                         text_upper = text.upper()
                         break
 
-        # Remove state
+        # Remove state - tokenize multi-word state names to remove individual words
         if state:
             state_upper = state.upper()
+            # First try to remove the full state name
             text = re.sub(r'\b' + re.escape(state_upper) + r'\b', '', text, flags=re.IGNORECASE).strip()
+            text_upper = text.upper()
+            # Also remove individual words from multi-word state names
+            # This handles cases like "PRADESH" from "ANDHRA PRADESH"
+            state_words = state_upper.split()
+            if len(state_words) > 1:
+                for word in state_words:
+                    # Remove each word individually if it appears standalone
+                    text = re.sub(r'\b' + re.escape(word) + r'\b', '', text, flags=re.IGNORECASE).strip()
+                    text_upper = text.upper()
 
-        # Remove city - only remove the last occurrence (typically at end of address)
+        # Remove city - remove ALL occurrences (not just the last)
         if city:
             city_upper = city.upper()
-            pattern = r'\b' + re.escape(city_upper) + r'\b'
-            matches = list(re.finditer(pattern, text.upper()))
-            if matches:
-                # Remove the last occurrence (typically at the end)
-                last_match = matches[-1]
-                text = text[:last_match.start()] + text[last_match.end():]
-                text = text.strip()
-            else:
-                # Fallback: remove without word boundary (last occurrence)
-                parts = re.split(r'(?i)' + re.escape(city_upper), text)
-                if len(parts) > 1:
-                    text = ''.join(parts[:-1]).strip()
-                    text = re.sub(r',\s*$', '', text).strip()
+            # Remove all occurrences using regex
+            text = re.sub(r'\b' + re.escape(city_upper) + r'\b', '', text, flags=re.IGNORECASE).strip()
+
+        # Also remove state abbreviations (for India, UAE, etc.)
+        if state and country_code:
+            state_upper = state.upper()
+            abbreviations = self._get_state_abbreviations(country_code)
+            for abbrev, full_name in abbreviations.items():
+                if state_upper == full_name.upper() or state_upper == abbrev.upper():
+                    # Remove the abbreviation from text
+                    text = re.sub(r'\b' + re.escape(abbrev.upper()) + r'\b', '', text, flags=re.IGNORECASE).strip()
+                    break
 
         # Clean up: remove extra commas and whitespace
         text = re.sub(r',\s*,', ',', text)
@@ -3641,7 +3670,141 @@ class SpatialBankStatementExtractor:
         text = re.sub(r',\s*$', '', text)
         text = re.sub(r'\s+', ' ', text)
 
-        return text.strip()
+        result = text.strip()
+        self.logger.info(f"_clean_street_address OUTPUT: '{result}'")
+        return result
+
+    def _get_state_abbreviations(self, country_code: str) -> Dict[str, str]:
+        """Get state abbreviation to full name mapping for a country."""
+        abbreviations = {}
+
+        if country_code == "IN":
+            # Indian state abbreviations
+            abbreviations = {
+                "AP": "ANDHRA PRADESH",
+                "TN": "TAMIL NADU",
+                "KA": "KARNATAKA",
+                "MH": "MAHARASHTRA",
+                "DL": "DELHI",
+                "TS": "TELANGANA",
+                "KL": "KERALA",
+            }
+        elif country_code == "AE":
+            # UAE emirates
+            abbreviations = {
+                "DU": "DUBAI",
+                "AB": "ABU DHABI",
+                "SH": "SHARJAH",
+                "AJ": "AJMAN",
+                "UM": "UMM AL QUWAIN",
+                "RAK": "RAS AL KHAIMAH",
+                "FUJ": "FUJAIRAH",
+            }
+
+        return abbreviations
+
+    def _remove_duplicate_words(self, text: str, city: str = None) -> str:
+        """
+        Remove duplicate words and location names from address.
+
+        Handles cases like:
+        - "1-21 SETTYGIRIPALLE, SETTYGIRIPALLE" -> "1-21 SETTYGIRIPALLE"
+        - "CHITTOOR, Chittoor" -> "" (both are city name)
+
+        Preserves house number prefixes like "1-21" while removing standalone duplicates.
+        """
+        if not text:
+            return ""
+
+        self.logger.info(f"_remove_duplicate_words INPUT: '{text}', city='{city}'")
+
+        # Split by comma and clean each part
+        parts = [p.strip() for p in text.split(',')]
+        if not parts:
+            return ""
+
+        seen_words = set()
+        seen_parts = []
+        unique_parts = []
+
+        for part in parts:
+            if not part:
+                continue
+
+            part_upper = part.upper()
+
+            # Check if this is a city name variant
+            is_city_variant = False
+            if city:
+                city_upper = city.upper()
+                # Direct match or case variation
+                if part_upper == city_upper or part_upper in city_upper or city_upper in part_upper:
+                    is_city_variant = True
+
+            if is_city_variant:
+                # Skip city name variants
+                continue
+
+            # Check for duplicate location names
+            # Split part into words to check for standalone duplicates
+            words = part_upper.split()
+            is_duplicate = False
+
+            # If part contains house number pattern, keep it
+            # Match patterns like: "1-21", "1-21 STREET", "123 MAIN ST", "H NO 1", "DOOR NO 123"
+            house_number_patterns = [
+                r'^\d+[-\s]\d+',  # "1-21", "123-456"
+                r'^[\d-]+$',      # "1-21" (just numbers and hyphens)
+                r'^H\s*NO\s*\d+',  # "H NO 1", "H NO 123"
+                r'^DOOR\s*NO\s*\d+',  # "DOOR NO 123"
+                r'^HOUSE\s*NO\s*\d+',  # "HOUSE NO 123"
+                r'^FLT\s*\d+',     # "FLT 1", "FLAT 1"
+                r'^\d+[-/\s]',     # "123-", "123 ", "123/"
+            ]
+            has_house_number = any(re.match(pattern, part_upper) for pattern in house_number_patterns)
+
+            if not has_house_number and len(words) == 1:
+                # Single word - check if already seen
+                if words[0] in seen_words:
+                    is_duplicate = True
+                else:
+                    seen_words.add(words[0])
+            elif not has_house_number:
+                # Multi-word part - check if all words were seen before
+                all_words_seen = all(w in seen_words for w in words)
+                if all_words_seen:
+                    is_duplicate = True
+                else:
+                    for w in words:
+                        seen_words.add(w)
+
+            # Also check for exact matches in seen_parts
+            for seen in seen_parts:
+                if seen == part_upper:
+                    is_duplicate = True
+                    break
+                # Check if one is contained in the other (partial duplicates)
+                if len(seen) > 3 and seen in part_upper:
+                    is_duplicate = True
+                    break
+                if len(part_upper) > 3 and part_upper in seen:
+                    is_duplicate = True
+                    break
+
+            if not is_duplicate:
+                seen_parts.append(part_upper)
+                unique_parts.append(part)
+                self.logger.info(f"_remove_duplicate_words KEPT: '{part}' (has_house_number={has_house_number})")
+            else:
+                self.logger.info(f"_remove_duplicate_words REMOVED: '{part}' (reason=duplicate)")
+
+        result = ', '.join(unique_parts).strip()
+        # Clean up any trailing/leading commas
+        result = re.sub(r',\s*,', ',', result)
+        result = re.sub(r'^,\s*', '', result)
+        result = re.sub(r',\s*$', '', result)
+
+        return result
 
     def _extract_state_from_address(self, address: str, country_code: str) -> Optional[str]:
         """

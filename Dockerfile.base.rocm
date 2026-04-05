@@ -26,7 +26,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     MIOPEN_USER_DB_PATH=/root/.config/miopen \
     MIOPEN_CACHE_DIR=/root/.cache/miopen \
     MIOPEN_FIND_MODE=3 \
-    PYTORCH_HIP_ALLOC_CONF=expandable_segments:True
+    PYTORCH_HIP_ALLOC_CONF=expandable_segments:True \
+    TORCH_HOME=/app/app/models
 
 # Install necessary build tools and app dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -57,10 +58,17 @@ RUN pip3 install /tmp/wheels/* && \
     echo "PyTorch installed with ROCm support from local wheels"
 
 # Copy pre-downloaded weights (5.1 GB - rarely change)
-COPY app/deepface_weights/ /root/.deepface/weights/
-COPY app/photoholmes/weights/ /app/photoholmes/weights/
+COPY app/deepface/.deepface/weights/ /root/.deepface/weights/
+COPY app/photoholmes/weights/ /app/app/photoholmes/weights/
 COPY app/spacy_models/ /app/app/spacy_models/
-COPY app/nltk_data/ /app/app/nltk_data/
+COPY app/models/nltk/ /app/app/models/nltk/
+COPY app/models/finbert/ /app/app/models/finbert/
+COPY app/models/gliner2/ /app/app/models/gliner2/
+COPY app/models/mediapipe/ /app/app/models/mediapipe/
+
+# Copy DocTR OCR model weights (PyTorch hub cache)
+# Default TORCH_HOME is app/models, weights stored in hub/checkpoints/
+COPY app/models/hub/checkpoints/ /root/.cache/torch/hub/checkpoints/
 
 # Create runtime directories and MIOpen cache
 RUN mkdir -p /app/logs /app/temp /var/run/mysqld /root/.config/miopen /root/.cache/miopen

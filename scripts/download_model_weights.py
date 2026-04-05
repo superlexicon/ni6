@@ -3,9 +3,12 @@
 Download all ML/DL model weights for the OSINT application from Google Drive zip files.
 
 The zip files contain folders that are copied to the correct app directories:
-- deepface → app/deepface_weights
-- finbert → app/finbert_weights
-- nltk → app/nltk_data
+- deepface → app/deepface/.deepface/weights
+- doctr → app/models/hub/checkpoints
+- finbert → app/models/finbert
+- gliner2 → app/models/gliner2
+- mediapipe → app/models/mediapipe
+- nltk → app/models/nltk
 - photoholmes → app/photoholmes/weights
 - spacy → app/spacy_models
 
@@ -41,11 +44,11 @@ logger = logging.getLogger(__name__)
 # Google Drive file IDs for the 5 zip files containing all model weights
 # Using direct download URL format for large files
 MODELS_ZIP_URLS = [
-    os.environ.get("MODELS_ZIP_URL_1", "https://drive.google.com/uc?id=1gSGwguV4ItxNcuXz2row5ev85Yo5fxnH"),
-    os.environ.get("MODELS_ZIP_URL_2", "https://drive.google.com/uc?id=1CdDaVQ7JXa6Pyem9tQjetHDHqEDkeudk"),
-    os.environ.get("MODELS_ZIP_URL_3", "https://drive.google.com/uc?id=1-z64KGwN8RNCixMHAS4f-MSfwwx5JJ1L"),
-    os.environ.get("MODELS_ZIP_URL_4", "https://drive.google.com/uc?id=1Z7OGBDWYhLJlh7lNnF8hZH4ZxMe3j-Jg"),
-    os.environ.get("MODELS_ZIP_URL_5", "https://drive.google.com/uc?id=1Y5HivG9Eu6pZTQ4LtJjDN02OCTa2vpgm"),
+    os.environ.get("MODELS_ZIP_URL_1", "https://drive.google.com/uc?export=download&id=16M5puSMn4o7ahwYHYTIODy42k2VB4D_H"),
+    os.environ.get("MODELS_ZIP_URL_2", "https://drive.google.com/uc?export=download&id=1hoIUbFn3TjjAJSk05W-Ia9o42LG-tlKp"),
+    os.environ.get("MODELS_ZIP_URL_3", "https://drive.google.com/uc?export=download&id=1fcW9Q9frxx8J_vtMaHjHwKt5Lei8ahqX"),
+    os.environ.get("MODELS_ZIP_URL_4", "https://drive.google.com/uc?export=download&id=1CQbhGBJVyeNoWAVO2QUXH0FdfmEu7UQr"),
+    os.environ.get("MODELS_ZIP_URL_5", "https://drive.google.com/uc?export=download&id=1TKtfYVE6FRvvFA_LIfGAwSKrfkn8NPse"),
 ]
 
 # Zip file extracts to this root folder
@@ -54,9 +57,12 @@ ZIP_ROOT_FOLDER = "ni6-models"
 # Mapping from folder names in the zip to target directories in the app
 # Format: "zip_folder_name": "app/target_directory"
 FOLDER_MAPPING = {
-    "deepface": "app/deepface_weights",
-    "finbert": "app/finbert_weights",
-    "nltk": "app/nltk_data",
+    "deepface": "app/deepface/.deepface/weights",
+    "doctr": "app/models/hub/checkpoints",
+    "finbert": "app/models/finbert",
+    "gliner2": "app/models/gliner2",
+    "mediapipe": "app/models/mediapipe",
+    "nltk": "app/models/nltk",
     "photoholmes": "app/photoholmes/weights",
     "spacy": "app/spacy_models",
 }
@@ -138,17 +144,42 @@ def download_and_extract_models(
             log_info(f"  Part {i}/{len(zip_urls)}: {zip_url}")
 
             try:
-                gdown.download(
-                    zip_url,
-                    output=str(zip_path),
-                    quiet=False,
-                    fuzzy=True,
-                    use_cookies=False
-                )
-                if not zip_path.exists():
-                    log_error(f"    Failed to download part {i}")
+                # Use Python's requests library to handle Google Drive downloads
+                # This handles the virus scan warning page automatically
+                import requests
+                import io
+
+                log_info(f"    Downloading with requests library...")
+
+                # Use requests to download, handling redirects automatically
+                # For large files, stream the download
+                response = requests.get(zip_url, stream=True, timeout=300)
+
+                # Check if we got the virus scan warning page
+                if "virus scan warning" in response.text.lower() or response.url.startswith("https://drive.google.com/"):
+                    # Parse HTML to get the confirm link
+                    import re
+                    uuid_match = re.search(r'name="uuid" value="([^"]+)"', response.text)
+                    file_id = zip_url.split("id=")[1].split("&")[0]
+
+                    if uuid_match:
+                        uuid_value = uuid_match.group(1)
+                        # Construct the direct download URL
+                        download_url = f"https://drive.usercontent.google.com/download?id={file_id}&export=download&confirm=t&uuid={uuid_value}"
+                        response = requests.get(download_url, stream=True, timeout=300)
+
+                # Download with progress indicator
+                downloaded_size = 0
+                with open(zip_path, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+                            downloaded_size += len(chunk)
+
+                if not zip_path.exists() or zip_path.stat().st_size < 1000:
+                    log_error(f"    Failed to download part {i} (file too small: {zip_path.stat().st_size if zip_path.exists() else 0} bytes)")
                     return results
-                log_success(f"    Part {i} downloaded")
+                log_success(f"    Part {i} downloaded ({zip_path.stat().st_size / (1024*1024):.1f} MB)")
 
                 # Extract this zip file
                 log_info(f"    Extracting part {i}...")

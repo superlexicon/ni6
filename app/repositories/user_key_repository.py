@@ -1,5 +1,5 @@
 from typing import Optional, Dict, Any, List
-from mysql.connector.errors import Error as MySQLError, IntegrityError
+from mysql.connector.errors import Error as MySQLError
 from app.core import logger
 from .base_repository import BaseRepository
 

@@ -48,11 +48,15 @@ logger = logging.getLogger(__name__)
 # Using GLiNER2 for improved entity extraction (better person name detection)
 # GLiNER2 correctly handles Indian names and addresses better than original GLiNER
 
-# Use local weights if available (downloaded via scripts/download_model_weights.py)
+# Use local weights if available (via GLINER_WEIGHTS_DIR env var)
 # Falls back to HuggingFace hub if local weights not found
 import os
-GLINER2_LOCAL_PATH = os.path.join(os.path.dirname(__file__), "..", "gliner2_weights")
-GLINER2_MODEL_NAME = GLINER2_LOCAL_PATH if os.path.exists(GLINER2_LOCAL_PATH) else "fastino/gliner2-large-v1"
+from dotenv import load_dotenv
+load_dotenv()
+
+# Get GLINER weights directory from environment or use default
+GLINER_WEIGHTS_DIR = os.environ.get("GLINER_WEIGHTS_DIR", os.path.join(os.path.dirname(__file__), "..", "models", "gliner2"))
+GLINER2_MODEL_NAME = GLINER_WEIGHTS_DIR if os.path.exists(GLINER_WEIGHTS_DIR) else "fastino/gliner2-large-v1"
 
 # Alternative models (uncomment to use):
 # GLINER2_MODEL_NAME = "fastino/gliner2-multi-v1"  # Multi-lingual version
@@ -90,7 +94,9 @@ class GLiNERNERModel:
         """Setup environment for GLiNER model."""
         # Set HF_HOME for caching models
         if not os.environ.get('HF_HOME'):
-            cache_dir = os.path.expanduser("~/.cache/huggingface")
+            # Use app cache directory instead of user home
+            cache_dir = os.path.join(os.path.dirname(__file__), "..", ".cache", "huggingface")
+            cache_dir = os.path.abspath(cache_dir)
             os.makedirs(cache_dir, exist_ok=True)
             os.environ['HF_HOME'] = cache_dir
 
@@ -128,7 +134,9 @@ class GLiNERNERModel:
             # Load model - handle different APIs for GLiNER2 vs GLiNER
             if gliner_version == "gliner2":
                 # GLiNER2 returns results wrapped as {'entities': {entity_type: [values]}}
-                model = GLiNERClass.from_pretrained(GLINER2_MODEL_NAME)
+                # Force local-only loading to prevent any HuggingFace Hub access
+                local_files_only = os.path.exists(GLINER_WEIGHTS_DIR)
+                model = GLiNERClass.from_pretrained(GLINER2_MODEL_NAME, local_files_only=local_files_only)
                 model = model.to(device)  # Move model to GPU
                 self.logger.info(f"{gliner_version} model loaded successfully on {device}")
             else:

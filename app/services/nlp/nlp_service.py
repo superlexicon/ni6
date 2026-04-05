@@ -12,8 +12,8 @@ import nltk
 import os
 
 # Use relative path from working directory (/app)
-# Dockerfile copies to /app/app/nltk_data/, working dir is /app
-nltk_data_dir = os.path.abspath('app/nltk_data')
+# Dockerfile copies to /app/app/models/nltk/, working dir is /app
+nltk_data_dir = os.path.abspath('app/models/nltk')
 nltk.data.path.insert(0, nltk_data_dir)  # Insert at beginning to search first
 
 from typing import Dict, Any, List, Optional
@@ -47,7 +47,7 @@ class NLPService:
             from pathlib import Path
 
             # Try bundled model first, fallback to system-installed
-            bundled_path = Path(__file__).parent.parent.parent / "spacy_models" / "en_core_web_sm"
+            bundled_path = Path(__file__).parent.parent.parent / "models" / "spacy" / "en_core_web_sm"
             if bundled_path.exists():
                 self.nlp = spacy.load(str(bundled_path))
                 self.logger.info(f"spaCy NER loaded from bundled model: {bundled_path}")
@@ -180,7 +180,7 @@ class NLPService:
             from pathlib import Path
 
             # Use local weights if available (downloaded via scripts/download_model_weights.py)
-            local_path = Path(__file__).parent.parent.parent / "finbert_weights"
+            local_path = Path(__file__).parent.parent.parent / "models" / "finbert"
             model_name = str(local_path) if local_path.exists() else "ProsusAI/finbert"
 
             self.logger.info(f"Loading FinBERT model from: {model_name}")

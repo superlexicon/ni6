@@ -16,7 +16,6 @@ class TruforMethod:
     MAX_IMAGE_SIZE: int = 512
     SUPPORTED_CONTENT_TYPE: str = 'image/'
     RGB_MODE: str = 'RGB'
-    # TruFor weights path - can be updated to actual weights location
     TRUFOR_WEIGHTS_PATH = "app/photoholmes/weights/trufor/TruFor_weights.pth"
 
     def __init__(self):

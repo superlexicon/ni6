@@ -79,8 +79,8 @@ def _download_model_file() -> str:
     """
     model_url = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
 
-    # Create cache directory
-    cache_dir = os.path.join(tempfile.gettempdir(), "mediapipe_models")
+    # Use consolidated models directory
+    cache_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "mediapipe")
     os.makedirs(cache_dir, exist_ok=True)
 
     model_path = os.path.join(cache_dir, "hand_landmarker.task")
