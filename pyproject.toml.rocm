@@ -76,6 +76,7 @@ ffmpeg-python = "^0.2.0"
 # NLP models for enhanced negative news detection
 nltk = "^3.8.1"
 spacy = "^3.7.2"
+gliner2 = "^1.2.4"  # Named Entity Recognition for document extraction
 beautifulsoup4 = "^4.12.2"
 trafilatura = "^1.6.0"  # Modern article extraction with better anti-bot handling
 
