@@ -132,11 +132,9 @@ uploads/
 *.db
 *.sqlite
 
-# Model weights (will be copied separately or mounted as volume)
-app/models/
-app/photoholmes/weights/
-app/deepface/.deepface/
-app/.cache/  # PyTorch hub cache (includes DocTR weights)
+# Model weights are copied into Docker image - DO NOT exclude
+# Cache directories only (weights are in app/models/ and copied separately)
+app/.cache/
 
 # Individual model directories (for reference - all covered by app/models/ above):
 # - app/deepface/.deepface/weights/ - DeepFace face detection models
