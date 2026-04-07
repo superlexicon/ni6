@@ -298,7 +298,9 @@ class JobManager:
             "encrypted_payload": job_request.encrypted_payload,
             "payload_iv": job_request.payload_iv,
             # Target server for routing (if provided)
-            "target_server_public_key": job_request.target_server_public_key
+            "target_server_public_key": job_request.target_server_public_key,
+            # API URL filter for secret share recovery
+            "api_url": job_request.api_url
         }
 
         # Debug logging for encrypted envelope
