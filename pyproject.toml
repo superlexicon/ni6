@@ -95,6 +95,8 @@ trafilatura = "^1.6.0"  # Modern article extraction with better anti-bot handlin
 
 # Country/State/City data for address validation
 countrystatecity-countries = "^1.0.0"
+# DocTR for OCR text extraction (passports, documents, geometry-aware analysis)
+python-doctr = "^1.0.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.0.0"

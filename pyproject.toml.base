@@ -82,6 +82,8 @@ trafilatura = "^1.6.0"  # Modern article extraction with better anti-bot handlin
 
 # City/State lookup for address parsing
 countrystatecity-countries = "^1.0.0"
+# DocTR for OCR text extraction (passports, documents, geometry-aware analysis)
+python-doctr = "^1.0.0"
 
 [tool.poetry.group.gpu.dependencies]
 GPUtil = "^1.4.0"
