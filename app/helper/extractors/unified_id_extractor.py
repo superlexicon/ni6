@@ -260,8 +260,12 @@ class UnifiedIDExtractor:
             document_type = detect_document_type_from_patterns(all_text, country_code)
             self.logger.info(f"  Detected document type: {document_type}")
 
-            # Step 4: For passports, try GLINER2 first
-            if document_type == 'passport':
+            # Step 4: Skip GLiNER2 for passports - use reliable logic-based extraction
+            # GLiNER2 schema-based extraction is unreliable for structured passport documents.
+            # It returns garbage results (e.g., "KILARI CHANDRA ROHITH PreCTErTT") even when
+            # DocTR OCR correctly extracts clean data. Passports have highly structured
+            # formats with known field positions - spatial/logic-based extraction is far more reliable.
+            if False:  # GLiNER2 disabled for passports
                 self.logger.info("Step 4: Trying GLINER2 extraction for passport")
                 try:
                     from app.helper.extractors import get_gliner_passport_extractor
@@ -288,7 +292,8 @@ class UnifiedIDExtractor:
                 except Exception as e:
                     self.logger.error(f"GLINER2 extraction error: {str(e)}, falling back to logic-based")
 
-            # Step 5: Logic-based extraction (fallback or non-passport documents)
+            # Step 5: Logic-based extraction (now primary for passports)
+            self.logger.info(f"Using logic-based extraction for {document_type}")
             return await self._extract_with_logic_based(content, is_pdf, text_blocks, all_text, country_code, document_type)
 
         except Exception as e:

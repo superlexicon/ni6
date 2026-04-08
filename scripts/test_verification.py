@@ -1726,11 +1726,11 @@ class ResultPrinter:
         """Print summary for document-only modes (passport/bank/pan_card)."""
         # Adjust table width based on mode
         if mode_name.lower() == 'passport':
-            header = f"\n{'User':<12} {'Filename':<25} {'Status':<10} {'Similarity':<12} {'Time':<10}"
-            separator = "-" * 85
-            print("\n" + "=" * 100)
-            print(" " * 30 + f"{mode_name.upper()} MODE RESULTS")
-            print("=" * 100)
+            header = f"\n{'User':<10} {'Filename':<20} {'Status':<8} {'Full Name':<20} {'Passport #':<12} {'Country':<4} {'DOB':<12} {'Sex':<4} {'Expiry':<10} {'Similarity':<10} {'Time':<8}"
+            separator = "-" * 130
+            print("\n" + "=" * 140)
+            print(" " * 40 + f"{mode_name.upper()} MODE RESULTS")
+            print("=" * 140)
         elif mode_name.lower() == 'pan card':
             header = f"\n{'User':<12} {'Filename':<20} {'Status':<10} {'PAN Number':<12} {'Full Name':<25} {'Father Name':<20} {'DOB':<12} {'Type':<8} {'Time':<8}"
             separator = "-" * 145
@@ -1757,7 +1757,23 @@ class ResultPrinter:
             status = "✓ PASS" if result.success else "✗ FAIL"
 
             if mode_name.lower() == 'passport':
-                time_str = f"{result.elapsed_seconds:.2f}s"
+                time_str = f"{result.elapsed_seconds:.1f}s"
+                # Extract passport data fields
+                full_name = result.extracted_data.get('full_name', '') or '-'
+                passport_number = result.extracted_data.get('passport_number', '') or '-'
+                country_code = result.extracted_data.get('country_code', '') or '-'
+                dob = result.extracted_data.get('dob', '') or '-'
+                sex = result.extracted_data.get('sex', '') or '-'
+                expiry = result.extracted_data.get('expiry', '') or '-'
+
+                # Clean newlines and extra whitespace from OCR output
+                full_name = ' '.join(str(full_name).replace('\n', ' ').split()) if full_name != '-' else '-'
+                passport_number = ' '.join(str(passport_number).replace('\n', ' ').split()) if passport_number != '-' else '-'
+                country_code = ' '.join(str(country_code).replace('\n', ' ').split()) if country_code != '-' else '-'
+                dob = ' '.join(str(dob).replace('\n', ' ').split()) if dob != '-' else '-'
+                sex = ' '.join(str(sex).replace('\n', ' ').split()) if sex != '-' else '-'
+                expiry = ' '.join(str(expiry).replace('\n', ' ').split()) if expiry != '-' else '-'
+
                 # Show similarity score for passport mode
                 sim_score = result.extracted_data.get('similarity_score')
                 if sim_score is not None:
@@ -1767,8 +1783,15 @@ class ResultPrinter:
                     sim_str = f"{sim_status} {sim_score:.3f}"
                 else:
                     sim_str = "-"
-                filename = result.filename[:23] + ".." if len(result.filename) > 25 else result.filename
-                print(f"{result.user:<12} {filename:<25} {status:<10} {sim_str:<12} {time_str:<10}")
+
+                # Truncate long values
+                filename = result.filename[:18] + ".." if len(result.filename) > 20 else result.filename
+                full_name = full_name[:18] + ".." if len(full_name) > 20 else full_name
+                passport_number = passport_number[:11] + ".." if len(passport_number) > 12 else passport_number
+                dob = dob[:11] if len(dob) > 12 else dob
+                expiry = expiry[:9] if len(expiry) > 10 else expiry
+
+                print(f"{result.user:<10} {filename:<20} {status:<8} {full_name:<20} {passport_number:<12} {country_code:<4} {dob:<12} {sex:<4} {expiry:<10} {sim_str:<10} {time_str:<8}")
             elif mode_name.lower() == 'pan card':
                 time_str = f"{result.elapsed_seconds:.2f}s"
                 # PAN card specific fields

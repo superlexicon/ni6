@@ -482,16 +482,23 @@ class GLiNERNERModel:
             Dictionary mapping field names to description strings
         """
         return {
-            "passport_number": "The unique passport document number, typically 8-9 alphanumeric characters with at least 6 digits",
-            "full_name": "The passport holder's full legal name including both surname and given names",
-            "date_of_birth": "The passport holder's date of birth in formats like DD MMM YYYY, DD/MM/YYYY, or YYYY-MM-DD",
-            "sex": "The passport holder's gender/sex, typically M or F",
-            "nationality": "The passport holder's nationality as a full text description (e.g., 'SINGAPORE CITIZEN', 'UNITED STATES OF AMERICA', 'MYANMAR', 'INDIAN') typically found near the 'Nationality' label",
-            "passport_country": "The issuing country of the passport as a 3-letter ISO country code",
-            "place_of_birth": "The passport holder's place of birth, typically a city or country name",
-            "issuing_authority": "The government authority that issued the passport",
-            "date_of_issue": "The date when the passport was issued in formats like DD MMM YYYY, DD/MM/YYYY, or YYYY-MM-DD",
-            "date_of_expiry": "The passport expiration date in formats like DD MMM YYYY, DD/MM/YYYY, or YYYY-MM-DD",
+            "passport_number": "The value that appears immediately after labels like 'Passport No' 'Passport Number' 'No' 'P<' or after the country code line. This is the passport's document identifier - extract whatever number/code appears on that line. Do NOT validate format - just extract the value next to the passport number label. DO NOT extract country codes like 'IND' 'SGP' as passport numbers.",
+
+            "full_name": "The value that appears immediately after 'Surname' label AND the value that appears immediately after 'Given Names' label - combine both values with a space. This is the person's name written next to these explicit labels. Do NOT extract text that IS the label itself (like 'Surname' or 'Given Names'). DO NOT extract single letters or words that are clearly labels like 'Nationality' 'Sex' 'Date'.",
+
+            "passport_country": "The 3-letter country code value that appears after 'Country Code' label OR at the very top of the document as the first 3-letter code. This is just the 3-letter code like 'IND' 'SGP' 'USA' 'GBR' 'MYS'. Extract the code value that appears next to 'Country Code' label.",
+
+            "nationality": "The value that appears immediately after the 'Nationality' label. This is the nationality text that comes after that explicit label. Examples of what you might extract: 'INDIAN' 'SINGAPORE CITIZEN' 'UNITED STATES OF AMERICA'. Do NOT extract the word 'Nationality' itself.",
+
+            "date_of_birth": "The date value that appears immediately after labels like 'Date of Birth' 'Birth Date' 'DOB'. Extract whatever date format appears after that label. Do NOT extract the label text itself.",
+
+            "sex": "The value that appears immediately after the 'Sex' label. This will be 'M' 'F' 'Male' or 'Female' - extract whatever appears after the Sex label. Do NOT extract the word 'Sex' itself.",
+
+            "date_of_expiry": "The date value that appears immediately after labels like 'Date of Expiry' 'Expiry' 'Valid Until'. Extract the date that appears after that label. This is typically the latest date on the document.",
+
+            "place_of_birth": "The value that appears immediately after the 'Place of Birth' label. This is the city or country name that comes after that explicit label. Do NOT extract the label text itself.",
+
+            "issuing_authority": "The value that appears immediately after labels like 'Issuing Authority' 'Authority' 'Issued By'. Extract the organization name that appears after that label.",
         }
 
     async def extract_passport_with_schema_async(
@@ -527,6 +534,16 @@ class GLiNERNERModel:
                 include_spans=True
             )
 
+            # Filter label text and low-confidence entities for all fields
+            LABEL_TEXT_TO_EXCLUDE = {
+                'surname', 'given names', 'given name', 'first name', 'last name', 'family name',
+                'name', 'full name', 'nationality', 'date of birth', 'place of birth', 'birth date',
+                'sex', 'issue date', 'expiry date', 'passport no', 'passport number',
+                'country code', 'type', 'code', 'birth', 'place', 'issued', 'valid', 'authority',
+                'republic', 'india', 'singapore', 'federation', 'brazil'
+            }
+            MIN_CONFIDENCE = 0.5
+
             # Process results - get best match per field
             results = {}
             entities_data = entities_dict.get("entities", entities_dict)
@@ -537,11 +554,34 @@ class GLiNERNERModel:
                     continue
 
                 if isinstance(values, list) and len(values) > 0:
-                    best = max(values, key=lambda v: v.get('confidence', v.get('score', 0)))
-                    results[field_name] = {
-                        'value': best.get('text', ''),
-                        'confidence': best.get('confidence', best.get('score', 0.0))
-                    }
+                    # Filter out label text and low confidence
+                    filtered_values = [
+                        v for v in values
+                        if v.get('confidence', v.get('score', 0)) >= MIN_CONFIDENCE
+                        and v.get('text', '').strip().lower() not in LABEL_TEXT_TO_EXCLUDE
+                        and len(v.get('text', '').strip()) > 1  # Exclude single chars
+                    ]
+
+                    if filtered_values:
+                        if field_name == 'full_name' and len(filtered_values) > 1:
+                            # Combine multiple name parts
+                            sorted_values = sorted(filtered_values, key=lambda v: v.get('start', 0))
+                            combined_name = ' '.join([v.get('text', '').strip() for v in sorted_values])
+                            results[field_name] = {
+                                'value': combined_name,
+                                'confidence': sum(v.get('confidence', 0) for v in sorted_values) / len(sorted_values)
+                            }
+                            self.logger.info(f"  Combined {len(sorted_values)} name parts into full_name: '{combined_name}'")
+                        else:
+                            # Use highest confidence
+                            best = max(filtered_values, key=lambda v: v.get('confidence', v.get('score', 0)))
+                            results[field_name] = {
+                                'value': best.get('text', ''),
+                                'confidence': best.get('confidence', best.get('score', 0.0))
+                            }
+                    else:
+                        # No valid values after filtering
+                        results[field_name] = None
                 elif isinstance(values, dict):
                     results[field_name] = {
                         'value': values.get('text', ''),
