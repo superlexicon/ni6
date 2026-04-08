@@ -98,13 +98,17 @@ class OTPService:
                         remaining_minutes = remaining_seconds // 60
                         remaining_secs = remaining_seconds % 60
 
-                        # Format as "X minutes" or "X minutes Y seconds"
+                        # Format as "X minute(s)" or "X minute(s) Y second(s)"
                         if remaining_minutes > 0 and remaining_secs > 0:
-                            expiry_text = f"{remaining_minutes} minutes {remaining_secs} seconds"
+                            min_text = "minute" if remaining_minutes == 1 else "minutes"
+                            sec_text = "second" if remaining_secs == 1 else "seconds"
+                            expiry_text = f"{remaining_minutes} {min_text} {remaining_secs} {sec_text}"
                         elif remaining_minutes > 0:
-                            expiry_text = f"{remaining_minutes} minutes"
+                            min_text = "minute" if remaining_minutes == 1 else "minutes"
+                            expiry_text = f"{remaining_minutes} {min_text}"
                         else:
-                            expiry_text = f"{remaining_secs} seconds"
+                            sec_text = "second" if remaining_secs == 1 else "seconds"
+                            expiry_text = f"{remaining_secs} {sec_text}"
 
                         should_generate_new = False
                         self.logger.debug(f"Reusing existing valid OTP for mobile number: {mobile_number}, expires at: {expires_at}")
@@ -120,13 +124,17 @@ class OTPService:
                     remaining_minutes = remaining_seconds // 60
                     remaining_secs = remaining_seconds % 60
 
-                    # Format as "X minutes" or "X minutes Y seconds"
+                    # Format as "X minute(s)" or "X minute(s) Y second(s)"
                     if remaining_minutes > 0 and remaining_secs > 0:
-                        expiry_text = f"{remaining_minutes} minutes {remaining_secs} seconds"
+                        min_text = "minute" if remaining_minutes == 1 else "minutes"
+                        sec_text = "second" if remaining_secs == 1 else "seconds"
+                        expiry_text = f"{remaining_minutes} {min_text} {remaining_secs} {sec_text}"
                     elif remaining_minutes > 0:
-                        expiry_text = f"{remaining_minutes} minutes"
+                        min_text = "minute" if remaining_minutes == 1 else "minutes"
+                        expiry_text = f"{remaining_minutes} {min_text}"
                     else:
-                        expiry_text = f"{remaining_secs} seconds"
+                        sec_text = "second" if remaining_secs == 1 else "seconds"
+                        expiry_text = f"{remaining_secs} {sec_text}"
 
                     should_generate_new = False
                     self.logger.debug(f"Reusing existing valid OTP for mobile number: {mobile_number}, expires at: {expires_at}")
@@ -151,7 +159,8 @@ class OTPService:
                 expires_at = datetime.now(timezone.utc) + timedelta(minutes=expiry_minutes)
 
                 # Format expiry time for new OTP (e.g., "30 minutes")
-                expiry_text = f"{expiry_minutes} minutes"
+                min_text = "minute" if expiry_minutes == 1 else "minutes"
+                expiry_text = f"{expiry_minutes} {min_text}"
 
                 # Store OTP in database with new schema fields
                 otp_data = {

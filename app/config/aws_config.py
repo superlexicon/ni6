@@ -22,7 +22,7 @@ class AWSSettings(BaseSettings):
 
     # Message Templates
     otp_message_template: str = Field(
-        "Your verification code is: {otp_code}. This code will expire in {expiry_minutes} minutes.",
+        "Your verification code is: {otp_code}. This code will expire in {expiry_minutes}.",
         description="Default OTP message template"
     )
 
