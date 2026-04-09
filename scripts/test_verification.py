@@ -829,7 +829,7 @@ class PanCardTester:
 
             elapsed = time.time() - start_time
 
-            is_valid = validation_result.get('is_valid', False)
+            is_valid = validation_result.get('success', False)
             extracted_data = validation_result.get('extracted_data', {})
             validation_checks = validation_result.get('validation_checks', {})
             error_message = validation_result.get('error_message')

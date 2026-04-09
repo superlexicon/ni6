@@ -185,9 +185,23 @@ class HybridCrypto:
             Decrypted JSON string
         """
         try:
+            # === DIAGNOSTIC LOGGING ===
+            import hashlib
+            logger.debug(f"=== PAYLOAD DECRYPTION DIAGNOSTICS ===")
+            logger.debug(f"payload_iv_b64 length: {len(payload_iv_b64)}")
+            logger.debug(f"encrypted_payload_b64 length: {len(encrypted_payload_b64)}")
+            logger.debug(f"payload_iv_b64 (first 50 chars): {payload_iv_b64[:50]}")
+            logger.debug(f"encrypted_payload_b64 (first 50 chars): {encrypted_payload_b64[:50]}")
+
             # Decode from base64
             payload_iv = base64.b64decode(payload_iv_b64)
             encrypted_payload = base64.b64decode(encrypted_payload_b64)
+
+            logger.debug(f"payload_iv decoded length: {len(payload_iv)} (expected: {self.AES_NONCE_SIZE})")
+            logger.debug(f"encrypted_payload decoded length: {len(encrypted_payload)}")
+            logger.debug(f"payload_iv hex: {payload_iv.hex()}")
+            logger.debug(f"encrypted_payload hex (first 32 bytes): {encrypted_payload[:32].hex()}")
+            logger.debug(f"encrypted_payload hex (last 32 bytes): {encrypted_payload[-32:].hex()}")
 
             if len(payload_iv) != self.AES_NONCE_SIZE:
                 raise HybridCryptoError(
@@ -201,6 +215,12 @@ class HybridCrypto:
             # Split ciphertext and tag
             ciphertext = encrypted_payload[:-self.AES_TAG_SIZE]
             auth_tag = encrypted_payload[-self.AES_TAG_SIZE:]
+
+            logger.debug(f"ciphertext length: {len(ciphertext)}")
+            logger.debug(f"auth_tag length: {len(auth_tag)} (expected: {self.AES_TAG_SIZE})")
+            logger.debug(f"auth_tag hex: {auth_tag.hex()}")
+            logger.debug(f"symmetric_key hash: {hashlib.sha256(symmetric_key).hexdigest()}")
+            logger.debug(f"========================================")
 
             # Decrypt using AES-256-GCM
             cipher = AES.new(symmetric_key, AES.MODE_GCM, nonce=payload_iv)

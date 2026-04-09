@@ -240,6 +240,26 @@ class DocumentAnalysisWorker:
             # Decrypt envelope if needed (do this here so decrypted data is available for storage)
             if self.hybrid_crypto.is_encrypted_envelope(request_data):
                 self.logger.info(f"Job {job_id}: Decrypting encrypted envelope...")
+
+                # === DIAGNOSTIC LOGGING ===
+                self.logger.debug(f"=== ENVELOPE DIAGNOSTICS ===")
+                self.logger.debug(f"request_data type: {type(request_data)}")
+                self.logger.debug(f"request_data keys: {request_data.keys() if isinstance(request_data, dict) else 'N/A'}")
+                if isinstance(request_data, dict):
+                    if 'encryptedEnvelope' in request_data:
+                        env = request_data['encryptedEnvelope']
+                        self.logger.debug(f"encryptedEnvelope keys: {env.keys() if isinstance(env, dict) else 'N/A'}")
+                        self.logger.debug(f"encryptedPayload length: {len(env.get('encryptedPayload', ''))}")
+                        self.logger.debug(f"payloadIv length: {len(env.get('payloadIv', ''))}")
+                    # Check if request_data itself is the envelope
+                    if 'encrypted_payload' in request_data:
+                        self.logger.debug(f"request_data is encrypted envelope (has encrypted_payload)")
+                        self.logger.debug(f"encrypted_payload length: {len(request_data.get('encrypted_payload', ''))}")
+                        self.logger.debug(f"payload_iv length: {len(request_data.get('payload_iv', ''))}")
+                        self.logger.debug(f"encrypted_key length: {len(request_data.get('encrypted_key', ''))}")
+                        self.logger.debug(f"key_iv length: {len(request_data.get('key_iv', ''))}")
+                self.logger.debug(f"==============================")
+
                 try:
                     decrypted = self.hybrid_crypto.decrypt_envelope(request_data)
                     request_data = decrypted.payload
@@ -259,6 +279,20 @@ class DocumentAnalysisWorker:
                     self.logger.error(
                         f"Job {job_id}: Decryption failed - {str(e)} - code: {error_code}, deleting without retry"
                     )
+
+                    # CRITICAL FIX: Send error callback BEFORE deleting job so client knows what went wrong
+                    error_response = {
+                        "success": False,
+                        "error": str(e),
+                        "error_code": error_code,
+                        "job_id": job_id,
+                        "status": "failed"
+                    }
+                    if job_record.callback_url:
+                        self._send_callback(job_record.callback_url, job_id, error_response)
+                        self.logger.info(f"Sent error callback for decryption failure: {job_record.callback_url}")
+                    else:
+                        self.logger.warning(f"Job {job_id}: No callback URL - client won't be notified of decryption failure")
 
                     # Delete job immediately - technical errors won't fix on retry
                     if self.job_manager.delete_job(job_id):
@@ -357,6 +391,22 @@ class DocumentAnalysisWorker:
             if not files_data or len(files_data) != 1:
                 error_msg = f"Sequential jobs must contain exactly one file, got {len(files_data)}"
                 self.logger.error(f"Job {job_id}: {error_msg} - validation error, deleting without retry")
+
+                # Send error callback before deleting job
+                callback_url = request_data.get("callback_url") or job_record.callback_url
+                error_response = {
+                    "success": False,
+                    "error": error_msg,
+                    "error_code": "TECHNICAL_INVALID_ENVELOPE",
+                    "job_id": job_id,
+                    "status": "failed"
+                }
+                if callback_url:
+                    self._send_callback(callback_url, job_id, error_response)
+                    self.logger.info(f"Sent error callback for validation error (empty files): {callback_url}")
+                else:
+                    self.logger.warning(f"Job {job_id}: No callback URL - client won't be notified of validation error")
+
                 # Delete job immediately - don't retry validation errors
                 if self.job_manager.delete_job(job_id):
                     self.logger.info(f"Job {job_id} deleted due to validation error (empty files)")

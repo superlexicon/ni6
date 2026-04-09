@@ -10,6 +10,7 @@ State is tracked via verification_state column in user_identity_index.
 from typing import Dict, Any, Optional, Tuple, List
 from app.services.sequential_document_processor_base import DocumentProcessorBase
 from app.helper.extractors.gliner_id_card_extractor import GLiNERIDCardExtractor
+from app.core.key_injection import DocumentType
 
 
 class SequentialIDCardService(DocumentProcessorBase):
@@ -61,12 +62,81 @@ class SequentialIDCardService(DocumentProcessorBase):
         self, text_blocks: list, raw_text: str, image_bytes: bytes, is_pdf: bool
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """
-        Extract ID card fields using GLiNER-based extractor.
+        Extract ID card fields using spatial extractors (PAN) or GLiNER (other types).
 
         Returns:
             (extracted_data, confidence_data)
         """
-        # Use GLiNER ID card extractor
+        # Detect document type from raw_text
+        from app.helper.extractors.gliner_id_card_extractor import GLiNERIDCardExtractor
+        temp_extractor = GLiNERIDCardExtractor()
+        document_type = temp_extractor._detect_document_type(raw_text, text_blocks)
+
+        # Use spatial PAN extractor for PAN cards
+        if document_type == 'PAN':
+            self.logger.info("Using Spatial PAN Extractor for PAN card")
+            from app.helper.extractors.spatial_pan_extractor import SpatialPANExtractor
+            extractor = SpatialPANExtractor()
+            result = await extractor.extract(image_bytes, is_pdf)
+
+            extracted_data = {
+                "document_type": "PAN",
+                "issuing_country": "IND",
+                "full_name": result.full_name,
+                "date_of_birth": result.date_of_birth,
+                "identification_number": result.identification_number,
+                **result.field_values,
+            }
+
+            confidence_data = {}
+            for field, confidence in result.confidence_scores.items():
+                conf_value = confidence / 100 if confidence > 1 else confidence
+                confidence_data[field] = {
+                    'overall_confidence': conf_value,
+                    'sources': ['spatial_extraction']
+                }
+
+            self.logger.info(
+                f"Spatial PAN extraction: document_type={result.document_type}, "
+                f"fields_extracted={len(result.field_values)}, "
+                f"overall_confidence={result.overall_confidence:.2f}%"
+            )
+
+            return extracted_data, confidence_data
+
+        # Use spatial UAE TRC extractor for UAE TRC
+        elif document_type == 'UAE_TRC':
+            self.logger.info("Using Spatial UAE TRC Extractor for UAE Tax Residency Certificate")
+            from app.helper.extractors.spatial_uae_trc_extractor import SpatialUAETRCExtractor
+            extractor = SpatialUAETRCExtractor()
+            result = await extractor.extract(image_bytes, is_pdf)
+
+            extracted_data = {
+                "document_type": "UAE_TRC",
+                "issuing_country": "AE",
+                "full_name": result.full_name,
+                "identification_number": result.identification_number,
+                **result.field_values,
+            }
+
+            confidence_data = {}
+            for field, confidence in result.confidence_scores.items():
+                conf_value = confidence / 100 if confidence > 1 else confidence
+                confidence_data[field] = {
+                    'overall_confidence': conf_value,
+                    'sources': ['spatial_extraction']
+                }
+
+            self.logger.info(
+                f"Spatial UAE TRC extraction: document_type={result.document_type}, "
+                f"fields_extracted={len(result.field_values)}, "
+                f"overall_confidence={result.overall_confidence:.2f}%"
+            )
+
+            return extracted_data, confidence_data
+
+        # Use GLiNER for other ID card types (existing code)
+        self.logger.info("Using GLiNER extractor for non-PAN/non-UAE_TRC ID card")
         extractor = GLiNERIDCardExtractor()
         result = await extractor.extract(image_bytes, is_pdf)
 
@@ -146,6 +216,168 @@ class SequentialIDCardService(DocumentProcessorBase):
 
         # ID cards are generally valid if we got this far
         return True, None, additional_checks
+
+    # ============================================================
+    # UNIFIED VALIDATION ENTRY POINT (for both API and test script)
+    # ============================================================
+
+    @staticmethod
+    async def extract_from_file(
+        file_bytes: bytes,
+        filename: str
+    ) -> Dict[str, Any]:
+        """
+        SINGLE ENTRY POINT for ID card extraction.
+
+        This is the ONLY method that should be called for ID card processing.
+        Both the API endpoint and test script MUST use this method to ensure
+        consistent behavior.
+
+        This method:
+        1. Extracts all fields using GLiNER ID card extractor
+        2. Validates required fields
+        3. Performs document-specific validations (e.g., PAN format)
+
+        Supports:
+        - Text-based PDFs (direct extraction)
+        - Image-based PDFs (OCR extraction)
+        - Regular images (JPG, PNG, etc. via OCR)
+
+        Args:
+            file_bytes: Raw file bytes (PDF or image)
+            filename: Original filename
+
+        Returns:
+            Dict with extraction and validation results
+        """
+        # Create an instance to call validate_from_file
+        service = SequentialIDCardService()
+        return await service.validate_from_file(
+            file_bytes=file_bytes,
+            filename=filename,
+            skip_photoholmes=True,
+        )
+
+    async def validate_from_file(
+        self,
+        file_bytes: bytes,
+        filename: str,
+        skip_photoholmes: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Unified validation entry point for ID cards (PAN, national ID, driver's license).
+
+        This method does everything from file bytes to full validation:
+        1. Text extraction (direct PDF or OCR)
+        2. Field extraction using GLiNER ID card extractor
+        3. Required fields validation
+        4. Document-specific validations (e.g., PAN format validation)
+
+        Supports:
+        - Text-based PDFs (direct extraction)
+        - Image-based PDFs (OCR extraction)
+        - Regular images (JPG, PNG, etc. via OCR)
+
+        Args:
+            file_bytes: Raw file bytes (PDF or image)
+            filename: Original filename (used to determine if PDF)
+            skip_photoholmes: Whether to skip forgery detection (default True for testing)
+
+        Returns:
+            Dict with keys:
+                - success: bool - Overall validation result
+                - extracted_data: dict - All extracted fields
+                - confidence_data: dict - Confidence scores
+                - validation_results: dict - Detailed validation results
+                - error_message: str or None - Combined error message if failed
+                - elapsed_seconds: float - Processing time
+        """
+        import time
+        from app.helper.doctr.document_text_extractor import DocumentTextExtractor
+
+        start_time = time.time()
+        is_pdf = filename.lower().endswith('.pdf')
+
+        # Initialize result structure
+        result = {
+            'success': False,
+            'extracted_data': {},
+            'confidence_data': {},
+            'validation_results': {},
+            'error_message': None,
+            'elapsed_seconds': 0.0,
+        }
+
+        try:
+            # Step 1: Text extraction with geometry
+            self.logger.info("=" * 80)
+            self.logger.info("UNIFIED ID CARD EXTRACTION PATH")
+            self.logger.info(f"Processing {'PDF' if is_pdf else 'image'}")
+            self.logger.info("=" * 80)
+
+            ocr = DocumentTextExtractor()
+            text_blocks = await ocr.extract_text_with_geometry_enhanced(
+                file_bytes, is_pdf=is_pdf, max_pages=1, document_type=DocumentType.ID_CARD
+            )
+
+            self.logger.info(f"Text extraction complete: {len(text_blocks)} text blocks extracted")
+
+            if not text_blocks:
+                result['error_message'] = "Text extraction failed: no text found"
+                result['elapsed_seconds'] = time.time() - start_time
+                return result
+
+            raw_text = "\n".join([block.get('text', '') for block in text_blocks])
+
+            # Step 2: Field extraction using GLiNER ID card extractor
+            extracted_data, confidence_data = await self.extract_fields_from_ocr(
+                text_blocks=text_blocks,
+                raw_text=raw_text,
+                image_bytes=file_bytes,
+                is_pdf=is_pdf
+            )
+
+            result['extracted_data'] = extracted_data
+            result['confidence_data'] = confidence_data
+
+            # Step 3: Validate required fields
+            fields_valid, missing_fields, field_validations = self.validate_required_fields_with_confidence(
+                extracted_data, confidence_data
+            )
+
+            result['validation_results']['required_fields'] = {
+                'valid': fields_valid,
+                'missing_fields': missing_fields,
+                'field_validations': field_validations,
+            }
+
+            if not fields_valid:
+                result['error_message'] = f"Missing required fields: {', '.join(missing_fields)}"
+                result['elapsed_seconds'] = time.time() - start_time
+                return result
+
+            # Step 4: Document-specific validations
+            doc_valid, doc_error, doc_validation_info = self.perform_document_specific_validations(
+                extracted_data, {}
+            )
+
+            result['validation_results']['document_specific'] = doc_validation_info.get('validation_results', {})
+
+            if not doc_valid:
+                result['error_message'] = doc_error
+                result['elapsed_seconds'] = time.time() - start_time
+                return result
+
+            # All validations passed
+            result['success'] = True
+            result['elapsed_seconds'] = time.time() - start_time
+            return result
+
+        except Exception as e:
+            self.logger.error(f"ID card validation failed: {e}")
+            result['error_message'] = str(e)
+            result['elapsed_seconds'] = time.time() - start_time
+            return result
 
     # ============================================================
     # ID CARD SPECIFIC METHODS

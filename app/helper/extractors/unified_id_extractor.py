@@ -396,8 +396,8 @@ class UnifiedIDExtractor:
         # Dates stored as (datetime, original_text) tuples, kept sorted
         dates: List[Tuple[datetime, str]] = []
 
-        # Name labels: (x1, y2, label_text) - store bottom-left corner for matching
-        name_labels: List[Tuple[float, float, str]] = []
+        # Name labels: (x1, y1, y2, label_text) - store top and bottom for matching
+        name_labels: List[Tuple[float, float, float, str]] = []
 
         # Unprocessed blocks for name extraction: (text, x_coord, y_coord, confidence)
         unprocessed: List[Tuple[str, float, float, float]] = []
@@ -452,10 +452,10 @@ class UnifiedIDExtractor:
             # 5. Name labels (using country-specific labels) - collect for post-pass matching
             elif self._is_name_label(text, found.get('country_code')):
                 y2 = block.get('y2', y)  # Get bottom of label box
-                name_labels.append((x, y2, text))
+                name_labels.append((x, y, y2, text))  # Store (x1, y1, y2, label_text)
                 processed_texts.add(text)
                 matched = True
-                self.logger.info(f"  ✓ Name label at (x1={x:.3f}, y2={y2:.3f}): {text}")
+                self.logger.info(f"  ✓ Name label at (x1={x:.3f}, y1={y:.3f}, y2={y2:.3f}): {text}")
 
             # 6. Dates (max 3, auto-sorted)
             elif len(dates) < 3:
@@ -478,6 +478,84 @@ class UnifiedIDExtractor:
             if not matched:
                 confidence = block.get('confidence', 0.9)
                 unprocessed.append((text, x, y, confidence))
+
+        # ============================================================
+        # NAME MATCHING: Match name values to labels BEFORE second pass
+        # This ensures name values are preserved as complete strings
+        # before they get split and consumed by word-level extraction
+        # ============================================================
+        extracted = {}
+        if name_labels:
+            self.logger.info("-" * 40)
+            self.logger.info(f"Matching {len(name_labels)} name label(s) to values using y1→y1 proximity...")
+
+            # Sort labels by y1 (top to bottom) for predictable processing
+            name_labels_sorted = sorted(name_labels, key=lambda t: t[1])
+
+            # Store name parts by label type for correct ordering
+            given_name_parts = []
+            surname_parts = []
+            other_name_parts = []  # For generic "Name" labels
+
+            # Filter candidates by confidence (exclude low-confidence OCR results)
+            candidates = [
+                (text, x, y, conf) for text, x, y, conf in unprocessed
+                if conf >= self.MIN_NAME_CONFIDENCE
+            ]
+            self.logger.info(f"  Filtered to {len(candidates)} candidates (confidence >= {self.MIN_NAME_CONFIDENCE})")
+
+            for label_x1, label_y1, label_y2, label_text in name_labels_sorted:
+                if not candidates:
+                    break
+
+                # Determine label type
+                label_type = self._get_name_label_type(label_text)
+
+                # Find the SINGLE closest line below the label
+                # Compare y1 to y1 - find values whose top comes after the label's top
+                # This handles overlapping OCR boxes correctly
+                # Note: All coordinates are normalized (0-1), so use normalized thresholds
+                below_candidates = [
+                    t for t in candidates
+                    if t[2] >= label_y1  # Value's y1 is at or below label's y1
+                    and abs(t[1] - label_x1) < 0.15  # Horizontally aligned (15% of image width)
+                ]
+
+                if below_candidates:
+                    # Choose the closest value (minimum vertical distance between y1 values)
+                    closest = min(below_candidates, key=lambda t: abs(t[2] - label_y1))
+                    delta = abs(closest[2] - label_y1)  # Distance between y1 values
+
+                    # Only match if reasonably close (within 5% of image height)
+                    if delta < 0.05:
+                        value = closest[0]
+                        conf = closest[3]
+
+                        # Remove matched candidate from unprocessed list
+                        # so it won't be consumed by second pass
+                        unprocessed.remove(closest)
+                        candidates.remove(closest)
+
+                        # Store value based on label type
+                        if label_type == 'given':
+                            given_name_parts.append(value)
+                        elif label_type == 'surname':
+                            surname_parts.append(value)
+                        else:  # Generic "Name" label
+                            other_name_parts.append(value)
+
+                        self.logger.info(f"  '{label_text}' ({label_type}) → '{value}' (delta={delta:.3f}, conf={conf:.2f})")
+                    else:
+                        self.logger.warning(f"  '{label_text}' → No value within range (closest is {delta:.3f} below)")
+                else:
+                    self.logger.warning(f"  '{label_text}' → No matching value found below")
+
+            # Concatenate in correct order: given name + surname + other
+            name_parts = given_name_parts + surname_parts + other_name_parts
+
+            if name_parts:
+                extracted['full_name'] = ' '.join(name_parts)
+                self.logger.info(f"  Full name: {extracted['full_name']}")
 
         # ============================================================
         # SECOND PASS: Substring matching for merged OCR values
@@ -549,8 +627,7 @@ class UnifiedIDExtractor:
         self.logger.info("-" * 40)
         self.logger.info("Resolving dates (earliest=DOB, latest=Expiry, middle=Issue)...")
 
-        extracted = {}
-
+        # Note: extracted dict may already have full_name from name matching above
         if len(dates) >= 1:
             extracted['dob'] = format_date_for_passport(dates[0][0])
             self.logger.info(f"  DOB (earliest): {extracted['dob']}")
@@ -564,70 +641,6 @@ class UnifiedIDExtractor:
             # Only 2 dates: assume DOB and Expiry
             extracted['expiry'] = format_date_for_passport(dates[1][0])
             self.logger.info(f"  Expiry (latest): {extracted['expiry']}")
-
-        # ============================================================
-        # POST-PASS: Match name values to labels using y2→y1 spatial proximity
-        # ============================================================
-        if name_labels:
-            self.logger.info("-" * 40)
-            self.logger.info(f"Matching {len(name_labels)} name label(s) to values using y2→y1 proximity...")
-
-            # Sort labels by y2 (top to bottom) for predictable processing
-            name_labels_sorted = sorted(name_labels, key=lambda t: t[1])
-
-            # Store name parts by label type for correct ordering
-            given_name_parts = []
-            surname_parts = []
-            other_name_parts = []  # For generic "Name" labels
-
-            # Filter candidates by confidence (exclude low-confidence OCR results)
-            candidates = [
-                (text, x, y, conf) for text, x, y, conf in unprocessed
-                if conf >= self.MIN_NAME_CONFIDENCE
-            ]
-            self.logger.info(f"  Filtered to {len(candidates)} candidates (confidence >= {self.MIN_NAME_CONFIDENCE})")
-
-            for label_x1, label_y2, label_text in name_labels_sorted:
-                if not candidates:
-                    break
-
-                # Determine label type
-                label_type = self._get_name_label_type(label_text)
-
-                # Find closest value that is BELOW or AT THE SAME LEVEL as the label
-                # Use tolerance to handle OCR geometry inaccuracies where values
-                # may appear at the same vertical level as labels
-                below_candidates = [
-                    t for t in candidates
-                    if t[2] > label_y2 - 0.10 and abs(t[1] - label_x1) < 150  # At same level or below, and horizontally aligned
-                ]
-
-                if below_candidates:
-                    # Choose the closest value below
-                    closest = min(below_candidates, key=lambda t: abs(t[1] - label_x1) + abs(t[2] - label_y2))
-                    delta = abs(closest[1] - label_x1) + abs(closest[2] - label_y2)
-                    value = closest[0]
-                    conf = closest[3]
-                    candidates.remove(closest)
-
-                    # Store value based on label type
-                    if label_type == 'given':
-                        given_name_parts.append(value)
-                    elif label_type == 'surname':
-                        surname_parts.append(value)
-                    else:  # Generic "Name" label
-                        other_name_parts.append(value)
-
-                    self.logger.info(f"  '{label_text}' ({label_type}) → '{value}' (delta={delta:.3f}, conf={conf:.2f})")
-                else:
-                    self.logger.warning(f"  '{label_text}' → No matching value found below")
-
-            # Concatenate in correct order: given name + surname + other
-            name_parts = given_name_parts + surname_parts + other_name_parts
-
-            if name_parts:
-                extracted['full_name'] = ' '.join(name_parts)
-                self.logger.info(f"  Full name: {extracted['full_name']}")
 
         # Map found fields to standard field names
         if found['type']:

@@ -168,6 +168,7 @@ class DoctrModel:
                     pretrained=True,  # Load pretrained weights for accurate OCR
                     assume_straight_pages=True,  # Optimize for horizontal text
                     export_as_straight_boxes=True,  # Handle rotated text
+                    paragraph_break=0.035,  # Default line grouping
                     resolve_lines=True,  # Resolve lines for better text structure
                     resolve_blocks=False,  # Don't group into blocks - keep lines separate
                 )
