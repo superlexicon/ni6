@@ -16,7 +16,6 @@ aiohttp = "^3.10.0"
 mysql-connector-python = "^9.3.0"
 python-dotenv = "^1.1.1"
 ddgs = "^9.0.2"
-duckduckgo-search = "^8.1.1"
 pypdf = "^5.7.0"
 
 # PhotoHolmes integrated dependencies (previously external photoholmes package)
@@ -73,11 +72,7 @@ scikit-learn = "^1.5.0"  # Required by PhotoHolmes EXIF As Language method
 # PhotoHolmes now integrated in app/photoholmes - no separate dependency needed
 
 # GPU utilities (optional for local development)
-GPUtil = "^1.4.0"
 psutil = "^5.9.0"
-
-# RethinkDB for cross-instance OTP synchronization
-rethinkdb = "^2.4.9"
 
 # Rate limiting for API endpoints
 slowapi = "^0.1.9"
@@ -89,7 +84,6 @@ ffmpeg-python = "^0.2.0"
 nltk = "^3.8.1"
 spacy = "^3.7.2"
 gliner2 = "^1.2.4"  # Named Entity Recognition for document extraction
-beautifulsoup4 = "^4.12.2"
 # newspaper3k = "^0.2.8"  # Replaced with trafilatura for better extraction
 trafilatura = "^1.6.0"  # Modern article extraction with better anti-bot handling
 

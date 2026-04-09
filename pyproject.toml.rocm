@@ -16,7 +16,6 @@ mysql-connector-python = "^9.3.0"
 python-dotenv = "^1.1.1"
 pypdf = "^5.7.0"
 ddgs = "^9.0.2"
-duckduckgo-search = "^8.1.1"
 
 # PhotoHolmes integrated dependencies (previously external photoholmes package)
 numpy = ">=1.26.0,<2.0.0"  # TensorFlow 2.17+ requires numpy>=1.26.0, strictly <2.0 for compatibility
@@ -64,9 +63,6 @@ lightphe = "^0.0.15"
 click = "^8.0.0"
 wget = "^3.2.0"
 
-# RethinkDB for cross-instance OTP synchronization
-rethinkdb = "^2.4.9"
-
 # Rate limiting for API endpoints
 slowapi = "^0.1.9"
 
@@ -77,11 +73,9 @@ ffmpeg-python = "^0.2.0"
 nltk = "^3.8.1"
 spacy = "^3.7.2"
 gliner2 = "^1.2.4"  # Named Entity Recognition for document extraction
-beautifulsoup4 = "^4.12.2"
 trafilatura = "^1.6.0"  # Modern article extraction with better anti-bot handling
 
 [tool.poetry.group.gpu.dependencies]
-GPUtil = "^1.4.0"
 psutil = "^5.9.0"
 
 [tool.poetry.group.dev.dependencies]
