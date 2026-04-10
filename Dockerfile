@@ -8,6 +8,7 @@ WORKDIR /app
 
 # Copy application code only (dependencies and weights are in base image)
 COPY --exclude=photoholmes/weights app/ /app/app/
+RUN rm -rf /app/app/deepface/.deepface
 COPY .env* /app/
 
 # Expose port

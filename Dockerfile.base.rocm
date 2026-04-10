@@ -68,7 +68,7 @@ COPY app/models/mediapipe/ /app/app/models/mediapipe/
 
 # Copy DocTR OCR model weights (PyTorch hub cache)
 # Default TORCH_HOME is app/models, weights stored in hub/checkpoints/
-COPY app/models/hub/checkpoints/ /app/app/hub/checkpoints/
+COPY app/models/hub/checkpoints/ /app/app/models/hub/checkpoints/
 
 # Create runtime directories and MIOpen cache
 RUN mkdir -p /app/logs /app/temp /var/run/mysqld /root/.config/miopen /root/.cache/miopen
