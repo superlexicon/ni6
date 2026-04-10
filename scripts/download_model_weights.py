@@ -10,7 +10,7 @@ The zip files contain folders that are copied to the correct app directories:
 - mediapipe → app/models/mediapipe
 - nltk → app/models/nltk
 - photoholmes → app/photoholmes/weights
-- spacy → app/spacy_models
+- spacy → app/models/spacy_models
 
 Usage:
     python scripts/download_model_weights.py                    # Download all
@@ -58,13 +58,13 @@ ZIP_ROOT_FOLDER = "ni6-models"
 # Format: "zip_folder_name": "app/target_directory"
 FOLDER_MAPPING = {
     "deepface": "app/deepface/.deepface/weights",
-    "doctr": "app/models/doctr",
+    "doctr": "app/models/doctr/models",
     "finbert": "app/models/finbert",
     "gliner2": "app/models/gliner2",
     "mediapipe": "app/models/mediapipe",
     "nltk": "app/models/nltk",
     "photoholmes": "app/photoholmes/weights",
-    "spacy": "app/spacy_models",
+    "spacy": "app/models/spacy",
 }
 
 # ============================================================================
