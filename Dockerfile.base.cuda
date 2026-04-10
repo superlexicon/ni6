@@ -25,7 +25,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     TF_CPP_MIN_LOG_LEVEL=2 \
     TF_USE_LEGACY_KERAS=1 \
     PYTHON="/usr/bin/python3.11" \
-    DOCTR_CACHE_DIR=/app/app/models/doctr
+    DOCTR_CACHE_DIR=/app/app/models/doctr \
     DEEPFACE_HOME=/app/app/deepface
 
 # Install system dependencies - Python 3.11

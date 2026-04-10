@@ -27,7 +27,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     MIOPEN_CACHE_DIR=/root/.cache/miopen \
     MIOPEN_FIND_MODE=3 \
     PYTORCH_HIP_ALLOC_CONF=expandable_segments:True \
-    DOCTR_CACHE_DIR=/app/app/models/doctr
+    DOCTR_CACHE_DIR=/app/app/models/doctr \
     DEEPFACE_HOME=/app/app/deepface
 
 # Install necessary build tools and app dependencies
