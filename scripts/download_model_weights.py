@@ -4,7 +4,7 @@ Download all ML/DL model weights for the OSINT application from Google Drive zip
 
 The zip files contain folders that are copied to the correct app directories:
 - deepface → app/deepface/.deepface/weights
-- doctr → app/models/hub/checkpoints
+- doctr → app/models/doctr
 - finbert → app/models/finbert
 - gliner2 → app/models/gliner2
 - mediapipe → app/models/mediapipe
@@ -58,7 +58,7 @@ ZIP_ROOT_FOLDER = "ni6-models"
 # Format: "zip_folder_name": "app/target_directory"
 FOLDER_MAPPING = {
     "deepface": "app/deepface/.deepface/weights",
-    "doctr": "app/models/hub/checkpoints",
+    "doctr": "app/models/doctr",
     "finbert": "app/models/finbert",
     "gliner2": "app/models/gliner2",
     "mediapipe": "app/models/mediapipe",
