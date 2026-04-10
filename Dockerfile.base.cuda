@@ -95,7 +95,7 @@ RUN pip3 install --upgrade pip && \
     echo "PyTorch CUDA installed successfully"
 
 # Copy pre-downloaded weights (5.1 GB - rarely change)
-COPY app/deepface/.deepface/weights/ /root/.deepface/weights/
+COPY app/deepface/.deepface/weights/ /app/app/deepface/.deepface/weights/
 COPY app/photoholmes/weights/ /app/app/photoholmes/weights/
 COPY app/spacy_models/ /app/app/spacy_models/
 COPY app/models/nltk/ /app/app/models/nltk/
@@ -104,7 +104,7 @@ COPY app/models/gliner2/ /app/app/models/gliner2/
 COPY app/models/mediapipe/ /app/app/models/mediapipe/
 
 # Copy DocTR OCR model weights (PyTorch hub cache)
-COPY app/models/hub/checkpoints/ /root/.cache/torch/hub/checkpoints/
+COPY app/models/hub/checkpoints/ /app/app/hub/checkpoints/
 
 # Create runtime directories
 RUN mkdir -p /app/logs /app/temp /var/run/mysqld
