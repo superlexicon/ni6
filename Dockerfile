@@ -7,8 +7,7 @@ FROM 10.0.0.14:5000/im-osint-base-cuda:latest
 WORKDIR /app
 
 # Copy application code only (dependencies and weights are in base image)
-COPY --exclude=photoholmes/weights app/ /app/app/
-RUN rm -rf /app/app/deepface/.deepface
+COPY app/ /app/app/
 COPY .env* /app/
 
 # Expose port

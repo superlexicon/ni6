@@ -25,7 +25,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     TF_CPP_MIN_LOG_LEVEL=2 \
     TF_USE_LEGACY_KERAS=1 \
     PYTHON="/usr/bin/python3.11" \
-    TORCH_HOME=/app/app/models
+    DOCTR_CACHE_DIR=/app/app/models/doctr
+    DEEPFACE_HOME=/app/app/deepface
 
 # Install system dependencies - Python 3.11
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -102,9 +103,7 @@ COPY app/models/nltk/ /app/app/models/nltk/
 COPY app/models/finbert/ /app/app/models/finbert/
 COPY app/models/gliner2/ /app/app/models/gliner2/
 COPY app/models/mediapipe/ /app/app/models/mediapipe/
-
-# Copy DocTR OCR model weights (PyTorch hub cache)
-COPY app/models/hub/checkpoints/ /app/app/models/hub/checkpoints/
+COPY app/models/doctr/ /app/app/models/doctr/
 
 # Create runtime directories
 RUN mkdir -p /app/logs /app/temp /var/run/mysqld
