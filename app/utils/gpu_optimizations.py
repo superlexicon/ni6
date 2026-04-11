@@ -1,7 +1,7 @@
 """
 Framework-Specific GPU Optimizations
 
-This module provides GPU optimization utilities for TensorFlow, PyTorch, and ONNX Runtime
+This module provides GPU optimization utilities for TensorFlow and PyTorch
 to maximize performance on RTX 4000 and similar GPUs.
 
 Expected Improvement: 20-50% per framework
@@ -145,122 +145,6 @@ class GPUOptimizations:
 
         return optimizations
 
-    def enable_onnx_optimizations(self) -> Dict[str, Any]:
-        """
-        Enable ONNX Runtime-specific GPU optimizations.
-
-        Returns:
-            Dict with optimization status and details
-        """
-        optimizations = {}
-
-        try:
-            import onnxruntime as ort
-
-            # Check available providers
-            available_providers = ort.get_available_providers()
-            optimizations['available_providers'] = available_providers
-
-            # Create optimized session options
-            session_options = ort.SessionOptions()
-
-            # Set execution mode to parallel for better performance
-            session_options.execution_mode = ort.ExecutionMode.ORT_PARALLEL
-            optimizations['execution_mode'] = 'parallel'
-
-            # Enable graph optimization level
-            session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-            optimizations['graph_optimization'] = 'all'
-
-            # Set intra-op num threads for parallel execution
-            session_options.intra_op_num_threads = 4
-            session_options.inter_op_num_threads = 4
-            optimizations['thread_count'] = 4
-
-            # Enable CPU memory arena for better memory management
-            session_options.enable_cpu_mem_arena = True
-            optimizations['cpu_mem_arena'] = True
-
-            # Add custom optimization level for RTX GPUs
-            if 'CUDAExecutionProvider' in available_providers:
-                # CUDA-specific optimizations
-                cuda_provider_options = {
-                    'device_id': 0,
-                    'arena_extend_strategy': 'kNextPowerOfTwo',
-                    'gpu_mem_limit': 2 * 1024 * 1024 * 1024,  # 2GB limit
-                    'cudnn_conv_algo_search': 'EXHAUSTIVE',
-                    'do_copy_in_default_stream': True,
-                }
-                optimizations['cuda_provider_options'] = cuda_provider_options
-
-            if 'TensorrtExecutionProvider' in available_providers:
-                # TensorRT-specific optimizations for RTX GPUs
-                trt_provider_options = {
-                    'device_id': 0,
-                    'trt_max_workspace_size': 1 * 1024 * 1024 * 1024,  # 1GB workspace
-                    'trt_max_partition_iterations': 1000,
-                    'trt_min_subgraph_size': 1,
-                    'trt_fp16_enable': True,  # Enable FP16 for RTX Tensor Cores
-                    'trt_int8_enable': False,  # Disable INT8 by default
-                    'trt_engine_cache_enable': True,  # Enable engine caching
-                    'trt_engine_cache_path': '/tmp/trt_cache'
-                }
-                optimizations['tensorrt_provider_options'] = trt_provider_options
-
-            self.logger.info("ONNX Runtime GPU optimizations configured successfully")
-            optimizations['status'] = 'success'
-
-        except ImportError:
-            self.logger.error("ONNX Runtime not available for optimizations")
-            optimizations['status'] = 'onnx_not_available'
-        except Exception as e:
-            self.logger.error(f"Failed to enable ONNX Runtime optimizations: {e}")
-            optimizations['status'] = 'failed'
-            optimizations['error'] = str(e)
-
-        return optimizations
-
-    def get_optimized_providers(self, preferred_order: Optional[List[str]] = None) -> List[str]:
-        """
-        Get optimized execution provider list for ONNX Runtime.
-
-        Args:
-            preferred_order: Preferred order of execution providers
-
-        Returns:
-            List of execution providers in optimized order
-        """
-        try:
-            import onnxruntime as ort
-
-            available_providers = ort.get_available_providers()
-
-            # Default preferred order for RTX GPUs
-            if preferred_order is None:
-                preferred_order = [
-                    'CUDAExecutionProvider',
-                    'TensorrtExecutionProvider',
-                    'CPUExecutionProvider'
-                ]
-
-            # Filter available providers based on preferred order
-            optimized_providers = []
-            for provider in preferred_order:
-                if provider in available_providers:
-                    optimized_providers.append(provider)
-
-            # Add any remaining providers not in preferred order
-            for provider in available_providers:
-                if provider not in optimized_providers:
-                    optimized_providers.append(provider)
-
-            self.logger.info(f"Optimized ONNX providers: {optimized_providers}")
-            return optimized_providers
-
-        except ImportError:
-            self.logger.error("ONNX Runtime not available")
-            return ['CPUExecutionProvider']
-
     def enable_environment_optimizations(self) -> Dict[str, Any]:
         """
         Enable environment-level GPU optimizations.
@@ -284,10 +168,6 @@ class GPUOptimizations:
             # PyTorch optimizations
             os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:512'  # Better memory allocation
             optimizations['pytorch_cuda_alloc_conf'] = 'max_split_size_mb:512'
-
-            # ONNX Runtime optimizations
-            os.environ['ORT_TENSORRT_ENGINE_CACHE_ENABLE'] = '1'  # Enable TensorRT cache
-            optimizations['ort_tensorrt_cache'] = '1'
 
             # Set number of threads for parallel operations
             os.environ['OMP_NUM_THREADS'] = '4'
@@ -421,9 +301,6 @@ def enable_all_framework_optimizations() -> Dict[str, Any]:
 
     # Enable TensorFlow optimizations
     results['tensorflow'] = optimizer.enable_tensorflow_optimizations()
-
-    # Enable ONNX Runtime optimizations
-    results['onnx_runtime'] = optimizer.enable_onnx_optimizations()
 
     # Enable environment optimizations
     results['environment'] = optimizer.enable_environment_optimizations()

@@ -28,9 +28,6 @@ torch-kmeans = "^0.2.0"
 opencv-python-headless = "^4.11.0"
 # MediaPipe for hand gesture detection (video selfie OTP)
 mediapipe = "^0.10.0"
-# ONNX Runtime (platform-compatible)
-onnxruntime = "^1.16.0"
-onnx = "<1.19.0"   # Pin to version before float4_e2m1fn requirement (conflicts with TensorFlow)
 pillow = "^11.3.0"
 tensorflow = "2.17.1"
 tf-keras = "2.17.0"    # Latest compatible version for TensorFlow 2.20.0

@@ -18,7 +18,6 @@ import gc
 
 import torch
 import tensorflow as tf
-import onnxruntime as ort
 
 from app.core.device_manager import DeviceInfo, DeviceType, get_recommended_device
 
@@ -87,7 +86,6 @@ class GPUResourceManager:
         # Framework-specific configurations
         self._configure_tensorflow()
         self._configure_pytorch()
-        self._configure_onnxruntime()
 
         logger.info(f"GPU Resource Manager initialized on device: {self.device_info.device_type.value}")
 
@@ -143,33 +141,6 @@ class GPUResourceManager:
                     logger.info("PyTorch MPS not available, will use CPU")
         except Exception as e:
             logger.warning(f"Failed to configure PyTorch: {e}")
-
-    def _configure_onnxruntime(self):
-        """Configure ONNX Runtime execution providers"""
-        try:
-            providers = []
-
-            if self.device_info.device_type == DeviceType.CUDA:
-                providers.append('CUDAExecutionProvider')
-            elif self.device_info.device_type == DeviceType.ROCM:
-                # Check for MIGraphX/ROCm execution providers
-                try:
-                    available = ort.get_available_providers()
-                    if 'MIGraphXExecutionProvider' in available or 'ROCMExecutionProvider' in available:
-                        providers = ['MIGraphXExecutionProvider', 'ROCMExecutionProvider']
-                        logger.info(f"ONNX Runtime ROCm providers available: {providers}")
-                    else:
-                        logger.info("ONNX Runtime ROCm providers not found, using CPU")
-                except Exception as e:
-                    logger.warning(f"Failed to check ONNX Runtime providers: {e}")
-            elif self.device_info.device_type == DeviceType.MPS:
-                providers.append('CoreMLExecutionProvider')
-
-            providers.append('CPUExecutionProvider')
-            ort.set_default_logger_severity(3)  # Warning level
-            logger.info(f"ONNX Runtime configured with providers: {providers}")
-        except Exception as e:
-            logger.warning(f"Failed to configure ONNX Runtime: {e}")
 
     async def get_model_with_gpu(self,
                                model_type: ModelType,

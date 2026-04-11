@@ -19,7 +19,6 @@ class FrameworkType(Enum):
     """Supported ML frameworks"""
     TENSORFLOW = "tensorflow"
     PYTORCH = "pytorch"
-    ONNX_RUNTIME = "onnxruntime"
 
 
 @dataclass
@@ -86,7 +85,6 @@ class FrameworkCoordinator:
         self._framework_memory_requirements = {
             FrameworkType.PYTORCH: 1200,    # PhotoHolmes models
             FrameworkType.TENSORFLOW: 800,   # DeepFace models
-            FrameworkType.ONNX_RUNTIME: 400  # DocTR models
         }
 
         self.logger.info(f"FrameworkCoordinator initialized with device: {recommended_device.device_type.value}")
@@ -103,10 +101,6 @@ class FrameworkCoordinator:
             # Enable TensorFlow optimizations
             tf_opts = self.gpu_optimizer.enable_tensorflow_optimizations()
             self.logger.info(f"TensorFlow optimizations: {tf_opts.get('status', 'unknown')}")
-
-            # Enable ONNX Runtime optimizations
-            onnx_opts = self.gpu_optimizer.enable_onnx_optimizations()
-            self.logger.info(f"ONNX Runtime optimizations: {onnx_opts.get('status', 'unknown')}")
 
             # Enable environment optimizations
             env_opts = self.gpu_optimizer.enable_environment_optimizations()
@@ -157,7 +151,7 @@ class FrameworkCoordinator:
                 memory_limit_mb=memory_limit_mb,
                 memory_growth_enabled=kwargs.get('memory_growth_enabled', True),
                 mixed_precision_enabled=kwargs.get('mixed_precision_enabled', False),  # Disable mixed precision for DeepFace compatibility
-                execution_providers=self.gpu_optimizer.get_optimized_providers() if framework_type == FrameworkType.ONNX_RUNTIME else self._get_default_execution_providers(framework_type, device_type)
+                execution_providers=self._get_default_execution_providers(framework_type, device_type)
             )
 
             self._framework_configs[framework_type] = config
@@ -355,43 +349,6 @@ class FrameworkCoordinator:
             self.logger.error(f"Failed to apply PyTorch configuration: {e}")
             return False
 
-    def apply_onnx_config(self) -> List[str]:
-        """
-        Apply ONNX Runtime configuration.
-
-        Returns:
-            List of execution providers to use
-        """
-        try:
-            import onnxruntime as ort
-
-            config = self._framework_configs.get(FrameworkType.ONNX_RUNTIME)
-            if not config:
-                config = self.configure_framework(FrameworkType.ONNX_RUNTIME)
-
-            providers = config.execution_providers
-
-            # Validate and adjust providers based on availability
-            available_providers = ort.get_available_providers()
-
-            # Filter available providers
-            valid_providers = [p for p in providers if p in available_providers]
-
-            if not valid_providers:
-                # Fallback to CPU
-                valid_providers = ['CPUExecutionProvider']
-                self.logger.warning("ONNX Runtime falling back to CPU provider")
-
-            self.logger.info(f"ONNX Runtime configured with providers: {valid_providers}")
-            return valid_providers
-
-        except ImportError:
-            self.logger.error("ONNX Runtime not available")
-            return ['CPUExecutionProvider']
-        except Exception as e:
-            self.logger.error(f"Failed to apply ONNX Runtime configuration: {e}")
-            return ['CPUExecutionProvider']
-
     def _calculate_memory_limit(self, framework_type: FrameworkType, device_type: DeviceType) -> int:
         """Calculate memory limit for a framework based on available GPU memory"""
         if device_type == DeviceType.CPU:
@@ -418,38 +375,6 @@ class FrameworkCoordinator:
             available_memory = device_info.memory_total - reserve_memory
             proportion = self._framework_memory_requirements[framework_type] / total_framework_memory
             return max(512, int(available_memory * proportion))  # Minimum 512MB
-
-    def _get_default_execution_providers(self, framework_type: FrameworkType, device_type: DeviceType) -> List[str]:
-        """Get default execution providers for ONNX Runtime"""
-        if framework_type != FrameworkType.ONNX_RUNTIME:
-            return []
-
-        providers = []
-
-        if device_type == DeviceType.CUDA:
-            providers.extend([
-                'CUDAExecutionProvider',
-                'TensorrtExecutionProvider'  # Will be ignored if TensorRT not available
-            ])
-        elif device_type == DeviceType.ROCM:
-            # AMD ROCm: Use MIGraphXExecutionProvider or ROCMExecutionProvider
-            providers.extend(['MIGraphXExecutionProvider', 'ROCMExecutionProvider'])
-            self.logger.info("Using MIGraphX/ROCm Execution Providers for AMD GPUs")
-        elif device_type == DeviceType.MPS:
-            # Apple Silicon: Try CoreML first, then fallback to CPU
-            try:
-                import onnxruntime as ort
-                available = ort.get_available_providers()
-                if 'CoreMLExecutionProvider' in available:
-                    providers.append('CoreMLExecutionProvider')
-                    self.logger.info("Using CoreML Execution Provider for Apple Silicon")
-                else:
-                    self.logger.info("CoreML Execution Provider not available, using CPU")
-            except Exception as e:
-                self.logger.warning(f"CoreML provider not available: {e}")
-
-        providers.append('CPUExecutionProvider')  # Always include as fallback
-        return providers
 
     def get_framework_config(self, framework_type: FrameworkType) -> Optional[FrameworkConfig]:
         """Get the current configuration for a framework"""
@@ -487,10 +412,6 @@ class FrameworkCoordinator:
         # Configure PyTorch
         pytorch_result = self.apply_pytorch_config()
         results['pytorch'] = pytorch_result is not False
-
-        # Configure ONNX Runtime
-        onnx_providers = self.apply_onnx_config()
-        results['onnxruntime'] = len(onnx_providers) > 0
 
         success_count = sum(1 for success in results.values() if success)
         self.logger.info(f"Framework coordination completed: {success_count}/{len(results)} frameworks configured successfully")

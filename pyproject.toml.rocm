@@ -28,9 +28,6 @@ torch-kmeans = "^0.2.0"
 opencv-python-headless = "^4.11.0"
 # MediaPipe for hand gesture detection (video selfie OTP)
 mediapipe = "^0.10.0"
-# ONNX Runtime ROCm - installed via AMD wheel in Dockerfile
-# onnxruntime = "^1.16.0"  # Commented out, using AMD wheel instead
-onnx = "<1.19.0"   # Pin to version before float4_e2m1fn requirement (conflicts with TensorFlow)
 python-doctr = "^1.0.0"
 pillow = "^11.3.0"
 tf-keras = "2.17.0"    # Latest compatible version for TensorFlow 2.20.0

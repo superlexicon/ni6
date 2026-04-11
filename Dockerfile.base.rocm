@@ -16,6 +16,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     POETRY_CACHE_DIR=/tmp/poetry_cache \
     TF_CPP_MIN_LOG_LEVEL=2 \
     TF_USE_LEGACY_KERAS=1 \
+    TF_ROCM_GPU_ALLOCATOR=cpu_malloc_async \
     ROCM_ARCH=gfx906 \
     ROCM_PATH=/opt/rocm \
     LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/lib:/opt/rocm/lib64 \
@@ -53,10 +54,10 @@ RUN cp pyproject.toml.rocm pyproject.toml && \
     echo "Poetry dependencies installed"
 
 # Copy and install PyTorch from local ROCm wheels
-COPY wheels/rocm/ /tmp/wheels/
+COPY wheels/rocm/torch-*.whl /tmp/wheels/
 RUN pip3 install /tmp/wheels/*.whl && \
     rm -rf /tmp/wheels && \
-    echo "PyTorch and ONNX Runtime ROCm installed from local wheels"
+    echo "PyTorch ROCm installed from local wheels"
 
 # Copy pre-downloaded weights (5.1 GB - rarely change)
 COPY app/deepface/.deepface/weights/ /app/app/deepface/.deepface/weights/

@@ -52,29 +52,13 @@ class DoctrModel:
             logger.info("DoctrModel initialized with unified framework coordinator")
 
     def _setup_environment(self):
-        """Setup ONNX Runtime environment and configure GPU acceleration."""
-        cache_dir = os.path.expanduser("~/.cache/onnxruntime")
-        os.makedirs(cache_dir, exist_ok=True)
-        os.environ['ONNXRUNTIME_CACHE_DIR'] = cache_dir
-
+        """Setup environment variables for DocTR."""
         # Configure PyTorch hub cache directory for DocTR weights
         torch_home = os.getenv('TORCH_HOME', os.path.join(os.path.dirname(__file__), '..', 'models'))
         torch_home = os.path.abspath(torch_home)
         os.makedirs(torch_home, exist_ok=True)
         os.environ['TORCH_HOME'] = torch_home
         self.logger.info(f"PyTorch hub cache directory set to: {torch_home}")
-
-        # Configure ONNX Runtime for GPU acceleration
-        self._configure_onnx_runtime()
-
-    def _configure_onnx_runtime(self):
-        """
-        Skip ONNX Runtime configuration for DocTR (PyTorch version).
-        DocTR with PyTorch backend doesn't need ONNX Runtime.
-        """
-        self.logger.info("DocTR uses PyTorch backend - skipping ONNX Runtime configuration")
-        # DocTR will use PyTorch's CUDA/ROCm backend directly
-        return
 
     def get_model(self, det_arch: Optional[str] = None, reco_arch: Optional[str] = None) -> 'OCRPredictor':
         """
@@ -214,56 +198,6 @@ class DoctrModel:
         except RuntimeError:
             # No event loop running, create one
             return asyncio.run(self.get_model(det_arch, reco_arch))
-
-    def _get_onnx_providers(self) -> List[str]:
-        """
-        Get ONNX Runtime execution providers prioritized for GPU acceleration
-
-        Returns:
-            List of execution providers in order of preference
-        """
-        try:
-            import onnxruntime as ort
-            available_providers = ort.get_available_providers()
-
-            # Prioritize providers based on platform and availability
-            preferred_providers = []
-
-            # Platform-specific provider prioritization
-            import platform
-            system = platform.system()
-
-            if system == "Darwin":  # macOS
-                # Prioritize Apple-specific providers
-                if 'CoreMLExecutionProvider' in available_providers:
-                    preferred_providers.append('CoreMLExecutionProvider')
-                    self.logger.info("CoreML Execution Provider configured for OCR (Apple Silicon)")
-            else:  # Linux and other systems
-                # Prioritize GPU providers
-                if 'CUDAExecutionProvider' in available_providers:
-                    preferred_providers.append('CUDAExecutionProvider')
-                    self.logger.info("CUDA Execution Provider configured for OCR")
-                elif 'ROCmExecutionProvider' in available_providers:
-                    preferred_providers.append('ROCmExecutionProvider')
-                    self.logger.info("ROCm Execution Provider configured for OCR (AMD)")
-
-            # Add CPU provider as fallback if not already included
-            if 'CPUExecutionProvider' in available_providers and 'CPUExecutionProvider' not in preferred_providers:
-                preferred_providers.append('CPUExecutionProvider')
-
-            # Add any remaining available providers
-            for provider in available_providers:
-                if provider not in preferred_providers:
-                    preferred_providers.append(provider)
-
-            return preferred_providers
-
-        except ImportError:
-            self.logger.warning("ONNX Runtime not available - using default providers")
-            return ['CPUExecutionProvider']
-        except Exception as e:
-            self.logger.error(f"Error configuring ONNX providers: {e}")
-            return ['CPUExecutionProvider']
 
     async def predict_with_key_injection(self,
                                  doc,
