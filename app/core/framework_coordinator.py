@@ -432,9 +432,9 @@ class FrameworkCoordinator:
                 'TensorrtExecutionProvider'  # Will be ignored if TensorRT not available
             ])
         elif device_type == DeviceType.ROCM:
-            # ROCm execution provider requires custom ONNX Runtime build
-            # For now, fall back to CPU
-            self.logger.info("ROCm execution provider not available in standard ONNX Runtime")
+            # AMD ROCm: Use MIGraphXExecutionProvider or ROCMExecutionProvider
+            providers.extend(['MIGraphXExecutionProvider', 'ROCMExecutionProvider'])
+            self.logger.info("Using MIGraphX/ROCm Execution Providers for AMD GPUs")
         elif device_type == DeviceType.MPS:
             # Apple Silicon: Try CoreML first, then fallback to CPU
             try:

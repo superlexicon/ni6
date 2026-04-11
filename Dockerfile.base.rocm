@@ -54,9 +54,9 @@ RUN cp pyproject.toml.rocm pyproject.toml && \
 
 # Copy and install PyTorch from local ROCm wheels
 COPY wheels/rocm/ /tmp/wheels/
-RUN pip3 install /tmp/wheels/* && \
+RUN pip3 install /tmp/wheels/*.whl && \
     rm -rf /tmp/wheels && \
-    echo "PyTorch installed with ROCm support from local wheels"
+    echo "PyTorch and ONNX Runtime ROCm installed from local wheels"
 
 # Copy pre-downloaded weights (5.1 GB - rarely change)
 COPY app/deepface/.deepface/weights/ /app/app/deepface/.deepface/weights/

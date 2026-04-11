@@ -71,15 +71,15 @@ class DeviceManager:
         if self._cached_devices is None:
             self._cached_devices = {}
 
+            # Detect AMD GPUs (ROCm) - check before CUDA to avoid misclassification
+            self._cached_devices[DeviceType.ROCM] = self._detect_rocm_devices()
+
             # Detect NVIDIA GPUs
             self._cached_devices[DeviceType.CUDA] = self._detect_cuda_devices()
 
             # Detect Apple Silicon GPUs
             if platform.system() == "Darwin":
                 self._cached_devices[DeviceType.MPS] = self._detect_mps_devices()
-
-            # Detect AMD GPUs (ROCm)
-            self._cached_devices[DeviceType.ROCM] = self._detect_rocm_devices()
 
             # CPU is always available
             self._cached_devices[DeviceType.CPU] = [self._get_cpu_device()]
@@ -99,11 +99,11 @@ class DeviceManager:
         devices = self.detect_available_devices()
 
         if prefer_gpu:
-            # Priority: CUDA > MPS > ROCm > CPU
+            # Priority: ROCm > CUDA > MPS > CPU (ROCm first on Linux to avoid misclassification)
             gpu_priority = [
+                DeviceType.ROCM,
                 DeviceType.CUDA,
-                DeviceType.MPS,
-                DeviceType.ROCM
+                DeviceType.MPS
             ]
 
             for device_type in gpu_priority:
@@ -421,6 +421,13 @@ class DeviceManager:
             try:
                 import torch
                 if torch.cuda.is_available():
+                    # Check if this is actually ROCm before classifying as CUDA
+                    if hasattr(torch.version, 'hip') and torch.version.hip:
+                        # This is ROCm, not NVIDIA CUDA - skip and let ROCm detection handle it
+                        self.logger.info("PyTorch reports CUDA but is actually ROCm (HIP detected)")
+                        return devices
+
+                    # Only proceed if this is true NVIDIA CUDA
                     for i in range(torch.cuda.device_count()):
                         props = torch.cuda.get_device_properties(i)
                         device = DeviceInfo(

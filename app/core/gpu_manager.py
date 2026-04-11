@@ -102,15 +102,15 @@ class GPUResourceManager:
                         tf.config.experimental.set_memory_growth(gpu, True)
                     logger.info(f"TensorFlow configured with memory growth for {len(gpus)} GPU(s)")
             elif self.device_info.device_type == DeviceType.ROCM:
-                # ROCm support in TensorFlow requires ROCm-enabled build
+                # TensorFlow ROCm build should detect AMD GPUs automatically
                 gpus = tf.config.experimental.list_physical_devices('GPU')
                 if gpus:
                     # Enable memory growth for all GPUs
                     for gpu in gpus:
                         tf.config.experimental.set_memory_growth(gpu, True)
-                    logger.info(f"TensorFlow configured with memory growth for ROCm GPU(s)")
+                    logger.info(f"TensorFlow configured with {len(gpus)} ROCm GPU(s)")
                 else:
-                    logger.info("No ROCm GPUs detected by TensorFlow, falling back to CPU")
+                    logger.warning("TensorFlow ROCm: No GPUs detected, check TF_ROCM_GPU_ALLOCATOR environment variable")
             elif self.device_info.device_type == DeviceType.MPS:
                 # TensorFlow MPS support is limited, fallback to CPU
                 logger.info("TensorFlow MPS support limited, using CPU fallback")
@@ -152,9 +152,16 @@ class GPUResourceManager:
             if self.device_info.device_type == DeviceType.CUDA:
                 providers.append('CUDAExecutionProvider')
             elif self.device_info.device_type == DeviceType.ROCM:
-                # ONNX Runtime ROCm support requires ROCm-enabled build
-                # For now, use CPU provider as fallback
-                logger.info("ONNX Runtime ROCm support not available, using CPU")
+                # Check for MIGraphX/ROCm execution providers
+                try:
+                    available = ort.get_available_providers()
+                    if 'MIGraphXExecutionProvider' in available or 'ROCMExecutionProvider' in available:
+                        providers = ['MIGraphXExecutionProvider', 'ROCMExecutionProvider']
+                        logger.info(f"ONNX Runtime ROCm providers available: {providers}")
+                    else:
+                        logger.info("ONNX Runtime ROCm providers not found, using CPU")
+                except Exception as e:
+                    logger.warning(f"Failed to check ONNX Runtime providers: {e}")
             elif self.device_info.device_type == DeviceType.MPS:
                 providers.append('CoreMLExecutionProvider')
 
