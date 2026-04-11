@@ -54,8 +54,10 @@ RUN cp pyproject.toml.rocm pyproject.toml && \
     echo "Poetry dependencies installed"
 
 # Copy and install PyTorch from local ROCm wheels
-COPY wheels/rocm/torch-*.whl /tmp/wheels/
-RUN pip3 install /tmp/wheels/*.whl && \
+COPY wheels/rocm/*.whl /tmp/wheels/
+RUN pip3 install /tmp/wheels/pytorch_triton_rocm-*.whl && \
+    pip3 install /tmp/wheels/torch-*.whl && \
+    pip3 install /tmp/wheels/torchvision-*.whl && \
     rm -rf /tmp/wheels && \
     echo "PyTorch ROCm installed from local wheels"
 
