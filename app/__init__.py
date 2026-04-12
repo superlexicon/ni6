@@ -88,11 +88,16 @@ async def lifespan(app: FastAPI):
 
     # 1. DeepFace warm-up (already has method)
     try:
-        from app.helper.deepface_helper import DeepfaceHelper
-        await DeepfaceHelper.preload_all_models()
-        logger.info("DeepFace models preloaded")
+        from app.helper.face_recognition_factory import get_backend_name
+        backend_name = get_backend_name()
+        if backend_name == 'deepface':
+            from app.helper.deepface_helper import DeepfaceHelper
+            await DeepfaceHelper.preload_all_models()
+            logger.info("DeepFace models preloaded")
+        elif backend_name == 'insightface':
+            logger.info("Using InsightFace backend - no preload needed")
     except Exception as e:
-        logger.warning(f"DeepFace preload failed: {e}")
+        logger.warning(f"Face recognition backend preload failed: {e}")
 
     # 2. DocTR warm-up (initialize model)
     try:

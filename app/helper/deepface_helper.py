@@ -18,6 +18,7 @@ from app.core.framework_coordinator import get_framework_coordinator, FrameworkT
 from app.utils.model_thresholds import get_adaptive_model_threshold
 from app.utils.deepface_compatibility import ensure_deepface_compatibility
 from app.utils.retinaface_compatibility import ensure_retinaface_compatibility
+from app.helper.face_recognition_base import FaceRecognitionBase
 
 logger = get_logger()
 
@@ -109,7 +110,7 @@ class FaceVerificationError(Exception):
     pass
 
 
-class DeepfaceHelper:
+class DeepfaceHelper(FaceRecognitionBase):
     """DeepFace helper class integrated with GPU resource manager."""
 
     _models_preloaded = False
@@ -1044,3 +1045,121 @@ class DeepfaceHelper:
             return image_bytes
         except Exception as e:
             raise FaceVerificationError(f"Failed to decode base64 image: {str(e)}") from e
+
+    # FaceRecognitionBase interface implementation
+    def __init__(self):
+        """Initialize DeepfaceHelper instance."""
+        pass  # DeepFace uses class methods, no instance state needed
+
+    def detect_faces(self, img: np.ndarray) -> list:
+        """
+        Detect faces in image.
+
+        Args:
+            img: Input image as numpy array (BGR or RGB format)
+
+        Returns:
+            List of face detections with bbox, landmarks, confidence, and embedding
+        """
+        try:
+            # Use synchronous DeepFace.extract_faces for face detection
+            faces = DeepFace.extract_faces(
+                img_path=img,
+                detector_backend='retinaface',
+                enforce_detection=False
+            )
+
+            results = []
+            for face in faces:
+                results.append({
+                    'bbox': face.get('facial_area', {}),
+                    'landmarks': face.get('landmarks', {}).get('dict', {}),
+                    'confidence': face.get('confidence', 0.0),
+                    'embedding': None  # Detection only, no embedding
+                })
+
+            return results
+        except Exception as e:
+            logger.error(f"DeepFace face detection failed: {e}")
+            return []
+
+    def get_embedding(self, img: np.ndarray) -> Optional[np.ndarray]:
+        """
+        Extract face embedding from image.
+
+        Args:
+            img: Input image as numpy array
+
+        Returns:
+            512-dimensional embedding vector, or None if no face detected
+        """
+        try:
+            # Use synchronous DeepFace.represent for embedding extraction
+            representation = DeepFace.represent(
+                img_path=img,
+                model_name='VGG-Face',
+                detector_backend='retinaface',
+                enforce_detection=False,
+                align=True
+            )
+
+            if representation and len(representation) > 0:
+                embedding = representation[0]['embedding']
+                return np.array(embedding, dtype=np.float32)
+            return None
+        except Exception as e:
+            logger.error(f"DeepFace embedding extraction failed: {e}")
+            return None
+
+    def verify_faces(
+        self,
+        embedding1: np.ndarray,
+        embedding2: np.ndarray,
+        threshold: float = 0.31
+    ) -> dict:
+        """
+        Verify if two face embeddings match using cosine similarity.
+
+        Args:
+            embedding1: First face embedding
+            embedding2: Second face embedding
+            threshold: Cosine distance threshold (default 0.31 for VGG-Face)
+
+        Returns:
+            Dictionary with verification results
+        """
+        try:
+            from scipy.spatial.distance import cosine
+
+            # Convert to lists if needed
+            emb1 = embedding1.tolist() if hasattr(embedding1, 'tolist') else embedding1
+            emb2 = embedding2.tolist() if hasattr(embedding2, 'tolist') else embedding2
+
+            # Compute cosine distance (0 = identical, 1 = completely different)
+            distance = cosine(emb1, emb2)
+            similarity = 1 - distance
+
+            return {
+                'verified': distance <= threshold,
+                'distance': float(distance),
+                'similarity': float(similarity),
+                'threshold': threshold
+            }
+
+        except Exception as e:
+            logger.error(f"DeepFace verification failed: {e}")
+            return {
+                'verified': False,
+                'distance': 1.0,
+                'similarity': 0.0,
+                'threshold': threshold,
+                'error': str(e)
+            }
+
+    def get_model_name(self) -> str:
+        """Return model name for database storage."""
+        return "deepface_vgg-face"
+
+    def get_embedding_dimension(self) -> int:
+        """Return embedding dimension (512 for VGG-Face/Facenet512)."""
+        return 512

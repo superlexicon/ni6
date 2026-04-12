@@ -1,7 +1,7 @@
 -- IM-OSINT Database Schema
--- Version: 1.8.0
+-- Version: 1.9.0
 -- Created: 2025-11-27
--- Updated: 2026-03-16
+-- Updated: 2026-04-12
 -- MySQL Requirements: MariaDB 11.7+ (for VECTOR type)
 -- Description: Complete schema for IM-OSINT KYC verification application
 -- Encryption: ECIES (ephemeral key) for user-only PII decryption
@@ -202,19 +202,23 @@ CREATE TABLE user_identity_index (
 CREATE TABLE face_biometrics (
     id VARCHAR(36) PRIMARY KEY DEFAULT(UUID()),
     user_identity_id VARCHAR(36) NOT NULL COMMENT 'References user_identity_index.id',
-    face_embedding JSON NOT NULL COMMENT 'DeepFace embedding vector (legacy, kept for backward compatibility)',
-    embedding_vec VECTOR(512) NOT NULL COMMENT 'Native VECTOR for similarity search (Facenet512), used for HNSW indexing',
+    face_embedding JSON NOT NULL COMMENT 'Face embedding vector (legacy, kept for backward compatibility)',
+    embedding_vec VECTOR(512) NOT NULL COMMENT 'Native VECTOR for similarity search (512 dims), used for HNSW indexing',
+    model_name VARCHAR(100) NOT NULL DEFAULT 'deepface_vgg-face' COMMENT 'Face recognition model used (deepface_vgg-face, insightface_buffalo_l)',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
     -- Indexes
     INDEX idx_user_identity_id (user_identity_id),
     INDEX idx_created_at (created_at),
+    INDEX idx_model_name (model_name),
+    INDEX idx_model_user (model_name, user_identity_id),
     VECTOR INDEX idx_embedding_vec (embedding_vec) M=16 DISTANCE=cosine
-) COMMENT='Face biometrics with VECTOR-based similarity search';
+) COMMENT='Face biometrics with VECTOR-based similarity search and model tracking';
 
 -- Trigger to prevent same face registering under different identities
 -- Allows: Same face, same user_identity_id (recovery selfies)
 -- Rejects: Same face, DIFFERENT user_identity_id (fraud prevention)
+-- IMPORTANT: Only compares embeddings from the SAME model (cross-model comparison is invalid)
 DELIMITER //
 CREATE TRIGGER trg_face_biometrics_cross_identity_check
 BEFORE INSERT ON face_biometrics
@@ -224,9 +228,11 @@ BEGIN
 
     -- Check if this face matches any existing face under a DIFFERENT identity
     -- Uses HNSW index for O(log n) lookup
+    -- CRITICAL: Only compare embeddings from the SAME model
     SELECT user_identity_id INTO existing_identity
     FROM face_biometrics
     WHERE user_identity_id != NEW.user_identity_id
+      AND model_name = NEW.model_name  -- SAME MODEL ONLY - cross-model comparison is invalid
       AND VEC_DISTANCE_COSINE(embedding_vec, NEW.embedding_vec) < 0.4
     LIMIT 1;
 
@@ -473,4 +479,32 @@ SHOW INDEX FROM sanctions_entries;
 --
 -- 4. To rollback (remove the columns):
 --    See comments in schema/migrations/add_user_keys_verification_state.sql
+
+-- ===============================================
+-- Face Recognition Model Tracking (v1.9.0)
+-- ===============================================
+-- For existing databases upgrading to support multiple face recognition models:
+
+-- 1. Add model_name column (run migration file):
+--    See schema/migrations/add_model_name_to_face_biometrics.sql
+--
+--    This adds:
+--    - model_name VARCHAR(100) NOT NULL DEFAULT 'deepface_vgg-face' to face_biometrics
+--    - idx_model_name index for model filtering
+--    - idx_model_user composite index for model + user queries
+
+-- 2. Update existing records (assumes all are DeepFace):
+--    The migration script handles this automatically.
+
+-- 3. Update duplicate detection trigger (same model only):
+--    The migration script recreates the trigger with model filtering.
+
+-- 4. Key changes to application code:
+--    - FaceBiometricsRepository now tracks and filters by model_name
+--    - All face comparison queries include AND model_name = X filter
+--    - Services pass model_name from factory's get_model_name()
+
+-- 5. To rollback (remove model tracking):
+--    Drop model_name column and indexes
+--    Restore old trigger (without model filtering)
 

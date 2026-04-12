@@ -3,7 +3,7 @@
 # Build: docker build -f Dockerfile.base.rocm -t 10.0.0.14:5000/im-osint-base-rocm:latest .
 # Push: docker push 10.0.0.14:5000/im-osint-base-rocm:latest
 
-FROM rocm/tensorflow:rocm6.3.3-py3.12-tf2.17-dev
+FROM rocm/tensorflow:rocm6.3.3-py3.12-tf2.17-runtime
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -30,7 +30,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTORCH_HIP_ALLOC_CONF=expandable_segments:True \
     DOCTR_CACHE_DIR=/app/app/models/doctr \
     DEEPFACE_HOME=/app/app/deepface
-
+    
 # Install necessary build tools and app dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential cmake git libsm6 libxext6 libglib2.0-0 ffmpeg \

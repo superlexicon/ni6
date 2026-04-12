@@ -19,6 +19,7 @@ class FaceBiometricsRepository:
     Embeddings are stored with multiple representations:
     1. face_embedding (JSON) - Legacy plaintext embedding (kept for compatibility)
     2. embedding_vec (VECTOR) - Native MariaDB VECTOR for HNSW indexing (fast filtering)
+    3. model_name (VARCHAR) - Which face recognition model was used (CRITICAL for compatibility)
     """
 
     def __init__(self):
@@ -27,14 +28,16 @@ class FaceBiometricsRepository:
     def create_face_biometric(
         self,
         user_identity_id: str,
-        face_embedding: List[float]
+        face_embedding: List[float],
+        model_name: str = 'deepface_vgg-face'
     ) -> Optional[str]:
         """
         Store face biometric data with VECTOR column for similarity search.
 
         Args:
             user_identity_id: Reference to user_identity_index.id
-            face_embedding: DeepFace embedding vector (512 floats, Facenet512)
+            face_embedding: Face embedding vector (512 floats)
+            model_name: Model used for extraction (e.g., 'deepface_vgg-face', 'insightface_buffalo_l')
 
         Returns:
             Biometric ID if successful, None otherwise
@@ -61,8 +64,8 @@ class FaceBiometricsRepository:
 
                 sql = """
                 INSERT INTO face_biometrics
-                (id, user_identity_id, face_embedding, embedding_vec, created_at)
-                VALUES (%s, %s, %s, UNHEX(%s), %s)
+                (id, user_identity_id, face_embedding, embedding_vec, model_name, created_at)
+                VALUES (%s, %s, %s, UNHEX(%s), %s, %s)
                 """
 
                 cursor.execute(sql, (
@@ -70,12 +73,13 @@ class FaceBiometricsRepository:
                     user_identity_id,
                     json.dumps(face_embedding),
                     embedding_hex,
+                    model_name,
                     datetime.now()
                 ))
 
                 conn.commit()
                 cursor.close()
-                self.logger.info(f"Created face biometric {biometric_id} for user {user_identity_id[:16]}...")
+                self.logger.info(f"Created face biometric {biometric_id} for user {user_identity_id[:16]}... with model {model_name}")
                 return biometric_id
 
         except Exception as e:
@@ -141,7 +145,8 @@ class FaceBiometricsRepository:
     def get_embeddings_by_user_identity_ordered(
         self,
         user_identity_id: str,
-        limit: Optional[int] = None
+        limit: Optional[int] = None,
+        model_name: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         Get face embeddings for a user ordered by created_at DESC.
@@ -152,9 +157,10 @@ class FaceBiometricsRepository:
         Args:
             user_identity_id: User identity ID
             limit: Optional limit on number of embeddings to return
+            model_name: Optional filter by model name (returns all if None)
 
         Returns:
-            List of dicts with 'id', 'embedding', 'created_at'
+            List of dicts with 'id', 'embedding', 'created_at', 'model_name'
         """
         from app.core.db.database import get_db_connection_context
         try:
@@ -162,16 +168,22 @@ class FaceBiometricsRepository:
                 cursor = conn.cursor(dictionary=True)
 
                 sql = """
-                SELECT id, face_embedding, created_at
+                SELECT id, face_embedding, created_at, model_name
                 FROM face_biometrics
                 WHERE user_identity_id = %s
-                ORDER BY created_at DESC
                 """
+                params = [user_identity_id]
+
+                if model_name:
+                    sql += " AND model_name = %s"
+                    params.append(model_name)
+
+                sql += " ORDER BY created_at DESC"
 
                 if limit:
                     sql += f" LIMIT {int(limit)}"
 
-                cursor.execute(sql, (user_identity_id,))
+                cursor.execute(sql, params)
                 results = cursor.fetchall()
                 cursor.close()
 
@@ -182,10 +194,11 @@ class FaceBiometricsRepository:
                         embeddings.append({
                             'id': result['id'],
                             'embedding': embedding,
-                            'created_at': result['created_at']
+                            'created_at': result['created_at'],
+                            'model_name': result.get('model_name', 'deepface_vgg-face')
                         })
 
-                self.logger.info(f"Retrieved {len(embeddings)} embeddings for user_identity_id: {user_identity_id[:16]}...")
+                self.logger.info(f"Retrieved {len(embeddings)} embeddings for user_identity_id: {user_identity_id[:16]}... (model: {model_name or 'all'})")
                 return embeddings
 
         except Exception as e:
@@ -195,15 +208,18 @@ class FaceBiometricsRepository:
     def check_duplicate_embedding(
         self,
         face_embedding: List[float],
-        distance_threshold: float = 0.4
+        distance_threshold: float = 0.4,
+        model_name: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Check if a similar face embedding already exists in the database.
         Uses MariaDB HNSW index for O(log n) lookup.
+        IMPORTANT: Only checks within the SAME model.
 
         Args:
             face_embedding: The embedding to check
             distance_threshold: Max cosine distance (0.4 = similarity > 0.6)
+            model_name: Model to use for comparison (uses all if None - NOT RECOMMENDED)
 
         Returns:
             Dict with match info if duplicate found, None otherwise
@@ -214,15 +230,20 @@ class FaceBiometricsRepository:
                 cursor = conn.cursor(dictionary=True)
                 embedding_hex = VectorHelper.to_hex(face_embedding)
 
-                sql = f"""
-                SELECT id, user_identity_id, VEC_DISTANCE_COSINE(embedding_vec, x'{embedding_hex}') AS distance
+                sql = """
+                SELECT id, user_identity_id, model_name, VEC_DISTANCE_COSINE(embedding_vec, x'{embedding_hex}') AS distance
                 FROM face_biometrics
                 WHERE VEC_DISTANCE_COSINE(embedding_vec, x'{embedding_hex}') < %s
-                ORDER BY distance
-                LIMIT 1
                 """
+                params = [distance_threshold]
 
-                cursor.execute(sql, (distance_threshold,))
+                if model_name:
+                    sql += " AND model_name = %s"
+                    params.append(model_name)
+
+                sql += " ORDER BY distance LIMIT 1"
+
+                cursor.execute(sql, params)
                 result = cursor.fetchone()
                 cursor.close()
 
@@ -230,6 +251,7 @@ class FaceBiometricsRepository:
                     return {
                         'id': result['id'],
                         'user_identity_id': result['user_identity_id'],
+                        'model_name': result['model_name'],
                         'distance': result['distance']
                     }
                 return None
@@ -242,36 +264,43 @@ class FaceBiometricsRepository:
         self,
         face_embedding: List[float],
         user_identity_id: str,
-        distance_threshold: float = 0.4
+        distance_threshold: float = 0.4,
+        model_name: Optional[str] = None
     ) -> tuple[bool, Optional[float]]:
         """
         Verify that a face embedding matches the user's stored face.
 
         Uses VECTOR HNSW index for fast lookup.
+        IMPORTANT: Only compares embeddings from the SAME model.
 
         Args:
             face_embedding: The new face embedding to verify
             user_identity_id: User identity ID to check against
             distance_threshold: Max cosine distance for match (0.4 = similarity > 0.6)
+            model_name: Model to use for comparison (uses latest if None)
 
         Returns:
             Tuple of (is_match, distance):
             - (True, value) if face matches user's stored face
             - (False, None) if no match or user has no stored face
         """
-        return self._verify_face_matches_user_vector(face_embedding, user_identity_id, distance_threshold)
+        return self._verify_face_matches_user_vector(face_embedding, user_identity_id, distance_threshold, model_name)
 
     def _verify_face_matches_user_vector(
         self,
         face_embedding: List[float],
         user_identity_id: str,
-        distance_threshold: float = 0.4
+        distance_threshold: float = 0.4,
+        model_name: Optional[str] = None
     ) -> tuple[bool, Optional[float]]:
         """
         Verify face match using VECTOR HNSW index (fast).
 
         Used for selfie resubmissions to ensure the new selfie is from
         the same person who registered the identity.
+
+        IMPORTANT: Only compares embeddings from the SAME model.
+        Cross-model comparisons are invalid and produce false negatives.
         """
         from app.core.db.database import get_db_connection_context
         try:
@@ -279,21 +308,26 @@ class FaceBiometricsRepository:
                 cursor = conn.cursor(dictionary=True)
                 embedding_hex = VectorHelper.to_hex(face_embedding)
 
-                # Find the closest stored face for this user
-                sql = f"""
-                SELECT id, VEC_DISTANCE_COSINE(embedding_vec, x'{embedding_hex}') AS distance
+                # Build SQL with optional model filter
+                sql = """
+                SELECT id, model_name, VEC_DISTANCE_COSINE(embedding_vec, x'{embedding_hex}') AS distance
                 FROM face_biometrics
                 WHERE user_identity_id = %s
-                ORDER BY distance
-                LIMIT 1
                 """
+                params = [user_identity_id]
 
-                cursor.execute(sql, (user_identity_id,))
+                if model_name:
+                    sql += " AND model_name = %s"
+                    params.append(model_name)
+
+                sql += " ORDER BY distance LIMIT 1"
+
+                cursor.execute(sql, params)
                 result = cursor.fetchone()
                 cursor.close()
 
                 if not result:
-                    self.logger.warning(f"No face biometrics found for user: {user_identity_id[:16]}...")
+                    self.logger.warning(f"No face biometrics found for user: {user_identity_id[:16]}... (model: {model_name or 'any'})")
                     return (False, None)
 
                 distance = result['distance']
@@ -301,7 +335,8 @@ class FaceBiometricsRepository:
 
                 self.logger.info(
                     f"Face verification for user {user_identity_id[:16]}...: "
-                    f"distance={distance:.4f}, threshold={distance_threshold}, match={is_match}"
+                    f"model={result['model_name']}, distance={distance:.4f}, "
+                    f"threshold={distance_threshold}, match={is_match}"
                 )
 
                 return (is_match, distance)
@@ -312,19 +347,22 @@ class FaceBiometricsRepository:
     def find_matching_identity(
         self,
         face_embedding: List[float],
-        distance_threshold: float = 0.3
+        distance_threshold: float = 0.3,
+        model_name: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Find matching identity by face embedding across all users.
 
         Uses MariaDB HNSW index for efficient O(log n) lookup.
+        IMPORTANT: Only compares embeddings from the SAME model.
 
         Args:
             face_embedding: Face embedding to match
             distance_threshold: Max cosine distance (default 0.3 = 70% confidence)
+            model_name: Model to use for comparison (uses all if None - NOT RECOMMENDED)
 
         Returns:
-            Dict with 'identity_id', 'distance', 'similarity', 'matched_biometric_id' if found,
+            Dict with 'identity_id', 'distance', 'similarity', 'matched_biometric_id', 'model_name' if found,
             None otherwise
         """
         from app.core.db.database import get_db_connection_context
@@ -333,18 +371,25 @@ class FaceBiometricsRepository:
                 cursor = conn.cursor(dictionary=True)
                 embedding_hex = VectorHelper.to_hex(face_embedding)
 
-                sql = f"""
+                # Build SQL with optional model filter
+                sql = """
                 SELECT
                 id AS biometric_id,
                 user_identity_id AS identity_id,
+                model_name,
                 VEC_DISTANCE_COSINE(embedding_vec, x'{embedding_hex}') AS distance
                 FROM face_biometrics
                 WHERE VEC_DISTANCE_COSINE(embedding_vec, x'{embedding_hex}') < %s
-                ORDER BY distance
-                LIMIT 1
                 """
+                params = [distance_threshold]
 
-                cursor.execute(sql, (distance_threshold,))
+                if model_name:
+                    sql += " AND model_name = %s"
+                    params.append(model_name)
+
+                sql += " ORDER BY distance LIMIT 1"
+
+                cursor.execute(sql, params)
                 result = cursor.fetchone()
                 cursor.close()
 
@@ -352,16 +397,18 @@ class FaceBiometricsRepository:
                     similarity = 1.0 - result['distance']
                     self.logger.info(
                         f"Found matching identity: {result['identity_id'][:16]}..., "
-                        f"distance={result['distance']:.4f} (similarity={similarity*100:.1f}%)"
+                        f"model={result['model_name']}, distance={result['distance']:.4f} "
+                        f"(similarity={similarity*100:.1f}%)"
                     )
                     return {
                         'identity_id': result['identity_id'],
                         'distance': result['distance'],
                         'similarity': similarity,
-                        'matched_biometric_id': result['biometric_id']
+                        'matched_biometric_id': result['biometric_id'],
+                        'model_name': result['model_name']
                     }
 
-                self.logger.info(f"No matching identity found (threshold: distance<{distance_threshold})")
+                self.logger.info(f"No matching identity found (threshold: distance<{distance_threshold}, model: {model_name or 'any'})")
                 return None
 
         except Exception as e:
@@ -371,7 +418,8 @@ class FaceBiometricsRepository:
     def update_face_biometric(
         self,
         user_identity_id: str,
-        face_embedding: List[float]
+        face_embedding: List[float],
+        model_name: str = 'deepface_vgg-face'
     ) -> Optional[str]:
         """
         Update or add a face biometric for a user (used for resubmissions).
@@ -382,6 +430,7 @@ class FaceBiometricsRepository:
         Args:
             user_identity_id: User identity ID
             face_embedding: New face embedding to store
+            model_name: Model used for extraction
 
         Returns:
             Biometric ID if successful, None otherwise
@@ -405,8 +454,8 @@ class FaceBiometricsRepository:
 
                 sql = """
                 INSERT INTO face_biometrics
-                (id, user_identity_id, face_embedding, embedding_vec, created_at)
-                VALUES (%s, %s, %s, UNHEX(%s), %s)
+                (id, user_identity_id, face_embedding, embedding_vec, model_name, created_at)
+                VALUES (%s, %s, %s, UNHEX(%s), %s, %s)
                 """
 
                 cursor.execute(sql, (
@@ -414,12 +463,13 @@ class FaceBiometricsRepository:
                     user_identity_id,
                     json.dumps(face_embedding),
                     embedding_hex,
+                    model_name,
                     datetime.now()
                 ))
 
                 conn.commit()
                 cursor.close()
-                self.logger.info(f"Updated face biometric {biometric_id} for user {user_identity_id[:16]}...")
+                self.logger.info(f"Updated face biometric {biometric_id} for user {user_identity_id[:16]}... with model {model_name}")
                 return biometric_id
 
         except Exception as e:
@@ -462,3 +512,43 @@ class FaceBiometricsRepository:
         except Exception as e:
             self.logger.error(f"Error deleting face embeddings: {str(e)}")
             return 0
+
+    def get_model_name_for_user(
+        self,
+        user_identity_id: str
+    ) -> Optional[str]:
+        """
+        Get the model name of the most recent face embedding for a user.
+
+        Args:
+            user_identity_id: User identity ID
+
+        Returns:
+            Model name (e.g., 'deepface_vgg-face', 'insightface_buffalo_l') or None if no embeddings found
+        """
+        from app.core.db.database import get_db_connection_context
+        try:
+            with get_db_connection_context() as conn:
+                cursor = conn.cursor(dictionary=True)
+
+                sql = """
+                SELECT model_name
+                FROM face_biometrics
+                WHERE user_identity_id = %s
+                ORDER BY created_at DESC
+                LIMIT 1
+                """
+
+                cursor.execute(sql, (user_identity_id,))
+                result = cursor.fetchone()
+                cursor.close()
+
+                if result and result.get('model_name'):
+                    return result['model_name']
+
+                self.logger.warning(f"No model name found for user: {user_identity_id[:16]}...")
+                return None
+
+        except Exception as e:
+            self.logger.error(f"Error getting model name for user: {str(e)}")
+            return None

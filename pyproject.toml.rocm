@@ -50,6 +50,10 @@ pydantic-settings = "^2.0.0"
 transformers = "^4.57.3"
 scikit-learn = "^1.5.0"  # Required by PhotoHolmes EXIF As Language method
 # PhotoHolmes now integrated in app/photoholmes - no separate dependency needed
+# InsightFace alternative backend for face recognition (PyTorch/ONNX)
+insightface = "^0.7.3"
+onnxruntime = "^1.17.0"
+scipy = "^1.13.0"
 
 # Additional essential dependencies (required for all build types)
 ecdsa = "^0.19.1"

@@ -43,6 +43,7 @@ from app.services.verification_state_service import VerificationStateService
 from app.repositories.user_key_repository import UserKeyRepository
 from app.repositories.user_identity_repository import UserIdentityRepository
 from app.core.logger import get_logger
+from app.helper.face_recognition_factory import get_model_name
 
 
 class VideoSelfieService:
@@ -205,7 +206,8 @@ class VideoSelfieService:
                 try:
                     biometric_id = self.face_biometrics_repo.create_face_biometric(
                         user_identity_id=user_identity_id,
-                        face_embedding=face_embedding
+                        face_embedding=face_embedding,
+                        model_name=get_model_name()
                     )
                     if biometric_id:
                         self.logger.info(f"Stored face biometric {biometric_id}")

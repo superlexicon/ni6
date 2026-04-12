@@ -1,5 +1,5 @@
 from app.repositories import otp_repository
-from .deepface_helper import DeepfaceHelper
+from .face_recognition_factory import get_face_recognition_backend
 from .doctr.document_text_extractor import DocumentTextExtractor
 from .doctr.document_validator import DocumentValidator
 from .doctr.text_matcher import TextMatcher
@@ -16,7 +16,8 @@ document_text_extractor = DocumentTextExtractor()
 exif_validator = ExifValidator()
 document_type_detector = DocumentTypeDetector()
 bank_statement_validator = BankStatementValidator()
-deepface_helper = DeepfaceHelper()
+# Use factory to get the appropriate backend (DeepFace or InsightFace)
+deepface_helper = get_face_recognition_backend()
 
 text_matcher = TextMatcher()
 document_validator = DocumentValidator()

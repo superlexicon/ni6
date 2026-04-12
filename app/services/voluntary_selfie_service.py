@@ -3,6 +3,7 @@ from app.repositories.face_biometrics_repository import FaceBiometricsRepository
 from app.repositories.user_key_repository import UserKeyRepository
 from app.services.face_extraction_service import FaceExtractionService
 from app.core.logger import get_logger
+from app.helper.face_recognition_factory import get_model_name
 
 class VoluntarySelfieService:
     """Service for voluntary selfie submissions"""
@@ -82,7 +83,8 @@ class VoluntarySelfieService:
         try:
             biometric_id = self.face_biometrics_repo.create_face_biometric(
                 user_identity_id=user_identity_id,
-                face_embedding=face_embedding
+                face_embedding=face_embedding,
+                model_name=get_model_name()
             )
         except DuplicateFaceError as e:
             raise ValueError(f"This face is already registered in the system: {str(e)}")

@@ -8,7 +8,7 @@ from app.dto import (
 from app.repositories import UserIdentityRepository
 from app.helper.deepface_helper import DeepfaceHelper
 from app.services.face_extraction_service import FaceExtractionService
-from app.core.logger import get_logger
+from app.core.logger import get_logger()
 
 
 class SelfieVerificationError(Exception):

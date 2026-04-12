@@ -38,6 +38,7 @@ from app.repositories.otp_repository import OTPRepository
 from app.repositories.user_identity_repository import UserIdentityRepository
 from app.repositories.face_biometrics_repository import FaceBiometricsRepository, DuplicateFaceError
 from app.dto import DocumentErrorCode
+from app.helper.face_recognition_factory import get_model_name
 
 
 class SequentialSelfieService:
@@ -221,7 +222,8 @@ class SequentialSelfieService:
                 # Add new face embedding
                 biometric_id = face_biometrics_repo.create_face_biometric(
                     user_identity_id=user_identity_id,
-                    face_embedding=verification_result.face_embedding
+                    face_embedding=verification_result.face_embedding,
+                    model_name=get_model_name()
                 )
                 if biometric_id:
                     self.logger.info(f"Added new face biometric {biometric_id} for resubmission")
@@ -269,7 +271,8 @@ class SequentialSelfieService:
                 try:
                     biometric_id = face_biometrics_repo.create_face_biometric(
                         user_identity_id=user_identity_id,
-                        face_embedding=verification_result.face_embedding
+                        face_embedding=verification_result.face_embedding,
+                        model_name=get_model_name()
                     )
                     if biometric_id:
                         self.logger.info(f"Stored face biometric {biometric_id}")
