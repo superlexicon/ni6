@@ -203,6 +203,29 @@ class FrameworkCoordinator:
                         self.logger.warning(f"TensorFlow GPU configuration failed: {e}")
                         return False
 
+            elif config.device_type == DeviceType.ROCM:
+                # Configure TensorFlow for ROCm (AMD GPU)
+                gpus = tf.config.experimental.list_physical_devices('GPU')
+                if gpus:
+                    try:
+                        # Enable memory growth for optimal GPU utilization
+                        for gpu in gpus:
+                            tf.config.experimental.set_memory_growth(gpu, config.memory_growth_enabled)
+
+                        # Enable mixed precision if requested
+                        if config.mixed_precision_enabled:
+                            tf.keras.mixed_precision.set_global_policy('mixed_float16')
+
+                        self.logger.info(f"TensorFlow ROCm configuration applied successfully with {len(gpus)} GPU(s)")
+                        return True
+
+                    except RuntimeError as e:
+                        self.logger.warning(f"TensorFlow ROCm configuration failed: {e}")
+                        return False
+                else:
+                    self.logger.warning("TensorFlow ROCm: No GPUs detected, check TF_ROCM_GPU_ALLOCATOR environment variable")
+                    return False
+
             elif config.device_type == DeviceType.MPS:
                 # Configure TensorFlow for Apple Silicon with DeepFace compatibility
                 try:
