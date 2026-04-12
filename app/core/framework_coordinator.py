@@ -151,7 +151,6 @@ class FrameworkCoordinator:
                 memory_limit_mb=memory_limit_mb,
                 memory_growth_enabled=kwargs.get('memory_growth_enabled', True),
                 mixed_precision_enabled=kwargs.get('mixed_precision_enabled', False),  # Disable mixed precision for DeepFace compatibility
-                execution_providers=self._get_default_execution_providers(framework_type, device_type)
             )
 
             self._framework_configs[framework_type] = config
