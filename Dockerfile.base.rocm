@@ -3,7 +3,7 @@
 # Build: docker build -f Dockerfile.base.rocm -t 10.0.0.14:5000/im-osint-base-rocm:latest .
 # Push: docker push 10.0.0.14:5000/im-osint-base-rocm:latest
 
-FROM rocm/tensorflow:rocm6.3.3-py3.12-tf2.17-runtime
+FROM rocm/tensorflow:rocm6.3.3-py3.12-tf2.17-dev
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -16,17 +16,17 @@ ENV DEBIAN_FRONTEND=noninteractive \
     POETRY_CACHE_DIR=/tmp/poetry_cache \
     TF_CPP_MIN_LOG_LEVEL=2 \
     TF_USE_LEGACY_KERAS=1 \
-    TF_ROCM_GPU_ALLOCATOR=cpu_malloc_async \
+    TF_ROCM_GPU_ALLOCATOR=gpu_malloc \
     ROCM_ARCH=gfx906 \
     ROCM_PATH=/opt/rocm \
     LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/lib:/opt/rocm/lib64 \
     PATH=$PATH:/opt/rocm/bin:/opt/rocm/profiler/bin:/opt/rocm/opencl/bin \
     PYTHONPATH=$PYTHONPATH:/usr/local/lib/python3.12/site-packages \
     HIP_VISIBLE_DEVICES=0 \
-    ROC_ENABLE_PRE_VEGA=1 \
+    ROC_ENABLE_PRE_VEGA=0 \
     MIOPEN_USER_DB_PATH=/root/.config/miopen \
     MIOPEN_CACHE_DIR=/root/.cache/miopen \
-    MIOPEN_FIND_MODE=3 \
+    MIOPEN_FIND_MODE=NORMAL \
     PYTORCH_HIP_ALLOC_CONF=expandable_segments:True \
     DOCTR_CACHE_DIR=/app/app/models/doctr \
     DEEPFACE_HOME=/app/app/deepface
