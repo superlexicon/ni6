@@ -20,26 +20,32 @@ logger = get_logger()
 # Define weight URLs and paths
 WEIGHTS_CONFIG = {
     "adaptive_cfa_net": {
-        "url": "https://github.com/ISICV/Fourier-Synthesis/releases/download/v1.0/adaptive_cfa_net.pth",
-        "filename": "adaptive_cfa_net.pth",
+        # Downloaded from raw GitHub content as pretrained.pt, renamed to weights.pth
+        "url": "https://raw.githubusercontent.com/qbammey/adaptive_cfa_forensics/master/src/models/pretrained.pt",
+        "filename": "weights.pth",
         "description": "Adaptive CFA Net weights for forgery detection"
     },
     "psccnet": {
+        # PSCCNet weights cannot be downloaded via direct URL
+        # They require manual download from the repository
+        "manual_download": True,
         "weights": {
             "fenet": {
-                "url": "https://github.com/proteus1991/PSCC-Net/releases/download/v1.0/FENet.pth",
+                "source": "PSCC-Net/checkpoint/HRNet_checkpoint/HRNet.pth",
                 "filename": "FENet.pth"
             },
             "segnet": {
-                "url": "https://github.com/proteus1991/PSCC-Net/releases/download/v1.0/SegNet.pth",
+                "source": "PSCC-Net/checkpoint/NLCDetection_checkpoint/NLCDetection.pth",
                 "filename": "SegNet.pth"
             },
             "clsnet": {
-                "url": "https://github.com/proteus1991/PSCC-Net/releases/download/v1.0/ClsNet.pth",
+                "source": "PSCC-Net/checkpoint/DetectionHead_checkpoint/DetectionHead.pth",
                 "filename": "ClsNet.pth"
             }
         },
-        "description": "PSCCNet weights for forgery detection"
+        "description": "PSCCNet weights for forgery detection (manual download required)",
+        "repo_url": "https://github.com/proteus1991/PSCC-Net",
+        "instructions": "Clone the repository or download from Baidu Cloud (password: js74)"
     }
 }
 
@@ -119,10 +125,33 @@ def download_weights(method: str, force: bool = False):
                 click.echo(f"Weights already exist at {target_path}")
                 return
 
-            download_file(config["url"], config["filename"], method_dir)
-            click.echo(f"✅ Adaptive CFA Net weights downloaded to {target_path}")
+            # Download from raw GitHub URL (saves as pretrained.pt, needs rename to weights.pth)
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix='.pt', delete=False) as tmp:
+                tmp_path = Path(tmp.name)
+
+            logger.info(f"Downloading from {config['url']}")
+            wget.download(config["url"], str(tmp_path))
+            tmp_path.rename(target_path)
+            click.echo(f"\n✅ Adaptive CFA Net weights downloaded to {target_path}")
 
         elif method == "psccnet":
+            # PSCCNet requires manual download
+            if config.get("manual_download"):
+                click.echo("⚠️  PSCCNet weights cannot be downloaded automatically")
+                click.echo(f"\nRepository: {config['repo_url']}")
+                click.echo(f"\n{config['instructions']}")
+                click.echo("\nManual download instructions:")
+                click.echo("  1. Clone the repository:")
+                click.echo("     git clone https://github.com/proteus1991/PSCC-Net.git /tmp/psccnet")
+                click.echo(f"\n  2. Copy the checkpoint files to {method_dir}:")
+                for weight_name, weight_config in config["weights"].items():
+                    click.echo(f"     cp /tmp/psccnet/{weight_config['source']} \\")
+                    click.echo(f"        {method_dir}/{weight_config['filename']}")
+                click.echo("\n  3. Or download from Baidu Cloud (password: js74)")
+                click.echo("     See the repository README for details")
+                return
+
             downloaded_files = []
             for weight_name, weight_config in config["weights"].items():
                 target_path = method_dir / weight_config["filename"]
@@ -214,7 +243,12 @@ def download_adaptive_cfa_weights():
 
     target_path = method_dir / config["filename"]
     if not target_path.exists():
-        download_file(config["url"], config["filename"], method_dir)
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix='.pt', delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+
+        wget.download(config["url"], str(tmp_path))
+        tmp_path.rename(target_path)
 
     return target_path
 
@@ -223,6 +257,13 @@ def download_psccnet_weights():
     """Download PSCCNet weights (backward compatibility)."""
     weights_dir = get_weights_dir()
     config = WEIGHTS_CONFIG["psccnet"]
+
+    # PSCCNet requires manual download
+    if config.get("manual_download"):
+        logger.warning("PSCCNet weights cannot be downloaded automatically")
+        logger.info(f"See {config['repo_url']} for manual download instructions")
+        return []
+
     method_dir = weights_dir / "psccnet"
     method_dir.mkdir(exist_ok=True)
 
