@@ -1356,11 +1356,47 @@ if [ "$DRY_RUN" = false ]; then
 fi
 
 # Exit with error code if any failed
-if [ $RESULT_DEEPFACE -ne 0 ] || [ $RESULT_DOCTR -ne 0 ] || \
-   [ $RESULT_HUGGINGFACE -ne 0 ] || [ $RESULT_MEDIAPIPE -ne 0 ] || \
-   [ $RESULT_NLTK -ne 0 ] || [ $RESULT_PHOTOHOLMES -ne 0 ] || \
-   [ $RESULT_SPACY -ne 0 ]; then
-    exit 1
+# Only check the downloaders that were actually run
+if [ "$DOWNLOAD_ALL" = true ] || [ "$DOWNLOAD_DEEPFACE" = true ]; then
+    if [ $RESULT_DEEPFACE -ne 0 ]; then
+        exit 1
+    fi
+fi
+
+if [ "$DOWNLOAD_ALL" = true ] || [ "$DOWNLOAD_DOCTR" = true ]; then
+    if [ $RESULT_DOCTR -ne 0 ]; then
+        exit 1
+    fi
+fi
+
+if [ "$DOWNLOAD_ALL" = true ] || [ "$DOWNLOAD_HUGGINGFACE" = true ]; then
+    if [ $RESULT_HUGGINGFACE -ne 0 ]; then
+        exit 1
+    fi
+fi
+
+if [ "$DOWNLOAD_ALL" = true ] || [ "$DOWNLOAD_MEDIAPIPE" = true ]; then
+    if [ $RESULT_MEDIAPIPE -ne 0 ]; then
+        exit 1
+    fi
+fi
+
+if [ "$DOWNLOAD_ALL" = true ] || [ "$DOWNLOAD_NLTK" = true ]; then
+    if [ $RESULT_NLTK -ne 0 ]; then
+        exit 1
+    fi
+fi
+
+if [ "$DOWNLOAD_ALL" = true ] || [ "$DOWNLOAD_PHOTOHOLMES" = true ]; then
+    if [ $RESULT_PHOTOHOLMES -ne 0 ]; then
+        exit 1
+    fi
+fi
+
+if [ "$DOWNLOAD_ALL" = true ] || [ "$DOWNLOAD_SPACY" = true ]; then
+    if [ $RESULT_SPACY -ne 0 ]; then
+        exit 1
+    fi
 fi
 
 exit 0
