@@ -494,14 +494,37 @@ download_huggingface() {
         log_info "    Would download using: python scripts/download_gliner2.py $GLINER2_TARGET"
         gliner2_success=2
     else
-        # Capture stderr to suppress Poetry's version check message
-        if poetry run python3 "${SCRIPT_DIR}/download_gliner2.py" "$GLINER2_TARGET" 2>/dev/null; then
+        # Run the script, capturing stderr separately for error reporting
+        # Stdout shows progress, stderr only shows on error
+        set +e  # Don't exit on error for this command
+        local stderr_file=$(mktemp)
+
+        # Show diagnostic info if VERBOSE is set
+        if [ "$VERBOSE" = "true" ]; then
+            log_info "    Running: poetry run python3 ${SCRIPT_DIR}/download_gliner2.py $GLINER2_TARGET"
+            log_info "    Current directory: $(pwd)"
+            log_info "    SCRIPT_DIR: $SCRIPT_DIR"
+        fi
+
+        if poetry run python3 "${SCRIPT_DIR}/download_gliner2.py" "$GLINER2_TARGET" 2>"$stderr_file"; then
             gliner2_success=2
             log_info "    → GLiNER2 downloaded successfully"
         else
             gliner2_success=0
             log_error "    Failed to download GLiNER2"
+            log_error "    Command: poetry run python3 ${SCRIPT_DIR}/download_gliner2.py $GLINER2_TARGET"
+            log_error "    Exit code: $?"
+            if [ -s "$stderr_file" ]; then
+                log_error "    Error output:"
+                while IFS= read -r line; do
+                    log_error "      $line"
+                done < "$stderr_file"
+            else
+                log_error "    No error output captured"
+            fi
         fi
+        rm -f "$stderr_file"
+        set -e  # Re-enable exit on error
     fi
 
     if [ $finbert_success -eq 4 ] && [ $gliner2_success -eq 2 ]; then
@@ -1083,11 +1106,16 @@ DOWNLOAD_MEDIAPIPE=false
 DOWNLOAD_NLTK=false
 DOWNLOAD_PHOTOHOLMES=false
 DOWNLOAD_SPACY=false
+VERBOSE=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
         --dry-run)
             DRY_RUN=true
+            shift
+            ;;
+        --verbose)
+            VERBOSE=true
             shift
             ;;
         --force)
@@ -1142,6 +1170,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --spacy            Download spaCy model"
             echo "  --dry-run          Show what would be downloaded"
             echo "  --force            Re-download existing files"
+            echo "  --verbose          Show detailed diagnostic information"
             echo "  -h, --help         Show this help message"
             exit 0
             ;;
