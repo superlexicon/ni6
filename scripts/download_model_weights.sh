@@ -547,38 +547,54 @@ download_huggingface() {
             log_error "    Please ensure Python 3.10-3.12 is available"
             log_error "    Run: pyenv local 3.11.7"
         else
-            set +e  # Don't exit on error for this command
-            local stderr_file=$(mktemp)
-
-            # Show diagnostic info if VERBOSE is set
-            if [ "$VERBOSE" = "true" ]; then
-                log_info "    Running: poetry run python3 ${SCRIPT_DIR}/download_gliner2.py $GLINER2_TARGET"
-                log_info "    Current directory: $(pwd)"
-                log_info "    SCRIPT_DIR: $SCRIPT_DIR"
-            fi
-
-            # Run the download script via Poetry
-            poetry run python3 "${SCRIPT_DIR}/download_gliner2.py" "$GLINER2_TARGET" 2>"$stderr_file"
-            local exit_code=$?  # Capture exit code IMMEDIATELY
-
-            if [ $exit_code -eq 0 ]; then
-                gliner2_success=2
-                log_info "    → GLiNER2 downloaded successfully"
-            else
-                gliner2_success=0
-                log_error "    Failed to download GLiNER2"
-                log_error "    Exit code: $exit_code"
-
-                if [ -s "$stderr_file" ]; then
-                    log_error "    Error output:"
-                    while IFS= read -r line; do
-                        log_error "      $line"
-                    done < "$stderr_file"
+            # Check if huggingface_hub is installed
+            local needs_huggingface_hub=false
+            if ! poetry run python3 -c "import huggingface_hub" 2>/dev/null; then
+                needs_huggingface_hub=true
+                log_info "    huggingface_hub not found, installing..."
+                if poetry run pip install huggingface_hub >/dev/null 2>&1; then
+                    log_info "    → huggingface_hub installed successfully"
+                else
+                    gliner2_success=0
+                    log_error "    Failed to install huggingface_hub"
+                    log_error "    Please run: poetry add huggingface_hub"
                 fi
             fi
 
-            rm -f "$stderr_file"
-            set -e  # Re-enable exit on error
+            if [ "$needs_huggingface_hub" = false ] || [ $gliner2_success -ne 0 ]; then
+                set +e  # Don't exit on error for this command
+                local stderr_file=$(mktemp)
+
+                # Show diagnostic info if VERBOSE is set
+                if [ "$VERBOSE" = "true" ]; then
+                    log_info "    Running: poetry run python3 ${SCRIPT_DIR}/download_gliner2.py $GLINER2_TARGET"
+                    log_info "    Current directory: $(pwd)"
+                    log_info "    SCRIPT_DIR: $SCRIPT_DIR"
+                fi
+
+                # Run the download script via Poetry
+                poetry run python3 "${SCRIPT_DIR}/download_gliner2.py" "$GLINER2_TARGET" 2>"$stderr_file"
+                local exit_code=$?  # Capture exit code IMMEDIATELY
+
+                if [ $exit_code -eq 0 ]; then
+                    gliner2_success=2
+                    log_info "    → GLiNER2 downloaded successfully"
+                else
+                    gliner2_success=0
+                    log_error "    Failed to download GLiNER2"
+                    log_error "    Exit code: $exit_code"
+
+                    if [ -s "$stderr_file" ]; then
+                        log_error "    Error output:"
+                        while IFS= read -r line; do
+                            log_error "      $line"
+                        done < "$stderr_file"
+                    fi
+                fi
+
+                rm -f "$stderr_file"
+                set -e  # Re-enable exit on error
+            fi
         fi
     fi
 
