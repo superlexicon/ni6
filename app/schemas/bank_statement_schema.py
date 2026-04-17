@@ -61,3 +61,6 @@ class BankStatementData(BaseModel):
 
     # Validation results
     validation_results: Dict[str, Any] = {}
+
+    # Raw OCR text as concatenated string
+    raw_data: Optional[str] = None  # Full OCR text for debugging/auditing

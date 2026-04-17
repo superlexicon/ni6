@@ -30,6 +30,7 @@ cache/
 # Model weights and binary files (use Git LFS instead)
 app/models/
 app/photoholmes/weights/
+app/deepface/.deepface
 *.pth
 *.pt
 *.h5
@@ -40,12 +41,6 @@ app/photoholmes/weights/
 *.so
 *.dylib
 *.dll
-
-# NLTK data
-app/models/nltk/
-
-# spaCy models (downloaded, not tracked)
-app/spacy_models/
 
 # Wheels directory
 wheels/

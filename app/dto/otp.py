@@ -53,8 +53,8 @@ class SignedOTPRequest(BaseModel):
     """
     # Client identification
     client_public_key: str = Field(..., description="Client's public key (hex)")
-    mobile_number: str = Field(..., description="Mobile number WITHOUT country code/prefix (e.g., '5551234567'). Prefix will be added from country_code.")
-    country_code: str = Field(..., description="ISO country code (e.g., 'US', 'SG', 'GB'). Converted to phone prefix like '+1', '+65'.")
+    mobile_number: Optional[str] = Field(None, description="Mobile number WITHOUT country code/prefix (e.g., '5551234567'). If provided, OTP will be sent via SMS. Otherwise, OTP is only returned in encrypted response.")
+    country_code: Optional[str] = Field(None, description="ISO country code (e.g., 'US', 'SG', 'GB'). Required if mobile_number is provided.")
 
     # Secret share (MOVED from selfie submission)
     secret_share: Optional[str] = Field(None, description="DEPRECATED - Shamir secret share (plaintext)")

@@ -623,6 +623,7 @@ class GLiNERBankStatementExtractor:
             account_number_extraction_method=account_number_extraction_method,
             overall_confidence=overall_confidence,
             confidence_scores=confidence_scores,
+            raw_data=ocr_text,
         )
 
     def _extract_single_field(

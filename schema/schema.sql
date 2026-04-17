@@ -93,7 +93,7 @@ COMMENT='Individual entries from sanctions lists with parsed searchable fields';
 -- ===============================================
 CREATE TABLE user_keys (
     id VARCHAR(255) PRIMARY KEY DEFAULT(UUID()),
-    mobile_number VARCHAR(20) NOT NULL,
+    mobile_number VARCHAR(20) NULL,
     country_code VARCHAR(10) NULL COMMENT 'Country code for mobile number (nullable for legacy records)',
     user_public_key TEXT NOT NULL,
     encrypted_secret_share TEXT,
@@ -121,7 +121,7 @@ CREATE TABLE user_keys (
 -- ===============================================
 CREATE TABLE user_keys_pending (
     id VARCHAR(255) PRIMARY KEY DEFAULT(UUID()),
-    mobile_number VARCHAR(20) NOT NULL,
+    mobile_number VARCHAR(20) NULL,
     country_code VARCHAR(10) NULL COMMENT 'Country code for mobile number (nullable for legacy records)',
     user_public_key TEXT NOT NULL,
     encrypted_secret_share TEXT,
@@ -147,7 +147,7 @@ CREATE TABLE otp (
     id VARCHAR(255) PRIMARY KEY DEFAULT(UUID()),
     email VARCHAR(255) UNIQUE,
     public_key VARCHAR(255),
-    mobile_number VARCHAR(20) UNIQUE,
+    mobile_number VARCHAR(20) NULL,
     country_code VARCHAR(10) NULL COMMENT 'Country code for mobile number (for multi-device linking)',
     encrypted_secret_share TEXT NULL COMMENT 'Encrypted secret share (for multi-device linking)',
     device_id VARCHAR(255) NULL COMMENT 'Device identifier from client',

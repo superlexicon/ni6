@@ -84,6 +84,8 @@ class PassportExtractor:
             passport_data.issuing_authority = extracted_fields.get('issuing_authority')
             passport_data.date_of_expiry = extracted_fields.get('date_of_expiry')
             passport_data.passport_country = extracted_fields.get('country_code')
+            passport_data.extraction_source = 'logic_based'
+            passport_data.raw_data = "\n".join([block.get('text', '') for block in text_blocks])
 
             # Calculate confidence based on OCR confidence scores from DocTR
             field_confidences = self._calculate_field_confidences(text_blocks, extracted_fields)

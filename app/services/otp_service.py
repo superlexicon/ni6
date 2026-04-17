@@ -44,6 +44,47 @@ class OTPService:
                 self.logger.error(f"Failed to initialize AWS SMS service: {str(e)}")
                 self.aws_sms_service = None
 
+    def generate_otp_without_sms(
+        self,
+        length: int,
+        client_public_key: Optional[str] = None,
+        gesture_mode: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Generate OTP code without sending SMS (for encrypted response delivery).
+
+        Args:
+            length: Length of OTP code to generate
+            client_public_key: Client's public key for security binding
+            gesture_mode: If True, restrict OTP to digits 1-5 only
+
+        Returns:
+            Dict with OTP details
+        """
+        try:
+            # Generate new OTP code using secure random generator
+            allowed_digits = '12345' if gesture_mode else None
+            otp_code = self.unique_random_generator.generate_random_number(length, allowed_digits=allowed_digits)
+
+            # Generate unique OTP request ID
+            otp_id = str(uuid.uuid4())
+
+            # Calculate expiry time (use UTC)
+            expiry_minutes = aws_settings.otp_expiry_minutes
+            expires_at = datetime.now(timezone.utc) + timedelta(minutes=expiry_minutes)
+
+            return {
+                'otp': otp_code,
+                'otp_id': otp_id,
+                'expires_at': expires_at,
+                'sent_at': datetime.now(timezone.utc),
+                'delivery_method': 'encrypted_response',
+                'otp_length': length
+            }
+        except Exception as e:
+            self.logger.error(f"Failed to generate OTP without SMS: {type(e).__name__}")
+            raise
+
     async def generate_and_send_otp_via_sms(
         self,
         length: int,

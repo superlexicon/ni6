@@ -84,6 +84,7 @@ class ExtractionResult:
     ifsc_code: Optional[str] = None
     swift_code: Optional[str] = None
     raw_values: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    raw_data: Optional[str] = None  # Raw OCR text for debugging/auditing
 
 
 @dataclass
@@ -3940,6 +3941,9 @@ class SpatialBankStatementExtractor:
                 'position': {'x1': span.x1, 'y1': span.y1, 'x2': span.x2, 'y2': span.y2}
             }
 
+        # Build raw_data by concatenating all span texts
+        raw_data = "\n".join([span.text for span in first_pass_results.values() if span.text])
+
         return ExtractionResult(
             account_holder_name=holder_name,
             account_holder_address=address_components.get("street_address"),
@@ -3957,7 +3961,8 @@ class SpatialBankStatementExtractor:
             statement_date=statement_date,
             opening_balance=opening_balance,
             closing_balance=closing_balance,
-            raw_values=raw_values
+            raw_values=raw_values,
+            raw_data=raw_data
         )
 
     def _convert_to_bank_statement_data(self, result: ExtractionResult) -> BankStatementData:
@@ -4019,6 +4024,9 @@ class SpatialBankStatementExtractor:
 
             # Validation results
             validation_results={},
+
+            # Raw OCR text for debugging/auditing
+            raw_data=result.raw_data,
         )
 
     def _parse_balance(self, balance_str: Optional[str]) -> Optional[float]:

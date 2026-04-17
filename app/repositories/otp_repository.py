@@ -106,16 +106,49 @@ class OTPRepository(BaseRepository):
                             RETURNING {returning_str}
                         """
                     else:
-                        # Email OTP (legacy) - keep existing logic
-                        if self._record_exists('email', otp_data['email']):
-                            logger.debug(f"Updating existing OTP for email: {otp_data['email']}")
-                            return self.update_otp(otp_data['email'], otp_data)
+                        # Check if this is public_key based OTP (no mobile_number, no email)
+                        if 'public_key' in otp_data and otp_data['public_key']:
+                            # Public key based OTP - for encrypted response delivery
+                            # Check if OTP already exists for this public_key
+                            existing_otp = self.get_unverified_otp_by_public_key(otp_data['public_key'])
+                            if existing_otp:
+                                logger.debug(f"Updating existing OTP for public_key: {otp_data['public_key'][:16]}...")
+                                return self.update_otp_by_public_key(otp_data['public_key'], otp_data)
 
-                        query = """
-                            INSERT INTO otp (id, email, random_number)
-                            VALUES (UUID(), %(email)s, %(random_number)s)
-                            RETURNING id, email, random_number, created_at
-                        """
+                            # Build dynamic INSERT query (similar to mobile_number logic)
+                            base_fields = ['id', 'public_key', 'random_number', 'otp_id', 'delivery_method',
+                                          'expires_at', 'attempts', 'max_attempts', 'is_verified']
+                            base_values = ['UUID()', '%(public_key)s', '%(random_number)s', '%(otp_id)s',
+                                          '%(delivery_method)s', '%(expires_at)s', '%(attempts)s', '%(max_attempts)s',
+                                          '%(is_verified)s']
+
+                            # Add optional fields if provided
+                            optional_fields = ['country_code', 'encrypted_secret_share', 'device_id', 'api_url']
+                            for field in optional_fields:
+                                if field in otp_data and otp_data[field] is not None:
+                                    base_fields.append(field)
+                                    base_values.append(f'%({field})s')
+
+                            fields_str = ', '.join(base_fields)
+                            values_str = ', '.join(base_values)
+                            returning_str = ', '.join([f for f in base_fields if f != 'id'] + ['id', 'created_at'])
+
+                            query = f"""
+                                INSERT INTO otp ({fields_str})
+                                VALUES ({values_str})
+                                RETURNING {returning_str}
+                            """
+                        else:
+                            # Email OTP (legacy) - keep existing logic
+                            if self._record_exists('email', otp_data['email']):
+                                logger.debug(f"Updating existing OTP for email: {otp_data['email']}")
+                                return self.update_otp(otp_data['email'], otp_data)
+
+                            query = """
+                                INSERT INTO otp (id, email, random_number)
+                                VALUES (UUID(), %(email)s, %(random_number)s)
+                                RETURNING id, email, random_number, created_at
+                            """
 
                     with conn.cursor(dictionary=True) as cursor:
                         cursor.execute(query, otp_data)
@@ -290,6 +323,38 @@ class OTPRepository(BaseRepository):
 
         return None
 
+    def get_unverified_otp_by_public_key(self, public_key: str) -> Optional[Dict[str, Any]]:
+        """
+        Get unverified OTP by client public key.
+
+        Args:
+            public_key: Client's public key (hex string)
+
+        Returns:
+            OTP record or None if not found
+        """
+        from app.core.db.database import get_db_connection_context
+
+        query = """
+            SELECT id, email, mobile_number, country_code, public_key, encrypted_secret_share,
+                   device_id, api_url, random_number, otp_id, delivery_method, expires_at, attempts, max_attempts,
+                   is_verified, created_at, updated_at
+            FROM otp
+            WHERE public_key = %s AND is_verified = FALSE
+            ORDER BY created_at DESC LIMIT 1
+        """
+        try:
+            with get_db_connection_context() as conn:
+                with conn.cursor(dictionary=True) as cursor:
+                    cursor.execute(query, (public_key,))
+                    result = cursor.fetchone()
+                    if result:
+                        logger.debug(f"Found unverified OTP for public_key: {public_key[:16]}...")
+                    return result
+        except MySQLError as e:
+            logger.error(f"Error fetching unverified OTP for public_key {public_key[:16]}...: {e}")
+            return None
+
     def update_otp(self, identifier: str, update_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
         Update OTP record by email or mobile number.
@@ -351,6 +416,63 @@ class OTPRepository(BaseRepository):
                     return result
         except MySQLError as e:
             logger.error(f"Error updating OTP for {identifier_field} {identifier}: {e}")
+            return None
+
+    def update_otp_by_public_key(self, public_key: str, update_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Update OTP record by public key.
+
+        Args:
+            public_key: Client's public key (hex string)
+            update_data: Dict of fields to update
+
+        Returns:
+            Updated OTP record or None if failed
+        """
+        from app.core.db.database import get_db_connection_context
+
+        if not update_data:
+            return None
+
+        # Build SET clause with special handling for encrypted_secret_share
+        set_items = []
+        for k in update_data.keys():
+            if k == 'encrypted_secret_share':
+                set_items.append(f"{k} = CASE WHEN %({k})s IS NOT NULL THEN %({k})s ELSE {k} END")
+            else:
+                set_items.append(f"{k} = %({k})s")
+        set_clause = ", ".join(set_items)
+
+        returning_fields = "id, email, mobile_number, country_code, public_key, encrypted_secret_share, device_id, api_url, random_number, otp_id, delivery_method, expires_at, attempts, max_attempts, is_verified, created_at, updated_at"
+
+        query = f"""
+            UPDATE otp
+            SET {set_clause}, updated_at = CURRENT_TIMESTAMP
+            WHERE public_key = %s
+        """
+
+        try:
+            with get_db_connection_context() as conn:
+                with conn.cursor(dictionary=True) as cursor:
+                    # Create params dict with all update_data values
+                    params = update_data.copy()
+                    # Add public_key at the end for WHERE clause
+                    params_list = list(params.values()) + [public_key]
+                    cursor.execute(query, params_list)
+                    conn.commit()
+                    # Fetch the updated record
+                    select_query = f"""
+                        SELECT {returning_fields}
+                        FROM otp
+                        WHERE public_key = %s
+                    """
+                    cursor.execute(select_query, (public_key,))
+                    result = cursor.fetchone()
+                    if result:
+                        logger.debug(f"Updated OTP record by public_key: {result.get('id')}")
+                    return result
+        except MySQLError as e:
+            logger.error(f"Error updating OTP for public_key {public_key[:16]}...: {e}")
             return None
 
     def increment_otp_attempts(self, identifier: str) -> bool:

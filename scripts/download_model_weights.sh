@@ -18,7 +18,6 @@
 #   --nltk             NLTK sentiment lexicon
 #   --photoholmes      PhotoHolmes forgery detection
 #   --spacy            spaCy language models
-#   --insightface      InsightFace face recognition
 
 set -e
 
@@ -39,7 +38,6 @@ MEDIAPIPE_TARGET="${APP_DIR}/models/mediapipe"
 NLTK_TARGET="${APP_DIR}/models/nltk"
 PHOTOHOLMES_TARGET="${APP_DIR}/photoholmes/weights"
 SPACY_TARGET="${APP_DIR}/models/spacy"
-INSIGHTFACE_TARGET="${APP_DIR}/models/insightface"
 
 # Colors for output
 RED='\033[0;31m'
@@ -79,14 +77,40 @@ log_section() {
     echo "============================================================"
 }
 
-# Download a file with optional progress bar
+# Get file size in bytes (cross-platform: stat -f%z on macOS, stat -c%s on Linux)
+get_file_size() {
+    local file="$1"
+    stat -f%z "$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null || echo "0"
+}
+
+# Check if file exists and is non-empty (with optional minimum size)
+check_file_exists_and_valid() {
+    local file="$1"
+    local min_size="${2:-1}"  # Default minimum 1 byte (just check non-zero)
+
+    if [ ! -f "$file" ]; then
+        return 1  # File doesn't exist
+    fi
+
+    local file_size=$(get_file_size "$file")
+
+    if [ "$file_size" -lt "$min_size" ]; then
+        # File exists but is too small (likely corrupted/empty)
+        return 1
+    fi
+
+    return 0  # File exists and is valid
+}
+
+# Download a file with optional progress bar and validation
 download_file() {
     local url="$1"
     local target="$2"
     local show_progress="${3:-true}"
+    local min_size="${4:-1}"  # Default minimum 1 byte (just check non-zero)
 
-    # Skip if exists and not forcing
-    if [ -f "$target" ] && [ "$FORCE" != "true" ]; then
+    # Skip if exists, is valid, and not forcing
+    if check_file_exists_and_valid "$target" "$min_size" && [ "$FORCE" != "true" ]; then
         return 0
     fi
 
@@ -97,24 +121,52 @@ download_file() {
         return 0
     fi
 
+    # Download to temp file first to avoid leaving empty files on failure
+    local tmp_file=$(mktemp)
+    local download_success=false
+
     log_info "  Downloading $(basename "$target")..."
 
     if [ "$show_progress" = "true" ]; then
-        if curl -fL --progress-bar "$url" -o "$target"; then
+        if curl -fL --progress-bar "$url" -o "$tmp_file" 2>/dev/null; then
+            download_success=true
+        fi
+    else
+        if curl -fLs "$url" -o "$tmp_file" 2>/dev/null; then
+            download_success=true
+        fi
+    fi
+
+    if [ "$download_success" = true ]; then
+        # Verify file size before moving to target
+        local downloaded_size=$(get_file_size "$tmp_file")
+        if [ "$downloaded_size" -ge "$min_size" ]; then
+            mv "$tmp_file" "$target"
+            log_info "    → $(basename "$target") ($(format_size "$downloaded_size"))"
             return 0
         else
-            log_error "  Failed to download $(basename "$target")"
-            rm -f "$target"
+            rm -f "$tmp_file"
+            log_error "  Downloaded file is too small ($downloaded_size bytes < $min_size bytes)"
             return 1
         fi
     else
-        if curl -fLs "$url" -o "$target"; then
-            return 0
-        else
-            log_error "  Failed to download $(basename "$target")"
-            rm -f "$target"
-            return 1
-        fi
+        rm -f "$tmp_file"
+        log_error "  Failed to download $(basename "$target")"
+        return 1
+    fi
+}
+
+# Format file size for human-readable output
+format_size() {
+    local bytes=$1
+    if [ "$bytes" -ge 1073741824 ]; then
+        echo "$((bytes / 1073741824))GB"
+    elif [ "$bytes" -ge 1048576 ]; then
+        echo "$((bytes / 1048576))MB"
+    elif [ "$bytes" -ge 1024 ]; then
+        echo "$((bytes / 1024))KB"
+    else
+        echo "${bytes}B"
     fi
 }
 
@@ -174,8 +226,21 @@ download_deepface() {
     log_section "DeepFace"
 
     if ! $FORCE && check_dir_has_files "$DEEPFACE_TARGET"; then
-        log_info "Already exists at ${DEEPFACE_TARGET#$PROJECT_ROOT/} (skipped)"
-        return 0
+        # Verify all expected files exist and are valid (non-empty)
+        local all_valid=true
+        for f in vgg_face_weights.h5 facenet_weights.h5 facenet512_weights.h5 openface_weights.h5 \
+                 deepid_keras_weights.h5 arcface_weights.h5 face_recognition_sface_2021dec.onnx \
+                 GhostFaceNet_W1.3_S1_ArcFace.h5 VGGFace2_DeepFace_weights_val-0.9034.h5 \
+                 dlib_face_recognition_resnet_model_v1.dat; do
+            if ! check_file_exists_and_valid "$DEEPFACE_TARGET/$f"; then
+                all_valid=false
+                break
+            fi
+        done
+        if [ "$all_valid" = true ]; then
+            log_info "Already exists at ${DEEPFACE_TARGET#$PROJECT_ROOT/} (skipped)"
+            return 0
+        fi
     fi
 
     if [ "$DRY_RUN" = "true" ]; then
@@ -192,67 +257,71 @@ download_deepface() {
 
     # VGG-Face
     if download_file "https://github.com/serengil/deepface_models/releases/download/v1.0/vgg_face_weights.h5" \
-            "$DEEPFACE_TARGET/vgg_face_weights.h5"; then
+            "$DEEPFACE_TARGET/vgg_face_weights.h5" "true"; then
         success_count=$((success_count + 1))
     fi
 
     # Facenet
     if download_file "https://github.com/serengil/deepface_models/releases/download/v1.0/facenet_weights.h5" \
-            "$DEEPFACE_TARGET/facenet_weights.h5"; then
+            "$DEEPFACE_TARGET/facenet_weights.h5" "true"; then
         success_count=$((success_count + 1))
     fi
 
     # Facenet512
     if download_file "https://github.com/serengil/deepface_models/releases/download/v1.0/facenet512_weights.h5" \
-            "$DEEPFACE_TARGET/facenet512_weights.h5"; then
+            "$DEEPFACE_TARGET/facenet512_weights.h5" "true"; then
         success_count=$((success_count + 1))
     fi
 
     # OpenFace
     if download_file "https://github.com/serengil/deepface_models/releases/download/v1.0/openface_weights.h5" \
-            "$DEEPFACE_TARGET/openface_weights.h5"; then
+            "$DEEPFACE_TARGET/openface_weights.h5" "true"; then
         success_count=$((success_count + 1))
     fi
 
     # DeepFace (ZIP format)
     if download_file "https://github.com/swghosh/DeepFace/releases/download/weights-vggface2-2d-aligned/VGGFace2_DeepFace_weights_val-0.9034.h5.zip" \
-            "$tmp_dir/deepface.zip"; then
+            "$tmp_dir/deepface.zip" "true"; then
         if extract_zip "$tmp_dir/deepface.zip" "$tmp_dir"; then
-            mv "$tmp_dir"/*.h5 "$DEEPFACE_TARGET/" 2>/dev/null || true
-            success_count=$((success_count + 1))
+            if [ -f "$tmp_dir/VGGFace2_DeepFace_weights_val-0.9034.h5" ]; then
+                mv "$tmp_dir/VGGFace2_DeepFace_weights_val-0.9034.h5" "$DEEPFACE_TARGET/"
+                success_count=$((success_count + 1))
+            fi
         fi
     fi
 
     # DeepID
     if download_file "https://github.com/serengil/deepface_models/releases/download/v1.0/deepid_keras_weights.h5" \
-            "$DEEPFACE_TARGET/deepid_keras_weights.h5"; then
+            "$DEEPFACE_TARGET/deepid_keras_weights.h5" "true"; then
         success_count=$((success_count + 1))
     fi
 
     # ArcFace
     if download_file "https://github.com/serengil/deepface_models/releases/download/v1.0/arcface_weights.h5" \
-            "$DEEPFACE_TARGET/arcface_weights.h5"; then
+            "$DEEPFACE_TARGET/arcface_weights.h5" "true"; then
         success_count=$((success_count + 1))
     fi
 
     # SFace
     if download_file "https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx" \
-            "$DEEPFACE_TARGET/face_recognition_sface_2021dec.onnx"; then
+            "$DEEPFACE_TARGET/face_recognition_sface_2021dec.onnx" "true"; then
         success_count=$((success_count + 1))
     fi
 
     # GhostFaceNet
     if download_file "https://github.com/HamadYA/GhostFaceNets/releases/download/v1.2/GhostFaceNet_W1.3_S1_ArcFace.h5" \
-            "$DEEPFACE_TARGET/GhostFaceNet_W1.3_S1_ArcFace.h5"; then
+            "$DEEPFACE_TARGET/GhostFaceNet_W1.3_S1_ArcFace.h5" "true"; then
         success_count=$((success_count + 1))
     fi
 
     # Dlib (BZ2 format)
     if download_file "http://dlib.net/files/dlib_face_recognition_resnet_model_v1.dat.bz2" \
-            "$tmp_dir/dlib_face_recognition_resnet_model_v1.dat.bz2"; then
+            "$tmp_dir/dlib_face_recognition_resnet_model_v1.dat.bz2" "true"; then
         if extract_bz2 "$tmp_dir/dlib_face_recognition_resnet_model_v1.dat.bz2" "$DEEPFACE_TARGET" \
                 "dlib_face_recognition_resnet_model_v1.dat"; then
-            success_count=$((success_count + 1))
+            if [ -f "$DEEPFACE_TARGET/dlib_face_recognition_resnet_model_v1.dat" ]; then
+                success_count=$((success_count + 1))
+            fi
         fi
     fi
 
@@ -280,9 +349,13 @@ download_deepface() {
 download_doctr() {
     log_section "DocTR"
 
+    # Check if both files exist and are valid (non-empty)
     if ! $FORCE && check_dir_has_files "$DOCTR_TARGET"; then
-        log_info "Already exists at ${DOCTR_TARGET#$PROJECT_ROOT/} (skipped)"
-        return 0
+        if check_file_exists_and_valid "$DOCTR_TARGET/db_resnet50-79bd7d70.pt" && \
+           check_file_exists_and_valid "$DOCTR_TARGET/crnn_vgg16_bn-0417f351.pt"; then
+            log_info "Already exists at ${DOCTR_TARGET#$PROJECT_ROOT/} (skipped)"
+            return 0
+        fi
     fi
 
     if [ "$DRY_RUN" = "true" ]; then
@@ -297,13 +370,13 @@ download_doctr() {
 
     # Detection model (db_resnet50)
     if download_file "https://doctr-static.mindee.com/models?id=v0.7.0/db_resnet50-79bd7d70.pt&src=0" \
-            "$DOCTR_TARGET/db_resnet50-79bd7d70.pt"; then
+            "$DOCTR_TARGET/db_resnet50-79bd7d70.pt" "true"; then
         success_count=$((success_count + 1))
     fi
 
     # Recognition model (crnn_vgg16_bn)
     if download_file "https://doctr-static.mindee.com/models?id=v0.12.0/crnn_vgg16_bn-0417f351.pt&src=0" \
-            "$DOCTR_TARGET/crnn_vgg16_bn-0417f351.pt"; then
+            "$DOCTR_TARGET/crnn_vgg16_bn-0417f351.pt" "true"; then
         success_count=$((success_count + 1))
     fi
 
@@ -325,10 +398,39 @@ download_doctr() {
 download_huggingface() {
     log_section "HuggingFace Models"
 
+    # Check if all files exist and are valid (non-empty)
+    local all_valid=true
+    if ! $FORCE && check_dir_has_files "$FINBERT_TARGET" && check_dir_has_files "$GLINER2_TARGET"; then
+        # Check FinBERT files
+        if ! check_file_exists_and_valid "$FINBERT_TARGET/pytorch_model.bin"; then
+            all_valid=false
+        fi
+        if ! check_file_exists_and_valid "$FINBERT_TARGET/config.json"; then
+            all_valid=false
+        fi
+        if ! check_file_exists_and_valid "$FINBERT_TARGET/vocab.txt"; then
+            all_valid=false
+        fi
+        if ! check_file_exists_and_valid "$FINBERT_TARGET/tokenizer_config.json"; then
+            all_valid=false
+        fi
+        # Check GLiNER2 files
+        if ! check_file_exists_and_valid "$GLINER2_TARGET/config.json"; then
+            all_valid=false
+        fi
+        if ! check_file_exists_and_valid "$GLINER2_TARGET/model.safetensors"; then
+            all_valid=false
+        fi
+        if [ "$all_valid" = true ]; then
+            log_info "Already exists at ${FINBERT_TARGET#$PROJECT_ROOT/} and ${GLINER2_TARGET#$PROJECT_ROOT/} (skipped)"
+            return 0
+        fi
+    fi
+
     if [ "$DRY_RUN" = "true" ]; then
         log_info "Would download HuggingFace models:"
         log_info "  - FinBERT (ProsusAI/finbert)"
-        log_info "  - GLiNER2 (urchade/gliner_large-v2.1)"
+        log_info "  - GLiNER2 (fastino/gliner2-large-v1)"
         return 0
     fi
 
@@ -344,43 +446,48 @@ download_huggingface() {
     log_info "  Downloading FinBERT (ProsusAI/finbert)..."
 
     if download_file "https://huggingface.co/ProsusAI/finbert/resolve/main/pytorch_model.bin" \
-            "$FINBERT_TARGET/pytorch_model.bin"; then
+            "$FINBERT_TARGET/pytorch_model.bin" "true"; then
         finbert_success=$((finbert_success + 1))
     fi
 
     if download_file "https://huggingface.co/ProsusAI/finbert/resolve/main/config.json" \
-            "$FINBERT_TARGET/config.json"; then
+            "$FINBERT_TARGET/config.json" "true"; then
         finbert_success=$((finbert_success + 1))
     fi
 
     if download_file "https://huggingface.co/ProsusAI/finbert/resolve/main/vocab.txt" \
-            "$FINBERT_TARGET/vocab.txt"; then
+            "$FINBERT_TARGET/vocab.txt" "true"; then
         finbert_success=$((finbert_success + 1))
     fi
 
     if download_file "https://huggingface.co/ProsusAI/finbert/resolve/main/tokenizer_config.json" \
-            "$FINBERT_TARGET/tokenizer_config.json"; then
+            "$FINBERT_TARGET/tokenizer_config.json" "true"; then
         finbert_success=$((finbert_success + 1))
     fi
 
-    # GLiNER2 files - urchade/gliner_large-v2.1 only has 2 files
-    log_info "  Downloading GLiNER2 (urchade/gliner_large-v2.1)..."
+    # GLiNER2 files - fastino/gliner2-large-v1
+    # Note: GLINER2 uses Xet storage which fails with curl (504 Gateway Timeout)
+    # Use Python huggingface_hub instead
+    log_info "  Downloading GLiNER2 (fastino/gliner2-large-v1) using Python..."
 
-    if download_file "https://huggingface.co/urchade/gliner_large-v2.1/resolve/main/gliner_config.json" \
-            "$GLINER2_TARGET/gliner_config.json"; then
-        gliner2_success=$((gliner2_success + 1))
-    fi
-
-    if download_file "https://huggingface.co/urchade/gliner_large-v2.1/resolve/main/pytorch_model.bin" \
-            "$GLINER2_TARGET/pytorch_model.bin"; then
-        gliner2_success=$((gliner2_success + 1))
+    if [ "$DRY_RUN" = "true" ]; then
+        log_info "    Would download using: python scripts/download_gliner2.py $GLINER2_TARGET"
+        gliner2_success=2
+    else
+        if poetry run python3 "${SCRIPT_DIR}/download_gliner2.py" "$GLINER2_TARGET"; then
+            gliner2_success=2
+            log_info "    → GLiNER2 downloaded successfully"
+        else
+            gliner2_success=0
+            log_error "    Failed to download GLiNER2"
+        fi
     fi
 
     if [ $finbert_success -eq 4 ] && [ $gliner2_success -eq 2 ]; then
         log_success "HuggingFace models downloaded"
         return 0
     else
-        log_warning "FinBERT: $finbert_success/4 files, GLiNER2: $gliner2_success/2 files"
+        log_warning "FinBERT: $finbert_success/4 files, GLiNER2: $gliner2_success/2 files (config.json + model.safetensors)"
         return 1
     fi
 }
@@ -392,7 +499,7 @@ download_huggingface() {
 download_mediapipe() {
     log_section "MediaPipe"
 
-    if ! $FORCE && [ -f "$MEDIAPIPE_TARGET/hand_landmarker.task" ]; then
+    if ! $FORCE && check_file_exists_and_valid "$MEDIAPIPE_TARGET/hand_landmarker.task"; then
         log_info "Already exists at ${MEDIAPIPE_TARGET#$PROJECT_ROOT/} (skipped)"
         return 0
     fi
@@ -407,9 +514,9 @@ download_mediapipe() {
     log_info "Downloading MediaPipe hand landmark model..."
 
     if download_file "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task" \
-            "$MEDIAPIPE_TARGET/hand_landmarker.task"; then
-        file_size=$(du -sm "$MEDIAPIPE_TARGET" | cut -f1)
-        log_success "Downloaded hand_landmarker.task (${file_size} MB)"
+            "$MEDIAPIPE_TARGET/hand_landmarker.task" "true"; then
+        file_size=$(get_file_size "$MEDIAPIPE_TARGET/hand_landmarker.task")
+        log_success "Downloaded hand_landmarker.task ($(format_size "$file_size"))"
         return 0
     else
         log_error "Failed to download MediaPipe model"
@@ -426,7 +533,8 @@ download_nltk() {
 
     local nltk_sentiment_dir="${NLTK_TARGET}/sentiment"
 
-    if ! $FORCE && check_dir_has_files "$nltk_sentiment_dir"; then
+    # Check if vader_lexicon.txt exists and is valid (non-empty)
+    if ! $FORCE && check_file_exists_and_valid "$nltk_sentiment_dir/vader_lexicon.txt"; then
         log_info "Already exists at ${nltk_sentiment_dir#$PROJECT_ROOT/} (skipped)"
         return 0
     fi
@@ -442,7 +550,7 @@ download_nltk() {
     log_info "Downloading NLTK VADER lexicon..."
 
     if download_file "https://raw.githubusercontent.com/nltk/nltk_data/gh-pages/packages/sentiment/vader_lexicon.zip" \
-            "$tmp_dir/vader_lexicon.zip"; then
+            "$tmp_dir/vader_lexicon.zip" "true"; then
         if extract_zip "$tmp_dir/vader_lexicon.zip" "$NLTK_TARGET"; then
             rm -rf "$tmp_dir"
             file_count=$(find "$NLTK_TARGET" -type f | wc -l)
@@ -468,64 +576,375 @@ download_photoholmes() {
     log_section "PhotoHolmes"
 
     if [ "$DRY_RUN" = "true" ]; then
-        log_info "Would download PhotoHolmes weights to ${PHOTOHOLMES_TARGET#$PROJECT_ROOT/}"
+        log_info "Would download PhotoHolmes weights to ${PHOTOHOLMES_TARGET#$PROJECT_ROOT/}:"
+        echo "  - AdaptiveCFANet (raw GitHub)"
+        echo "  - CAT-Net (Google Drive - 2 files)"
+        echo "  - EXIF as Language (Google Drive - needs pruning)"
+        echo "  - FOCAL (Google Drive - 2 files)"
+        echo "  - TruFor (direct URL)"
+        echo "  - PSCCNet (manual download only)"
         return 0
     fi
 
     mkdir -p "$PHOTOHOLMES_TARGET"
     local success_count=0
+    local total_methods=6  # AdaptiveCFANet, CAT-Net, EXIF, FOCAL, PSCCNet, TruFor
 
     log_info "Downloading PhotoHolmes weights..."
 
-    # AdaptiveCFANet - download from raw GitHub and rename to weights.pth
+    # ========================================================================
+    # 1. AdaptiveCFANet - download from raw GitHub and rename to weights.pth
+    # ========================================================================
     local adaptive_cfa_dir="${PHOTOHOLMES_TARGET}/adaptive_cfa_net"
     local adaptive_cfa_target="${adaptive_cfa_dir}/weights.pth"
 
-    if [ -f "$adaptive_cfa_target" ] && [ "$FORCE" != "true" ]; then
-        log_info "  AdaptiveCFANet already exists (skipped)"
+    if check_file_exists_and_valid "$adaptive_cfa_target"; then
+        log_info "  [1/6] AdaptiveCFANet already exists (skipped)"
         success_count=$((success_count + 1))
     else
         mkdir -p "$adaptive_cfa_dir"
-        log_info "  Downloading AdaptiveCFANet..."
+        log_info "  [1/6] Downloading AdaptiveCFANet..."
 
-        # Download as pretrained.pt and rename to weights.pth
-        local tmp_file=$(mktemp)
-        if download_file "https://raw.githubusercontent.com/qbammey/adaptive_cfa_forensics/master/src/models/pretrained.pt" \
-                "$tmp_file" "false"; then
-            mv "$tmp_file" "$adaptive_cfa_target"
-            success_count=$((success_count + 1))
-            log_success "  Downloaded AdaptiveCFANet"
+        # Download to temp file first, then move if valid (non-empty)
+        local tmp_file=$(mktemp).pt
+        mkdir -p "$(dirname "$tmp_file")"
+        if curl -fL --progress-bar "https://raw.githubusercontent.com/qbammey/adaptive_cfa_forensics/master/src/models/pretrained.pt" -o "$tmp_file" 2>/dev/null; then
+            # Verify file is non-empty before moving
+            local downloaded_size=$(get_file_size "$tmp_file")
+            if [ "$downloaded_size" -gt 0 ]; then
+                mv "$tmp_file" "$adaptive_cfa_target"
+                success_count=$((success_count + 1))
+                log_success "  [1/6] Downloaded AdaptiveCFANet ($(format_size "$downloaded_size"))"
+            else
+                rm -f "$tmp_file"
+                log_error "  [1/6] Downloaded file is empty"
+            fi
         else
             rm -f "$tmp_file"
-            log_error "  Failed to download AdaptiveCFANet"
+            log_error "  [1/6] Failed to download AdaptiveCFANet"
         fi
     fi
 
-    # PSCCNet - CANNOT be downloaded via direct URL
-    # The checkpoint files require manual download from the repository
-    log_warning "  PSCCNet weights cannot be downloaded automatically"
-    log_info "  Manual download required for PSCCNet:"
-    echo ""
-    echo "    Option 1: Clone the PSCC-Net repository"
-    echo "      git clone https://github.com/proteus1991/PSCC-Net.git /tmp/psccnet"
-    echo "      mkdir -p ${PHOTOHOLMES_TARGET#$PROJECT_ROOT/}/psccnet"
-    echo "      cp /tmp/psccnet/checkpoint/HRNet_checkpoint/HRNet.pth \\"
-    echo "         ${PHOTOHOLMES_TARGET#$PROJECT_ROOT/}/psccnet/FENet.pth"
-    echo "      cp /tmp/psccnet/checkpoint/NLCDetection_checkpoint/NLCDetection.pth \\"
-    echo "         ${PHOTOHOLMES_TARGET#$PROJECT_ROOT/}/psccnet/SegNet.pth"
-    echo "      cp /tmp/psccnet/checkpoint/DetectionHead_checkpoint/DetectionHead.pth \\"
-    echo "         ${PHOTOHOLMES_TARGET#$PROJECT_ROOT/}/psccnet/ClsNet.pth"
-    echo ""
-    echo "    Option 2: Download from Baidu Cloud (password: js74)"
-    echo "      See: https://github.com/proteus1991/PSCC-Net"
-    echo ""
+    # ========================================================================
+    # 2. CAT-Net - Google Drive (2 files: v1 and v2)
+    # ========================================================================
+    local catnet_dir="${PHOTOHOLMES_TARGET}/catnet"
+    mkdir -p "$catnet_dir"
+
+    # CAT-Net v1
+    local catnet_v1_target="${catnet_dir}/CAT_full_v1.pth"
+    local catnet_v1_valid=false
+    if check_file_exists_and_valid "$catnet_v1_target"; then
+        log_info "  [2a/6] CAT-Net v1 already exists (skipped)"
+        catnet_v1_valid=true
+    else
+        log_info "  [2a/6] Downloading CAT-Net v1..."
+        if command -v gdown >/dev/null 2>&1; then
+            local tmp_file=$(mktemp).pth
+            if gdown -q "https://drive.google.com/file/d/1NXLDCn0ABG7eWEXltGZ4SyIsREhOUhRM/view" -O "$tmp_file" 2>/dev/null; then
+                local downloaded_size=$(get_file_size "$tmp_file")
+                if [ "$downloaded_size" -gt 0 ]; then
+                    mv "$tmp_file" "$catnet_v1_target"
+                    log_success "  [2a/6] Downloaded CAT-Net v1 ($(format_size "$downloaded_size"))"
+                    catnet_v1_valid=true
+                else
+                    rm -f "$tmp_file"
+                    log_error "  [2a/6] Downloaded file is empty"
+                fi
+            else
+                log_error "  [2a/6] Failed to download CAT-Net v1"
+            fi
+        else
+            log_error "  [2a/6] gdown not found - install with: pip install gdown"
+        fi
+    fi
+
+    # CAT-Net v2
+    local catnet_v2_target="${catnet_dir}/CAT_full_v2.pth"
+    local catnet_v2_valid=false
+    if check_file_exists_and_valid "$catnet_v2_target"; then
+        log_info "  [2b/6] CAT-Net v2 already exists (skipped)"
+        catnet_v2_valid=true
+    else
+        log_info "  [2b/6] Downloading CAT-Net v2..."
+        if command -v gdown >/dev/null 2>&1; then
+            local tmp_file=$(mktemp).pth
+            if gdown -q "https://drive.google.com/file/d/1tyOKVdx6UMys2OcNpUj9r6scxNIpcoLE/view" -O "$tmp_file" 2>/dev/null; then
+                local downloaded_size=$(get_file_size "$tmp_file")
+                if [ "$downloaded_size" -gt 0 ]; then
+                    mv "$tmp_file" "$catnet_v2_target"
+                    log_success "  [2b/6] Downloaded CAT-Net v2 ($(format_size "$downloaded_size"))"
+                    catnet_v2_valid=true
+                else
+                    rm -f "$tmp_file"
+                    log_error "  [2b/6] Downloaded file is empty"
+                fi
+            else
+                log_error "  [2b/6] Failed to download CAT-Net v2"
+            fi
+        else
+            log_error "  [2b/6] gdown not found - install with: pip install gdown"
+        fi
+    fi
+
+    # Count CAT-Net as success if both files exist and are valid
+    if [ "$catnet_v1_valid" = true ] && [ "$catnet_v2_valid" = true ]; then
+        success_count=$((success_count + 1))
+    fi
+
+    # ========================================================================
+    # 3. EXIF as Language - Google Drive (needs pruning)
+    # ========================================================================
+    local exif_dir="${PHOTOHOLMES_TARGET}/exif_as_language"
+    mkdir -p "$exif_dir"
+
+    local exif_original="${exif_dir}/wrapper_75_new.pth"
+    local exif_pruned="${exif_dir}/wrapper_75_new_pruned.pth"
+
+    if check_file_exists_and_valid "$exif_pruned"; then
+        log_info "  [3/6] EXIF as Language already exists (skipped)"
+        success_count=$((success_count + 1))
+    elif check_file_exists_and_valid "$exif_original"; then
+        log_info "  [3/6] EXIF as Language weights downloaded but need pruning..."
+        log_info "  [3/6] Run: python -m photoholmes.methods.exif_as_language prune-weights"
+        success_count=$((success_count + 1))
+    else
+        log_info "  [3/6] Downloading EXIF as Language..."
+        if command -v gdown >/dev/null 2>&1; then
+            local tmp_file=$(mktemp).pth
+            if gdown -q --id "17MW-fZRRQQ8dSRv52X_9DmcmdQD7TmHZ" -O "$tmp_file" 2>/dev/null; then
+                local downloaded_size=$(get_file_size "$tmp_file")
+                if [ "$downloaded_size" -gt 0 ]; then
+                    mv "$tmp_file" "$exif_original"
+                    log_success "  [3/6] Downloaded EXIF as Language ($(format_size "$downloaded_size"), needs pruning)"
+                    log_info "  [3/6] Run: python -m photoholmes.methods.exif_as_language prune-weights"
+                    success_count=$((success_count + 1))
+                else
+                    rm -f "$tmp_file"
+                    log_error "  [3/6] Downloaded file is empty"
+                fi
+            else
+                log_error "  [3/6] Failed to download EXIF as Language"
+            fi
+        else
+            log_error "  [3/6] gdown not found - install with: pip install gdown"
+        fi
+    fi
+
+    # ========================================================================
+    # 4. FOCAL - Google Drive (2 files: ViT and HRNet)
+    # ========================================================================
+    local focal_dir="${PHOTOHOLMES_TARGET}/focal"
+    mkdir -p "$focal_dir"
+
+    # FOCAL ViT
+    local focal_vit_target="${focal_dir}/Focal_ViT_weights.pth"
+    local focal_vit_valid=false
+    if check_file_exists_and_valid "$focal_vit_target"; then
+        log_info "  [4a/6] FOCAL ViT already exists (skipped)"
+        focal_vit_valid=true
+    else
+        log_info "  [4a/6] Downloading FOCAL ViT..."
+        if command -v gdown >/dev/null 2>&1; then
+            local tmp_file=$(mktemp).pth
+            if gdown -q --id "1GQMU8FHwi2K3XkkHhe71bt-RQvuA2VQ4" -O "$tmp_file" 2>/dev/null; then
+                local downloaded_size=$(get_file_size "$tmp_file")
+                if [ "$downloaded_size" -gt 0 ]; then
+                    mv "$tmp_file" "$focal_vit_target"
+                    log_success "  [4a/6] Downloaded FOCAL ViT ($(format_size "$downloaded_size"))"
+                    focal_vit_valid=true
+                else
+                    rm -f "$tmp_file"
+                    log_error "  [4a/6] Downloaded file is empty"
+                fi
+            else
+                log_error "  [4a/6] Failed to download FOCAL ViT"
+            fi
+        else
+            log_error "  [4a/6] gdown not found - install with: pip install gdown"
+        fi
+    fi
+
+    # FOCAL HRNet
+    local focal_hrnet_target="${focal_dir}/Focal_HRNet_weights.pth"
+    local focal_hrnet_valid=false
+    if check_file_exists_and_valid "$focal_hrnet_target"; then
+        log_info "  [4b/6] FOCAL HRNet already exists (skipped)"
+        focal_hrnet_valid=true
+    else
+        log_info "  [4b/6] Downloading FOCAL HRNet..."
+        if command -v gdown >/dev/null 2>&1; then
+            local tmp_file=$(mktemp).pth
+            if gdown -q --id "1O_iyg5Tg_iZ5u_yGcU_MhKVH-c6MIpdR" -O "$tmp_file" 2>/dev/null; then
+                local downloaded_size=$(get_file_size "$tmp_file")
+                if [ "$downloaded_size" -gt 0 ]; then
+                    mv "$tmp_file" "$focal_hrnet_target"
+                    log_success "  [4b/6] Downloaded FOCAL HRNet ($(format_size "$downloaded_size"))"
+                    focal_hrnet_valid=true
+                else
+                    rm -f "$tmp_file"
+                    log_error "  [4b/6] Downloaded file is empty"
+                fi
+            else
+                log_error "  [4b/6] Failed to download FOCAL HRNet"
+            fi
+        else
+            log_error "  [4b/6] gdown not found - install with: pip install gdown"
+        fi
+    fi
+
+    # Count FOCAL as success if both files exist and are valid
+    if [ "$focal_vit_valid" = true ] && [ "$focal_hrnet_valid" = true ]; then
+        success_count=$((success_count + 1))
+    fi
+
+    # ========================================================================
+    # 5. TruFor - Direct URL (ZIP contains tar file)
+    # ========================================================================
+    local trufor_dir="${PHOTOHOLMES_TARGET}/trufor"
+
+    # Check for the extracted weights file
+    if check_file_exists_and_valid "$trufor_dir/trufor.pth"; then
+        log_info "  [5/6] TruFor already exists (skipped)"
+        success_count=$((success_count + 1))
+    else
+        log_info "  [5/6] Downloading TruFor..."
+        local tmp_zip=$(mktemp).zip
+        local tmp_extract=$(mktemp -d)
+        local download_success=false
+
+        # Download with curl directly
+        mkdir -p "$(dirname "$tmp_zip")"
+        if curl -fL --progress-bar "https://www.grip.unina.it/download/prog/TruFor/TruFor_weights.zip" -o "$tmp_zip" 2>/dev/null; then
+            # Check if file is a valid ZIP and has content
+            local zip_size=$(get_file_size "$tmp_zip")
+            if [ "$zip_size" -gt 0 ] && unzip -t "$tmp_zip" >/dev/null 2>&1; then
+                mkdir -p "$trufor_dir"
+                # Unzip to get the tar file
+                if unzip -q -o "$tmp_zip" -d "$tmp_extract" 2>/dev/null; then
+                    # Move the .pth.tar file as trufor.pth (PyTorch can load it directly)
+                    # The tar contains an internal archive/ structure - don't extract it
+                    if [ -f "$tmp_extract/weights/trufor.pth.tar" ]; then
+                        local tar_size=$(get_file_size "$tmp_extract/weights/trufor.pth.tar")
+                        if [ "$tar_size" -gt 0 ]; then
+                            mv "$tmp_extract/weights/trufor.pth.tar" "$trufor_dir/trufor.pth"
+                            download_success=true
+                            log_success "  [5/6] Downloaded TruFor ($(format_size "$tar_size"))"
+                        fi
+                    fi
+                fi
+            else
+                log_error "  [5/6] Downloaded ZIP is invalid or empty ($zip_size bytes)"
+            fi
+        fi
+
+        # Cleanup
+        rm -f "$tmp_zip"
+        rm -rf "$tmp_extract"
+
+        if [ "$download_success" = true ]; then
+            success_count=$((success_count + 1))
+        else
+            rm -rf "$trufor_dir"  # Clean up incomplete download
+            log_error "  [5/6] Failed to download TruFor"
+        fi
+    fi
+
+    # ========================================================================
+    # 6. PSCCNet - Direct URL (ZIP)
+    # ========================================================================
+    local psccnet_dir="${PHOTOHOLMES_TARGET}/psccnet"
+    local psccnet_valid=false
+
+    # Check for all three weight files
+    if check_file_exists_and_valid "$psccnet_dir/FENet.pth" && \
+       check_file_exists_and_valid "$psccnet_dir/SegNet.pth" && \
+       check_file_exists_and_valid "$psccnet_dir/ClsNet.pth"; then
+        log_info "  [6/6] PSCCNet already exists (skipped)"
+        success_count=$((success_count + 1))
+        psccnet_valid=true
+    else
+        log_info "  [6/6] Downloading PSCCNet..."
+        local tmp_zip=$(mktemp).zip
+        local tmp_extract=$(mktemp -d)
+        local download_success=false
+
+        # Download with curl directly
+        mkdir -p "$(dirname "$tmp_zip")"
+        if curl -fL --progress-bar "https://www.immin.io/public/assets/business/psccnet.zip" -o "$tmp_zip" 2>/dev/null; then
+            # Check if file is a valid ZIP and has content
+            local zip_size=$(get_file_size "$tmp_zip")
+            if [ "$zip_size" -gt 0 ] && unzip -t "$tmp_zip" >/dev/null 2>&1; then
+                mkdir -p "$psccnet_dir"
+                # Extract the zip
+                if unzip -q -o "$tmp_zip" -d "$tmp_extract" 2>/dev/null; then
+                    # Move the three weight files
+                    local fenet_valid=false
+                    local segnet_valid=false
+                    local clsnet_valid=false
+
+                    if [ -f "$tmp_extract/psccnet/FENet.pth" ]; then
+                        local fenet_size=$(get_file_size "$tmp_extract/psccnet/FENet.pth")
+                        if [ "$fenet_size" -gt 0 ]; then
+                            mv "$tmp_extract/psccnet/FENet.pth" "$psccnet_dir/FENet.pth"
+                            fenet_valid=true
+                        fi
+                    fi
+
+                    if [ -f "$tmp_extract/psccnet/SegNet.pth" ]; then
+                        local segnet_size=$(get_file_size "$tmp_extract/psccnet/SegNet.pth")
+                        if [ "$segnet_size" -gt 0 ]; then
+                            mv "$tmp_extract/psccnet/SegNet.pth" "$psccnet_dir/SegNet.pth"
+                            segnet_valid=true
+                        fi
+                    fi
+
+                    if [ -f "$tmp_extract/psccnet/ClsNet.pth" ]; then
+                        local clsnet_size=$(get_file_size "$tmp_extract/psccnet/ClsNet.pth")
+                        if [ "$clsnet_size" -gt 0 ]; then
+                            mv "$tmp_extract/psccnet/ClsNet.pth" "$psccnet_dir/ClsNet.pth"
+                            clsnet_valid=true
+                        fi
+                    fi
+
+                    # Count as success only if all three files were extracted
+                    if [ "$fenet_valid" = true ] && [ "$segnet_valid" = true ] && [ "$clsnet_valid" = true ]; then
+                        download_success=true
+                        psccnet_valid=true
+                        local total_size=$(($(get_file_size "$psccnet_dir/FENet.pth") + $(get_file_size "$psccnet_dir/SegNet.pth") + $(get_file_size "$psccnet_dir/ClsNet.pth")))
+                        log_success "  [6/6] Downloaded PSCCNet ($(format_size "$total_size"))"
+                    fi
+                fi
+            else
+                log_error "  [6/6] Downloaded ZIP is invalid or empty ($zip_size bytes)"
+            fi
+        else
+            log_error "  [6/6] Failed to download PSCCNet"
+        fi
+
+        # Cleanup
+        rm -f "$tmp_zip"
+        rm -rf "$tmp_extract"
+
+        if [ "$download_success" = true ]; then
+            success_count=$((success_count + 1))
+        else
+            rm -rf "$psccnet_dir"  # Clean up incomplete download
+            log_error "  [6/6] Failed to download PSCCNet"
+        fi
+    fi
 
     # Summary
-    if [ $success_count -eq 1 ]; then
-        log_success "AdaptiveCFANet downloaded (PSCCNet requires manual download)"
+    echo ""
+    log_info "  PhotoHolmes methods downloaded: $success_count/$total_methods"
+    if [ $success_count -eq $total_methods ]; then
+        log_success "All PhotoHolmes weights downloaded successfully"
+        return 0
+    elif [ $success_count -gt 0 ]; then
+        log_warning "Some PhotoHolmes weights downloaded ($success_count/$total_methods)"
         return 0
     else
-        log_error "Failed to download AdaptiveCFANet"
+        log_error "Failed to download PhotoHolmes weights"
         return 1
     fi
 }
@@ -539,9 +958,14 @@ download_spacy() {
 
     local spacy_model_path="${SPACY_TARGET}/en_core_web_sm"
 
+    # Check if key model files exist and are valid (non-empty)
     if ! $FORCE && check_dir_has_files "$spacy_model_path"; then
-        log_info "Already exists at ${spacy_model_path#$PROJECT_ROOT/} (skipped)"
-        return 0
+        if check_file_exists_and_valid "$spacy_model_path/en_core_web_sm-3.7.1-py3-none-any.whl" || \
+           (check_file_exists_and_valid "$spacy_model_path/model.bin" && \
+            check_file_exists_and_valid "$spacy_model_path/vocab"); then
+            log_info "Already exists at ${spacy_model_path#$PROJECT_ROOT/} (skipped)"
+            return 0
+        fi
     fi
 
     if [ "$DRY_RUN" = "true" ]; then
@@ -555,10 +979,11 @@ download_spacy() {
     log_info "Downloading spaCy language model..."
 
     if download_file "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl" \
-            "$tmp_dir/spacy.whl"; then
+            "$tmp_dir/spacy.whl" "true"; then
         if extract_zip "$tmp_dir/spacy.whl" "$tmp_dir"; then
             # Find the extracted en_core_web_sm directory and move it
             if [ -d "$tmp_dir/en_core_web_sm" ]; then
+                rm -rf "$spacy_model_path"  # Remove old version if exists
                 mv "$tmp_dir/en_core_web_sm" "$SPACY_TARGET/"
                 rm -rf "$tmp_dir"
                 file_count=$(find "$spacy_model_path" -type f | wc -l)
@@ -583,59 +1008,6 @@ download_spacy() {
 }
 
 # ============================================================================
-# InsightFace Download
-# ============================================================================
-
-download_insightface() {
-    log_section "InsightFace"
-
-    local insightface_model_path="${INSIGHTFACE_TARGET}/buffalo_l"
-
-    if ! $FORCE && check_dir_has_files "$insightface_model_path"; then
-        log_info "Already exists at ${insightface_model_path#$PROJECT_ROOT/} (skipped)"
-        return 0
-    fi
-
-    if [ "$DRY_RUN" = "true" ]; then
-        log_info "Would download InsightFace model to ${insightface_model_path#$PROJECT_ROOT/}"
-        return 0
-    fi
-
-    mkdir -p "$INSIGHTFACE_TARGET"
-    local tmp_dir=$(mktemp -d)
-
-    log_info "Downloading InsightFace buffalo_l model weights (288MB)..."
-
-    if download_file "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip" \
-            "$tmp_dir/buffalo_l.zip"; then
-        if extract_zip "$tmp_dir/buffalo_l.zip" "$insightface_model_path"; then
-            rm -rf "$tmp_dir"
-            file_count=$(find "$insightface_model_path" -name "*.onnx" | wc -l)
-            total_size=$(du -sm "$insightface_model_path" | cut -f1)
-            log_success "Downloaded $file_count ONNX file(s) (${total_size} MB)"
-
-            # List downloaded files
-            for file in "$insightface_model_path"/*.onnx; do
-                if [ -f "$file" ]; then
-                    size=$(du -sm "$file" | cut -f1)
-                    basename "$file" | sed "s/^/    - /"
-                    echo "      (${size} MB)"
-                fi
-            done
-            return 0
-        else
-            rm -rf "$tmp_dir"
-            log_error "Failed to extract InsightFace model"
-            return 1
-        fi
-    else
-        rm -rf "$tmp_dir"
-        log_error "Failed to download InsightFace model"
-        return 1
-    fi
-}
-
-# ============================================================================
 # Parse Arguments
 # ============================================================================
 
@@ -647,7 +1019,6 @@ DOWNLOAD_MEDIAPIPE=false
 DOWNLOAD_NLTK=false
 DOWNLOAD_PHOTOHOLMES=false
 DOWNLOAD_SPACY=false
-DOWNLOAD_INSIGHTFACE=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -691,10 +1062,6 @@ while [[ $# -gt 0 ]]; do
             DOWNLOAD_SPACY=true
             shift
             ;;
-        --insightface)
-            DOWNLOAD_INSIGHTFACE=true
-            shift
-            ;;
         -h|--help)
             echo "Usage: $0 [OPTIONS]"
             echo ""
@@ -709,7 +1076,6 @@ while [[ $# -gt 0 ]]; do
             echo "  --nltk             Download NLTK data"
             echo "  --photoholmes      Download PhotoHolmes weights"
             echo "  --spacy            Download spaCy model"
-            echo "  --insightface      Download InsightFace model"
             echo "  --dry-run          Show what would be downloaded"
             echo "  --force            Re-download existing files"
             echo "  -h, --help         Show this help message"
@@ -727,7 +1093,7 @@ done
 if [ "$DOWNLOAD_DEEPFACE" = false ] && [ "$DOWNLOAD_DOCTR" = false ] && \
    [ "$DOWNLOAD_HUGGINGFACE" = false ] && [ "$DOWNLOAD_MEDIAPIPE" = false ] && \
    [ "$DOWNLOAD_NLTK" = false ] && [ "$DOWNLOAD_PHOTOHOLMES" = false ] && \
-   [ "$DOWNLOAD_SPACY" = false ] && [ "$DOWNLOAD_INSIGHTFACE" = false ]; then
+   [ "$DOWNLOAD_SPACY" = false ]; then
     DOWNLOAD_ALL=true
 fi
 
@@ -750,7 +1116,6 @@ RESULT_MEDIAPIPE=1
 RESULT_NLTK=1
 RESULT_PHOTOHOLMES=1
 RESULT_SPACY=1
-RESULT_INSIGHTFACE=1
 
 if [ "$DOWNLOAD_ALL" = true ] || [ "$DOWNLOAD_DEEPFACE" = true ]; then
     if download_deepface; then
@@ -791,12 +1156,6 @@ fi
 if [ "$DOWNLOAD_ALL" = true ] || [ "$DOWNLOAD_SPACY" = true ]; then
     if download_spacy; then
         RESULT_SPACY=0
-    fi
-fi
-
-if [ "$DOWNLOAD_ALL" = true ] || [ "$DOWNLOAD_INSIGHTFACE" = true ]; then
-    if download_insightface; then
-        RESULT_INSIGHTFACE=0
     fi
 fi
 
@@ -867,14 +1226,6 @@ if [ "$DRY_RUN" = false ]; then
         fi
     fi
 
-    if [ "$DOWNLOAD_ALL" = true ] || [ "$DOWNLOAD_INSIGHTFACE" = true ]; then
-        if [ $RESULT_INSIGHTFACE -eq 0 ]; then
-            echo -e " ${GREEN}✓${NC} insightface"
-        else
-            echo -e " ${RED}✗${NC} insightface"
-        fi
-    fi
-
     echo ""
 
     # Count successes
@@ -930,13 +1281,6 @@ if [ "$DRY_RUN" = false ]; then
         fi
     fi
 
-    if [ "$DOWNLOAD_ALL" = true ] || [ "$DOWNLOAD_INSIGHTFACE" = true ]; then
-        TOTAL_COUNT=$((TOTAL_COUNT + 1))
-        if [ $RESULT_INSIGHTFACE -eq 0 ]; then
-            SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
-        fi
-    fi
-
     if [ $SUCCESS_COUNT -eq $TOTAL_COUNT ]; then
         log_success "All $TOTAL_COUNT downloaders succeeded!"
     else
@@ -951,7 +1295,7 @@ fi
 if [ $RESULT_DEEPFACE -ne 0 ] || [ $RESULT_DOCTR -ne 0 ] || \
    [ $RESULT_HUGGINGFACE -ne 0 ] || [ $RESULT_MEDIAPIPE -ne 0 ] || \
    [ $RESULT_NLTK -ne 0 ] || [ $RESULT_PHOTOHOLMES -ne 0 ] || \
-   [ $RESULT_SPACY -ne 0 ] || [ $RESULT_INSIGHTFACE -ne 0 ]; then
+   [ $RESULT_SPACY -ne 0 ]; then
     exit 1
 fi
 

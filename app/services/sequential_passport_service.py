@@ -840,6 +840,7 @@ class SequentialPassportService:
                 "address": document_data.get('address'),
                 "date_of_issue": issue_normalized,  # ISO format (YYYY-MM-DD)
                 "nrc_number": document_data.get('nrc_number'),
+                "raw_data": getattr(document_data, 'raw_data', None),
             }
 
             # Add backward-compatible field names for passport processing
@@ -884,6 +885,7 @@ class SequentialPassportService:
             "place_of_birth": getattr(document_data, 'place_of_birth', None),
             "issuing_authority": getattr(document_data, 'issuing_authority', None),
             "address": getattr(document_data, 'address', None),
+            "raw_data": getattr(document_data, 'raw_data', None),
         }
 
     def _check_passport_expiry(self, expiry_date_str: Optional[str]) -> bool:

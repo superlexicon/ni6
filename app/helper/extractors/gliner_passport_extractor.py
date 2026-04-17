@@ -148,6 +148,7 @@ class GLiNERPassportExtractor:
             result.field_confidences = confidence_scores
             result.overall_confidence = result.calculate_overall_confidence()
             result.extraction_source = 'gliner_ner'
+            result.raw_data = all_text
 
             self.logger.info("=" * 80)
             self.logger.info("EXTRACTION COMPLETE")

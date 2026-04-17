@@ -58,13 +58,14 @@ async def generate_and_send_otp(
     **DEPRECATED:** Use /api/otp/ with SignedOTPRequest instead.
     """
     try:
-        # Apply rate limiting per mobile number
+        # Apply rate limiting - use mobile_number if available, otherwise public_key
         limiter = http_request.app.state.limiter if http_request else None
         if limiter:
             # Store mobile_number in request state for rate limiter key function
             http_request.state.mobile_number = request.mobile_number
-            # Use the mobile number based rate limiting
-            limiter._check_request_limit(http_request, lambda r: f"mobile:{request.mobile_number}", "3/10minutes")
+            # Use mobile_number based rate limiting, fallback to public_key prefix
+            rate_limit_key = f"mobile:{request.mobile_number}" if request.mobile_number else f"key:{request.client_public_key[:16]}"
+            limiter._check_request_limit(http_request, lambda r: rate_limit_key, "3/10minutes")
 
         result = await otp_service.generate_and_send_otp_via_sms(
             length=length,
@@ -95,12 +96,12 @@ async def request_signed_otp(
     - Creates user_identity_index and user_keys records
     - Returns encrypted OTP (hybrid encryption)
 
-    **Rate Limiting:** 3 requests per 10 minutes per mobile number
+    **Rate Limiting:** 3 requests per 10 minutes per mobile number or public key
 
     **Request Body:**
     - client_public_key: Client's public key (hex)
-    - mobile_number: Mobile number WITHOUT country code/prefix (e.g., '5551234567')
-    - country_code: ISO country code (e.g., 'US', 'SG', 'GB'). Converted to phone prefix like '+1', '+65'
+    - mobile_number: Mobile number WITHOUT country code/prefix (e.g., '5551234567'). Optional - if not provided, OTP is only returned in encrypted response.
+    - country_code: ISO country code (e.g., 'US', 'SG', 'GB'). Required if mobile_number is provided.
     - secret_share: Shamir secret share (format: '{index}:{base64}')
     - otp_length: OTP length (default 6)
     - timestamp: Unix timestamp for replay protection
@@ -125,13 +126,14 @@ async def request_signed_otp(
     - Use hybrid crypto: ECDH for key exchange, AES-256-GCM for payload
     """
     try:
-        # Apply rate limiting per mobile number
+        # Apply rate limiting - use mobile_number if available, otherwise public_key
         limiter = http_request.app.state.limiter if http_request else None
         if limiter:
             # Store mobile_number in request state for rate limiter key function
             http_request.state.mobile_number = request.mobile_number
-            # Use the mobile number based rate limiting
-            limiter._check_request_limit(http_request, lambda r: f"mobile:{request.mobile_number}", "3/10minutes")
+            # Use mobile_number based rate limiting, fallback to public_key prefix
+            rate_limit_key = f"mobile:{request.mobile_number}" if request.mobile_number else f"key:{request.client_public_key[:16]}"
+            limiter._check_request_limit(http_request, lambda r: rate_limit_key, "3/10minutes")
 
         # Create signed OTP service
         signed_otp_service = SignedOTPService()
@@ -155,10 +157,16 @@ async def request_signed_otp(
         )
 
         if result['success']:
-            logger.info(
-                f"Signed OTP request processed for {request.mobile_number}, "
-                f"user_identity_id: {result.get('user_identity_id')}"
-            )
+            if request.mobile_number:
+                logger.info(
+                    f"Signed OTP request processed for {request.mobile_number}, "
+                    f"user_identity_id: {result.get('user_identity_id')}"
+                )
+            else:
+                logger.info(
+                    f"Signed OTP request processed for {request.client_public_key[:16]}..., "
+                    f"user_identity_id: {result.get('user_identity_id')}"
+                )
             return EncryptedOTPResponse(**result['encrypted_response'])
         else:
             raise HTTPException(
@@ -201,13 +209,14 @@ async def request_recovery_otp(
     Response model: EncryptedOTPResponse
     """
     try:
-        # Apply rate limiting per mobile number
+        # Apply rate limiting - use mobile_number if available, otherwise public_key
         limiter = http_request.app.state.limiter if http_request else None
         if limiter:
             # Store mobile_number in request state for rate limiter key function
             http_request.state.mobile_number = request.mobile_number
-            # Use the mobile number based rate limiting
-            limiter._check_request_limit(http_request, lambda r: f"mobile:{request.mobile_number}", "3/10minutes")
+            # Use mobile_number based rate limiting, fallback to public_key prefix
+            rate_limit_key = f"mobile:{request.mobile_number}" if request.mobile_number else f"key:{request.client_public_key[:16]}"
+            limiter._check_request_limit(http_request, lambda r: rate_limit_key, "3/10minutes")
 
         # Create signed OTP service
         signed_otp_service = SignedOTPService()
@@ -227,9 +236,14 @@ async def request_recovery_otp(
         )
 
         if result['success']:
-            logger.info(
-                f"Recovery OTP request processed for {request.mobile_number}"
-            )
+            if request.mobile_number:
+                logger.info(
+                    f"Recovery OTP request processed for {request.mobile_number}"
+                )
+            else:
+                logger.info(
+                    f"Recovery OTP request processed for {request.client_public_key[:16]}..."
+                )
             return EncryptedOTPResponse(**result['encrypted_response'])
         else:
             raise HTTPException(

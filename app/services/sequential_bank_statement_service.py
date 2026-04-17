@@ -195,6 +195,7 @@ class SequentialBankStatementService(DocumentProcessorBase):
             "currency": result.currency,
             "statement_date": self._normalize_date_to_iso(result.statement_date) or "",  # ISO format (YYYY-MM-DD)
             "account_number_extraction_method": result.account_number_extraction_method,
+            "raw_data": result.raw_data,
         }
 
         # Fallback: Infer currency from bank_country if not extracted
@@ -409,6 +410,7 @@ class SequentialBankStatementService(DocumentProcessorBase):
             "statement_date": self._normalize_date_to_iso(bank_data.statement_date) or "",
             "account_number_extraction_method": bank_data.account_number_extraction_method or "gliner_ner",
             "extraction_method": extraction_method,
+            "raw_data": bank_data.raw_data,
         }
 
         confidence_data = {}

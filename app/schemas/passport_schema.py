@@ -28,6 +28,9 @@ class PassportData(BaseModel):
     # Extraction source tracking
     extraction_source: Optional[str] = None  # 'gliner_ner', 'logic_based', etc.
 
+    # Raw OCR text as concatenated string
+    raw_data: Optional[str] = None  # Full OCR text for debugging/auditing
+
     def calculate_overall_confidence(self) -> float:
         """
         Calculate aggregate confidence score based on OCR quality when available.

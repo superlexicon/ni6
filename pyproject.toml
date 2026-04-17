@@ -34,10 +34,6 @@ mediapipe = "^0.10.0"
 torch = "^2.6.0"
 torchvision = "^0.21.0"
 
-# CPU-only PyTorch for local development
-torch = "^2.6.0"
-torchvision = "^0.21.0"
-
 # Additional essential dependencies (required for all build types)
 ecdsa = "^0.19.1"
 pycryptodome = "^3.23.0"

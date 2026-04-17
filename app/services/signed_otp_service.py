@@ -63,8 +63,8 @@ class SignedOTPService:
     async def process_signed_request(
         self,
         client_public_key: str,
-        mobile_number: str,
-        country_code: str,
+        mobile_number: Optional[str],
+        country_code: Optional[str],
         secret_share: Optional[str],
         secret_share_encrypted: Optional[Dict[str, str]],
         timestamp: int,
@@ -148,16 +148,21 @@ class SignedOTPService:
                     f"will update OTP record"
                 )
 
-            # Step 3: Convert country code to phone prefix for consistent mobile number format
-            # All OTP operations use the full mobile number (with prefix) to ensure consistency
-            phone_prefix = get_phone_prefix(country_code) if country_code else None
-            if not phone_prefix:
+            # Step 3: Process mobile number if provided
+            full_mobile_number = None
+            if mobile_number and country_code:
+                phone_prefix = get_phone_prefix(country_code)
+                if not phone_prefix:
+                    return {
+                        'success': False,
+                        'error': f'Invalid country code: {country_code}'
+                    }
+                full_mobile_number = f"{phone_prefix}{mobile_number}"
+            elif mobile_number and not country_code:
                 return {
                     'success': False,
-                    'error': f'Invalid country code: {country_code}'
+                    'error': 'country_code is required when mobile_number is provided'
                 }
-
-            full_mobile_number = f"{phone_prefix}{mobile_number}"
 
             # Step 4: Store in user_keys_pending IMMEDIATELY (before OTP operations)
             # This ensures encrypted_secret_share is stored regardless of OTP generation timing
@@ -166,7 +171,7 @@ class SignedOTPService:
 
             pending_key_data = {
                 'mobile_number': full_mobile_number,
-                'country_code': country_code,
+                'country_code': country_code if full_mobile_number else None,
                 'user_public_key': client_public_key,
                 'encrypted_secret_share': encrypted_for_storage,
                 'device_id': device_id,
@@ -180,10 +185,14 @@ class SignedOTPService:
             # Only insert into otp table if generate_otp=True or if OTP record doesn't exist yet
             # Note: encrypted_secret_share is already stored in user_keys_pending, so this is just for OTP operations
 
-            # Check if OTP already exists for this mobile_number
+            # Check for existing OTP by public_key first (primary lookup)
             from app.repositories.otp_repository import OTPRepository
             otp_repo = OTPRepository()
-            existing_otp = otp_repo.get_otp_by_mobile_number(full_mobile_number)
+            existing_otp = otp_repo.get_unverified_otp_by_public_key(client_public_key)
+
+            # Also check by mobile_number if provided (for backward compatibility)
+            if not existing_otp and full_mobile_number:
+                existing_otp = otp_repo.get_otp_by_mobile_number(full_mobile_number)
 
             # Only include encrypted_secret_share if we have a value (additional safeguard)
             otp_update_data = {
@@ -200,8 +209,12 @@ class SignedOTPService:
 
             if existing_otp:
                 # Update existing OTP record with metadata
-                self.logger.info(f"Updating existing OTP record for mobile_number: {full_mobile_number}")
-                otp_repo.update_otp(full_mobile_number, otp_update_data)
+                if full_mobile_number:
+                    self.logger.info(f"Updating existing OTP record for mobile_number: {full_mobile_number}")
+                    otp_repo.update_otp(full_mobile_number, otp_update_data)
+                else:
+                    self.logger.info(f"Updating existing OTP record for public_key: {client_public_key[:16]}...")
+                    otp_repo.update_otp_by_public_key(client_public_key, otp_update_data)
             elif not generate_otp:
                 # No existing OTP and not generating OTP - create record with encrypted_secret_share now
                 # This ensures each node stores its own secret share before broadcast arrives
@@ -218,52 +231,107 @@ class SignedOTPService:
                     'max_attempts': 3
                 }
                 otp_repo.create_otp(otp_create_data)
-                self.logger.info(f"Created OTP record with encrypted_secret_share for mobile_number: {full_mobile_number} (generate_otp=false)")
+                if full_mobile_number:
+                    self.logger.info(f"Created OTP record with encrypted_secret_share for mobile_number: {full_mobile_number} (generate_otp=false)")
+                else:
+                    self.logger.info(f"Created OTP record with encrypted_secret_share for public_key: {client_public_key[:16]}... (generate_otp=false)")
 
             # Step 6: Generate OTP and send via SMS (only if generate_otp is True)
             # Note: generate_and_send_otp_via_sms will create the OTP record if it doesn't exist
             otp_data = {}
 
             if generate_otp:
-                otp_result = await self.otp_service.generate_and_send_otp_via_sms(
-                    length=otp_length,
-                    mobile_number=full_mobile_number,
-                    client_public_key=client_public_key,
-                    country_code=country_code,
-                    gesture_mode=gesture_mode
-                )
+                if full_mobile_number:
+                    # Generate OTP with SMS delivery
+                    otp_result = await self.otp_service.generate_and_send_otp_via_sms(
+                        length=otp_length,
+                        mobile_number=full_mobile_number,
+                        client_public_key=client_public_key,
+                        country_code=country_code,
+                        gesture_mode=gesture_mode
+                    )
 
-                # Update the newly created OTP record with metadata (if no existing OTP was found before)
-                if not existing_otp:
-                    self.logger.info(f"Updating newly created OTP record with metadata for mobile_number: {full_mobile_number}")
-                    otp_repo.update_otp(full_mobile_number, otp_update_data)
+                    # Update the newly created OTP record with metadata (if no existing OTP was found before)
+                    if not existing_otp:
+                        self.logger.info(f"Updating newly created OTP record with metadata for mobile_number: {full_mobile_number}")
+                        otp_repo.update_otp(full_mobile_number, otp_update_data)
 
-                # The OTP response doesn't have a 'success' field, check if OTP was sent
-                if otp_result and otp_result.otp_id:
-                    otp_data = {
-                        'otp_id': otp_result.otp_id,
-                        'expires_at': otp_result.expires_at,
-                        'sent_at': otp_result.sent_at,
-                        'otp': None  # Initialize with None
-                    }
-                    # For testing/debugging, include the OTP if present
-                    if hasattr(otp_result, 'random_number') and otp_result.random_number:
-                        otp_data['otp'] = otp_result.random_number
+                    # The OTP response doesn't have a 'success' field, check if OTP was sent
+                    if otp_result and otp_result.otp_id:
+                        otp_data = {
+                            'otp_id': otp_result.otp_id,
+                            'expires_at': otp_result.expires_at,
+                            'sent_at': otp_result.sent_at,
+                            'otp': None  # Initialize with None
+                        }
+                        # For testing/debugging, include the OTP if present
+                        if hasattr(otp_result, 'random_number') and otp_result.random_number:
+                            otp_data['otp'] = otp_result.random_number
+                        else:
+                            from app.repositories.otp_repository import OTPRepository
+                            otp_repo = OTPRepository()
+                            otp_record = otp_repo.get_otp_by_mobile_number(full_mobile_number)
+                            if otp_record and otp_record.get('random_number'):
+                                otp_data['otp'] = otp_record['random_number']
                     else:
-                        from app.repositories.otp_repository import OTPRepository
-                        otp_repo = OTPRepository()
-                        otp_record = otp_repo.get_otp_by_mobile_number(full_mobile_number)
-                        if otp_record and otp_record.get('random_number'):
-                            otp_data['otp'] = otp_record['random_number']
+                        return {
+                            'success': False,
+                            'error': 'Failed to generate OTP'
+                        }
+
+                    self.logger.info(f"✅ OTP generated and sent to {full_mobile_number}")
                 else:
-                    return {
-                        'success': False,
-                        'error': 'Failed to generate OTP'
+                    # Generate OTP without SMS delivery (mobile_number not provided)
+                    otp_result = self.otp_service.generate_otp_without_sms(
+                        length=otp_length,
+                        client_public_key=client_public_key,
+                        gesture_mode=gesture_mode
+                    )
+
+                    # Create or update OTP record with the generated OTP
+                    if not existing_otp:
+                        # Create OTP record without mobile_number
+                        otp_create_data = {
+                            'public_key': client_public_key,
+                            'country_code': None,
+                            'random_number': otp_result['otp'],
+                            'otp_id': otp_result['otp_id'],
+                            'expires_at': otp_result['expires_at'],
+                            'delivery_method': 'encrypted_response',
+                            'attempts': 0,
+                            'max_attempts': 3,
+                            'is_verified': False
+                        }
+                        if encrypted_for_storage is not None:
+                            otp_create_data['encrypted_secret_share'] = encrypted_for_storage
+                        if device_id is not None:
+                            otp_create_data['device_id'] = device_id
+                        if api_url is not None:
+                            otp_create_data['api_url'] = api_url
+
+                        otp_repo.create_otp(otp_create_data)
+                    else:
+                        # Update existing OTP record
+                        otp_repo.update_otp_by_public_key(client_public_key, {
+                            'random_number': otp_result['otp'],
+                            'otp_id': otp_result['otp_id'],
+                            'expires_at': otp_result['expires_at'],
+                            'delivery_method': 'encrypted_response'
+                        })
+
+                    otp_data = {
+                        'otp_id': otp_result['otp_id'],
+                        'expires_at': otp_result['expires_at'],
+                        'sent_at': otp_result['sent_at'],
+                        'otp': otp_result['otp']
                     }
 
-                self.logger.info(f"✅ OTP generated and sent to {mobile_number}")
+                    self.logger.info(f"✅ OTP generated (no SMS) for {client_public_key[:16]}...")
             else:
-                self.logger.info(f"⏭️ Skipping OTP generation for {mobile_number} (generate_otp=False)")
+                if full_mobile_number:
+                    self.logger.info(f"⏭️ Skipping OTP generation for {mobile_number} (generate_otp=False)")
+                else:
+                    self.logger.info(f"⏭️ Skipping OTP generation for {client_public_key[:16]}... (generate_otp=False)")
                 # Return empty otp_data - client will wait for peer sync
                 otp_data = {
                     'otp_id': None,
@@ -307,8 +375,8 @@ class SignedOTPService:
     async def process_recovery_request(
         self,
         client_public_key: str,
-        mobile_number: str,
-        country_code: str,
+        mobile_number: Optional[str],
+        country_code: Optional[str],
         timestamp: int,
         signature_r: str,
         signature_s: str,
@@ -363,47 +431,75 @@ class SignedOTPService:
             otp_data = {}
 
             if generate_otp:
-                # Convert ISO country code to phone prefix for SMS sending
-                phone_prefix = get_phone_prefix(country_code) if country_code else None
-                if not phone_prefix:
+                # Process mobile number if provided
+                full_mobile_number = None
+                if mobile_number and country_code:
+                    phone_prefix = get_phone_prefix(country_code)
+                    if not phone_prefix:
+                        return {
+                            'success': False,
+                            'error': f'Invalid country code: {country_code}'
+                        }
+                    full_mobile_number = f"{phone_prefix}{mobile_number}"
+                elif mobile_number and not country_code:
                     return {
                         'success': False,
-                        'error': f'Invalid country code: {country_code}'
+                        'error': 'country_code is required when mobile_number is provided'
                     }
 
-                full_mobile_number = f"{phone_prefix}{mobile_number}"
-                otp_result = await self.otp_service.generate_and_send_otp_via_sms(
-                    length=otp_length,
-                    mobile_number=full_mobile_number,
-                    client_public_key=client_public_key,
-                    country_code=country_code,
-                    gesture_mode=gesture_mode
-                )
+                if full_mobile_number:
+                    # Generate OTP with SMS delivery
+                    otp_result = await self.otp_service.generate_and_send_otp_via_sms(
+                        length=otp_length,
+                        mobile_number=full_mobile_number,
+                        client_public_key=client_public_key,
+                        country_code=country_code,
+                        gesture_mode=gesture_mode
+                    )
 
-                if otp_result and otp_result.otp_id:
-                    otp_data = {
-                        'otp_id': otp_result.otp_id,
-                        'expires_at': otp_result.expires_at,
-                        'sent_at': otp_result.sent_at,
-                    }
-                    # For testing/debugging, include the OTP if present
-                    if hasattr(otp_result, 'random_number') and otp_result.random_number:
-                        otp_data['otp'] = otp_result.random_number
+                    if otp_result and otp_result.otp_id:
+                        otp_data = {
+                            'otp_id': otp_result.otp_id,
+                            'expires_at': otp_result.expires_at,
+                            'sent_at': otp_result.sent_at,
+                        }
+                        # For testing/debugging, include the OTP if present
+                        if hasattr(otp_result, 'random_number') and otp_result.random_number:
+                            otp_data['otp'] = otp_result.random_number
+                        else:
+                            from app.repositories.otp_repository import OTPRepository
+                            otp_repo = OTPRepository()
+                            otp_record = otp_repo.get_otp_by_mobile_number(full_mobile_number)
+                            if otp_record and otp_record.get('random_number'):
+                                otp_data['otp'] = otp_record['random_number']
                     else:
-                        from app.repositories.otp_repository import OTPRepository
-                        otp_repo = OTPRepository()
-                        otp_record = otp_repo.get_otp_by_mobile_number(full_mobile_number)
-                        if otp_record and otp_record.get('random_number'):
-                            otp_data['otp'] = otp_record['random_number']
+                        return {
+                            'success': False,
+                            'error': 'Failed to generate OTP'
+                        }
+
+                    self.logger.info(f"✅ Recovery OTP generated and sent to {full_mobile_number}")
                 else:
-                    return {
-                        'success': False,
-                        'error': 'Failed to generate OTP'
+                    # Generate OTP without SMS delivery (mobile_number not provided)
+                    otp_result = self.otp_service.generate_otp_without_sms(
+                        length=otp_length,
+                        client_public_key=client_public_key,
+                        gesture_mode=gesture_mode
+                    )
+
+                    otp_data = {
+                        'otp_id': otp_result['otp_id'],
+                        'expires_at': otp_result['expires_at'],
+                        'sent_at': otp_result['sent_at'],
+                        'otp': otp_result['otp']
                     }
 
-                self.logger.info(f"✅ Recovery OTP generated and sent to {mobile_number}")
+                    self.logger.info(f"✅ Recovery OTP generated (no SMS) for {client_public_key[:16]}...")
             else:
-                self.logger.info(f"⏭️ Skipping OTP generation for {mobile_number} (generate_otp=False)")
+                if full_mobile_number:
+                    self.logger.info(f"⏭️ Skipping OTP generation for {mobile_number} (generate_otp=False)")
+                else:
+                    self.logger.info(f"⏭️ Skipping OTP generation for {client_public_key[:16]}... (generate_otp=False)")
                 otp_data = {
                     'otp_id': None,
                     'expires_at': None,
