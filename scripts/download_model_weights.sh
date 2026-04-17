@@ -411,6 +411,52 @@ download_doctr() {
     fi
 }
 
+# Ensure Poetry is using the correct Python version
+ensure_poetry_python() {
+    local target_python=""
+
+    # Method 1: Read from .python-version file
+    if [ -f "$PROJECT_ROOT/.python-version" ]; then
+        local version=$(cat "$PROJECT_ROOT/.python-version" | tr -d '[:space:]')
+        # Find Python with this version
+        if command -v pyenv >/dev/null 2>&1; then
+            target_python=$(pyenv which python3 "$version" 2>/dev/null)
+        fi
+
+        # Fallback to finding python3.<version> in PATH
+        if [ -z "$target_python" ]; then
+            target_python=$(command -v "python3.$version" 2>/dev/null)
+        fi
+    fi
+
+    # Method 2: Use existing virtualenv's Python
+    if [ -z "$target_python" ] && [ -x "$PROJECT_ROOT/.venv/bin/python" ]; then
+        target_python="$PROJECT_ROOT/.venv/bin/python"
+    fi
+
+    # Method 3: Try common Python versions
+    if [ -z "$target_python" ]; then
+        for version in "3.11" "3.12" "3.10"; do
+            if command -v "python3.$version" >/dev/null 2>&1; then
+                target_python=$(command -v "python3.$version")
+                break
+            fi
+        done
+    fi
+
+    # Set Poetry to use this Python
+    if [ -n "$target_python" ]; then
+        if [ "$VERBOSE" = "true" ]; then
+            log_info "    Setting Poetry Python to: $target_python"
+        fi
+        poetry env use "$target_python" >/dev/null 2>&1
+        return 0
+    else
+        log_error "    Could not find a compatible Python (3.10-3.12)"
+        return 1
+    fi
+}
+
 # ============================================================================
 # HuggingFace Models (FinBERT, GLiNER2)
 # ============================================================================
@@ -494,37 +540,46 @@ download_huggingface() {
         log_info "    Would download using: python scripts/download_gliner2.py $GLINER2_TARGET"
         gliner2_success=2
     else
-        # Run the script, capturing stderr separately for error reporting
-        # Stdout shows progress, stderr only shows on error
-        set +e  # Don't exit on error for this command
-        local stderr_file=$(mktemp)
-
-        # Show diagnostic info if VERBOSE is set
-        if [ "$VERBOSE" = "true" ]; then
-            log_info "    Running: poetry run python3 ${SCRIPT_DIR}/download_gliner2.py $GLINER2_TARGET"
-            log_info "    Current directory: $(pwd)"
-            log_info "    SCRIPT_DIR: $SCRIPT_DIR"
-        fi
-
-        if poetry run python3 "${SCRIPT_DIR}/download_gliner2.py" "$GLINER2_TARGET" 2>"$stderr_file"; then
-            gliner2_success=2
-            log_info "    → GLiNER2 downloaded successfully"
-        else
+        # Ensure Poetry is using the correct Python version
+        if ! ensure_poetry_python; then
             gliner2_success=0
-            log_error "    Failed to download GLiNER2"
-            log_error "    Command: poetry run python3 ${SCRIPT_DIR}/download_gliner2.py $GLINER2_TARGET"
-            log_error "    Exit code: $?"
-            if [ -s "$stderr_file" ]; then
-                log_error "    Error output:"
-                while IFS= read -r line; do
-                    log_error "      $line"
-                done < "$stderr_file"
-            else
-                log_error "    No error output captured"
+            log_error "    Failed to set Poetry Python version"
+            log_error "    Please ensure Python 3.10-3.12 is available"
+            log_error "    Run: pyenv local 3.11.7"
+        else
+            set +e  # Don't exit on error for this command
+            local stderr_file=$(mktemp)
+
+            # Show diagnostic info if VERBOSE is set
+            if [ "$VERBOSE" = "true" ]; then
+                log_info "    Running: poetry run python3 ${SCRIPT_DIR}/download_gliner2.py $GLINER2_TARGET"
+                log_info "    Current directory: $(pwd)"
+                log_info "    SCRIPT_DIR: $SCRIPT_DIR"
             fi
+
+            # Run the download script via Poetry
+            poetry run python3 "${SCRIPT_DIR}/download_gliner2.py" "$GLINER2_TARGET" 2>"$stderr_file"
+            local exit_code=$?  # Capture exit code IMMEDIATELY
+
+            if [ $exit_code -eq 0 ]; then
+                gliner2_success=2
+                log_info "    → GLiNER2 downloaded successfully"
+            else
+                gliner2_success=0
+                log_error "    Failed to download GLiNER2"
+                log_error "    Exit code: $exit_code"
+
+                if [ -s "$stderr_file" ]; then
+                    log_error "    Error output:"
+                    while IFS= read -r line; do
+                        log_error "      $line"
+                    done < "$stderr_file"
+                fi
+            fi
+
+            rm -f "$stderr_file"
+            set -e  # Re-enable exit on error
         fi
-        rm -f "$stderr_file"
-        set -e  # Re-enable exit on error
     fi
 
     if [ $finbert_success -eq 4 ] && [ $gliner2_success -eq 2 ]; then
