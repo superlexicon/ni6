@@ -181,7 +181,22 @@ extract_zip() {
     fi
 
     mkdir -p "$target_dir"
-    if unzip -q -o "$zip_file" -d "$target_dir" 2>/dev/null; then
+
+    # Validate it's a ZIP file
+    if ! file "$zip_file" | grep -qi "zip"; then
+        log_error "  File is not a valid ZIP archive"
+        file "$zip_file" | head -1
+        return 1
+    fi
+
+    # Test ZIP integrity before extraction
+    if ! unzip -t "$zip_file" >/dev/null 2>&1; then
+        log_error "  ZIP file is corrupted or invalid"
+        return 1
+    fi
+
+    # Extract (show errors, don't suppress with -q)
+    if unzip -o "$zip_file" -d "$target_dir" 2>&1; then
         return 0
     else
         log_error "  Failed to extract $(basename "$zip_file")"
@@ -283,9 +298,14 @@ download_deepface() {
     if download_file "https://github.com/swghosh/DeepFace/releases/download/weights-vggface2-2d-aligned/VGGFace2_DeepFace_weights_val-0.9034.h5.zip" \
             "$tmp_dir/deepface.zip" "true"; then
         if extract_zip "$tmp_dir/deepface.zip" "$tmp_dir"; then
-            if [ -f "$tmp_dir/VGGFace2_DeepFace_weights_val-0.9034.h5" ]; then
-                mv "$tmp_dir/VGGFace2_DeepFace_weights_val-0.9034.h5" "$DEEPFACE_TARGET/"
+            # Check for the extracted file (may be in subdirectory)
+            local extracted_file=$(find "$tmp_dir" -name "VGGFace2_DeepFace_weights_val-0.9034.h5" -type f | head -1)
+            if [ -n "$extracted_file" ]; then
+                mv "$extracted_file" "$DEEPFACE_TARGET/"
                 success_count=$((success_count + 1))
+                log_success "  Extracted VGGFace2 weights"
+            else
+                log_error "  VGGFace2 weights not found in ZIP"
             fi
         fi
     fi
@@ -474,7 +494,8 @@ download_huggingface() {
         log_info "    Would download using: python scripts/download_gliner2.py $GLINER2_TARGET"
         gliner2_success=2
     else
-        if poetry run python3 "${SCRIPT_DIR}/download_gliner2.py" "$GLINER2_TARGET"; then
+        # Capture stderr to suppress Poetry's version check message
+        if poetry run python3 "${SCRIPT_DIR}/download_gliner2.py" "$GLINER2_TARGET" 2>/dev/null; then
             gliner2_success=2
             log_info "    → GLiNER2 downloaded successfully"
         else
@@ -552,10 +573,23 @@ download_nltk() {
     if download_file "https://raw.githubusercontent.com/nltk/nltk_data/gh-pages/packages/sentiment/vader_lexicon.zip" \
             "$tmp_dir/vader_lexicon.zip" "true"; then
         if extract_zip "$tmp_dir/vader_lexicon.zip" "$NLTK_TARGET"; then
-            rm -rf "$tmp_dir"
-            file_count=$(find "$NLTK_TARGET" -type f | wc -l)
-            log_success "Downloaded $file_count file(s)"
-            return 0
+            # CRITICAL FIX: Move vader_lexicon/ to sentiment/ for NLTK compatibility
+            # ZIP extracts to vader_lexicon/ but code expects sentiment/vader_lexicon.txt
+            if [ -d "${NLTK_TARGET}/vader_lexicon" ] && [ ! -d "$nltk_sentiment_dir" ]; then
+                mv "${NLTK_TARGET}/vader_lexicon" "$nltk_sentiment_dir"
+                log_info "  Moved vader_lexicon/ to sentiment/ for NLTK compatibility"
+            fi
+            # Verify final location
+            if check_file_exists_and_valid "$nltk_sentiment_dir/vader_lexicon.txt"; then
+                rm -rf "$tmp_dir"
+                file_count=$(find "$NLTK_TARGET" -type f | wc -l)
+                log_success "Downloaded $file_count file(s)"
+                return 0
+            else
+                rm -rf "$tmp_dir"
+                log_error "  vader_lexicon.txt not found at $nltk_sentiment_dir/"
+                return 1
+            fi
         else
             rm -rf "$tmp_dir"
             log_error "Failed to extract NLTK data"
@@ -816,25 +850,40 @@ download_photoholmes() {
         # Download with curl directly
         mkdir -p "$(dirname "$tmp_zip")"
         if curl -fL --progress-bar "https://www.grip.unina.it/download/prog/TruFor/TruFor_weights.zip" -o "$tmp_zip" 2>/dev/null; then
-            # Check if file is a valid ZIP and has content
+            # Check minimum size (1MB for TruFor weights)
             local zip_size=$(get_file_size "$tmp_zip")
-            if [ "$zip_size" -gt 0 ] && unzip -t "$tmp_zip" >/dev/null 2>&1; then
-                mkdir -p "$trufor_dir"
-                # Unzip to get the tar file
-                if unzip -q -o "$tmp_zip" -d "$tmp_extract" 2>/dev/null; then
-                    # Move the .pth.tar file as trufor.pth (PyTorch can load it directly)
-                    # The tar contains an internal archive/ structure - don't extract it
-                    if [ -f "$tmp_extract/weights/trufor.pth.tar" ]; then
-                        local tar_size=$(get_file_size "$tmp_extract/weights/trufor.pth.tar")
-                        if [ "$tar_size" -gt 0 ]; then
-                            mv "$tmp_extract/weights/trufor.pth.tar" "$trufor_dir/trufor.pth"
-                            download_success=true
-                            log_success "  [5/6] Downloaded TruFor ($(format_size "$tar_size"))"
+            if [ "$zip_size" -lt 1000000 ]; then
+                log_error "  [5/6] Downloaded file too small ($zip_size bytes)"
+                rm -f "$tmp_zip"
+            else
+                # Validate it's actually a ZIP file
+                local file_type=$(file "$tmp_zip" | head -1)
+                if ! echo "$file_type" | grep -qi "zip"; then
+                    log_error "  [5/6] Downloaded file is not a ZIP archive"
+                    log_error "  [5/6] File type: $file_type"
+                    rm -f "$tmp_zip"
+                else
+                    # Test ZIP integrity
+                    if ! unzip -t "$tmp_zip" >/dev/null 2>&1; then
+                        log_error "  [5/6] ZIP file is corrupted"
+                        rm -f "$tmp_zip"
+                    else
+                        mkdir -p "$trufor_dir"
+                        # Unzip to get the tar file
+                        if unzip -q -o "$tmp_zip" -d "$tmp_extract" 2>/dev/null; then
+                            # Move the .pth.tar file as trufor.pth (PyTorch can load it directly)
+                            # The tar contains an internal archive/ structure - don't extract it
+                            if [ -f "$tmp_extract/weights/trufor.pth.tar" ]; then
+                                local tar_size=$(get_file_size "$tmp_extract/weights/trufor.pth.tar")
+                                if [ "$tar_size" -gt 0 ]; then
+                                    mv "$tmp_extract/weights/trufor.pth.tar" "$trufor_dir/trufor.pth"
+                                    download_success=true
+                                    log_success "  [5/6] Downloaded TruFor ($(format_size "$tar_size"))"
+                                fi
+                            fi
                         fi
                     fi
                 fi
-            else
-                log_error "  [5/6] Downloaded ZIP is invalid or empty ($zip_size bytes)"
             fi
         fi
 
@@ -872,51 +921,66 @@ download_photoholmes() {
         # Download with curl directly
         mkdir -p "$(dirname "$tmp_zip")"
         if curl -fL --progress-bar "https://www.immin.io/public/assets/business/psccnet.zip" -o "$tmp_zip" 2>/dev/null; then
-            # Check if file is a valid ZIP and has content
+            # Check minimum size (1MB for PSCCNet weights)
             local zip_size=$(get_file_size "$tmp_zip")
-            if [ "$zip_size" -gt 0 ] && unzip -t "$tmp_zip" >/dev/null 2>&1; then
-                mkdir -p "$psccnet_dir"
-                # Extract the zip
-                if unzip -q -o "$tmp_zip" -d "$tmp_extract" 2>/dev/null; then
-                    # Move the three weight files
-                    local fenet_valid=false
-                    local segnet_valid=false
-                    local clsnet_valid=false
+            if [ "$zip_size" -lt 1000000 ]; then
+                log_error "  [6/6] Downloaded file too small ($zip_size bytes)"
+                rm -f "$tmp_zip"
+            else
+                # Validate it's actually a ZIP file
+                local file_type=$(file "$tmp_zip" | head -1)
+                if ! echo "$file_type" | grep -qi "zip"; then
+                    log_error "  [6/6] Downloaded file is not a ZIP archive"
+                    log_error "  [6/6] File type: $file_type"
+                    rm -f "$tmp_zip"
+                else
+                    # Test ZIP integrity
+                    if ! unzip -t "$tmp_zip" >/dev/null 2>&1; then
+                        log_error "  [6/6] ZIP file is corrupted"
+                        rm -f "$tmp_zip"
+                    else
+                        mkdir -p "$psccnet_dir"
+                        # Extract the zip
+                        if unzip -q -o "$tmp_zip" -d "$tmp_extract" 2>/dev/null; then
+                            # Move the three weight files
+                            local fenet_valid=false
+                            local segnet_valid=false
+                            local clsnet_valid=false
 
-                    if [ -f "$tmp_extract/psccnet/FENet.pth" ]; then
-                        local fenet_size=$(get_file_size "$tmp_extract/psccnet/FENet.pth")
-                        if [ "$fenet_size" -gt 0 ]; then
-                            mv "$tmp_extract/psccnet/FENet.pth" "$psccnet_dir/FENet.pth"
-                            fenet_valid=true
+                            if [ -f "$tmp_extract/psccnet/FENet.pth" ]; then
+                                local fenet_size=$(get_file_size "$tmp_extract/psccnet/FENet.pth")
+                                if [ "$fenet_size" -gt 0 ]; then
+                                    mv "$tmp_extract/psccnet/FENet.pth" "$psccnet_dir/FENet.pth"
+                                    fenet_valid=true
+                                fi
+                            fi
+
+                            if [ -f "$tmp_extract/psccnet/SegNet.pth" ]; then
+                                local segnet_size=$(get_file_size "$tmp_extract/psccnet/SegNet.pth")
+                                if [ "$segnet_size" -gt 0 ]; then
+                                    mv "$tmp_extract/psccnet/SegNet.pth" "$psccnet_dir/SegNet.pth"
+                                    segnet_valid=true
+                                fi
+                            fi
+
+                            if [ -f "$tmp_extract/psccnet/ClsNet.pth" ]; then
+                                local clsnet_size=$(get_file_size "$tmp_extract/psccnet/ClsNet.pth")
+                                if [ "$clsnet_size" -gt 0 ]; then
+                                    mv "$tmp_extract/psccnet/ClsNet.pth" "$psccnet_dir/ClsNet.pth"
+                                    clsnet_valid=true
+                                fi
+                            fi
+
+                            # Count as success only if all three files were extracted
+                            if [ "$fenet_valid" = true ] && [ "$segnet_valid" = true ] && [ "$clsnet_valid" = true ]; then
+                                download_success=true
+                                psccnet_valid=true
+                                local total_size=$(($(get_file_size "$psccnet_dir/FENet.pth") + $(get_file_size "$psccnet_dir/SegNet.pth") + $(get_file_size "$psccnet_dir/ClsNet.pth")))
+                                log_success "  [6/6] Downloaded PSCCNet ($(format_size "$total_size"))"
+                            fi
                         fi
-                    fi
-
-                    if [ -f "$tmp_extract/psccnet/SegNet.pth" ]; then
-                        local segnet_size=$(get_file_size "$tmp_extract/psccnet/SegNet.pth")
-                        if [ "$segnet_size" -gt 0 ]; then
-                            mv "$tmp_extract/psccnet/SegNet.pth" "$psccnet_dir/SegNet.pth"
-                            segnet_valid=true
-                        fi
-                    fi
-
-                    if [ -f "$tmp_extract/psccnet/ClsNet.pth" ]; then
-                        local clsnet_size=$(get_file_size "$tmp_extract/psccnet/ClsNet.pth")
-                        if [ "$clsnet_size" -gt 0 ]; then
-                            mv "$tmp_extract/psccnet/ClsNet.pth" "$psccnet_dir/ClsNet.pth"
-                            clsnet_valid=true
-                        fi
-                    fi
-
-                    # Count as success only if all three files were extracted
-                    if [ "$fenet_valid" = true ] && [ "$segnet_valid" = true ] && [ "$clsnet_valid" = true ]; then
-                        download_success=true
-                        psccnet_valid=true
-                        local total_size=$(($(get_file_size "$psccnet_dir/FENet.pth") + $(get_file_size "$psccnet_dir/SegNet.pth") + $(get_file_size "$psccnet_dir/ClsNet.pth")))
-                        log_success "  [6/6] Downloaded PSCCNet ($(format_size "$total_size"))"
                     fi
                 fi
-            else
-                log_error "  [6/6] Downloaded ZIP is invalid or empty ($zip_size bytes)"
             fi
         else
             log_error "  [6/6] Failed to download PSCCNet"
