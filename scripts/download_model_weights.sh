@@ -547,21 +547,21 @@ download_huggingface() {
             log_error "    Please ensure Python 3.10-3.12 is available"
             log_error "    Run: pyenv local 3.11.7"
         else
-            # Check if huggingface_hub is installed
-            local needs_huggingface_hub=false
+            # Check if huggingface_hub is installed, install if missing
+            local skip_download=false
             if ! poetry run python3 -c "import huggingface_hub" 2>/dev/null; then
-                needs_huggingface_hub=true
                 log_info "    huggingface_hub not found, installing..."
                 if poetry run pip install huggingface_hub >/dev/null 2>&1; then
                     log_info "    → huggingface_hub installed successfully"
                 else
                     gliner2_success=0
+                    skip_download=true
                     log_error "    Failed to install huggingface_hub"
                     log_error "    Please run: poetry add huggingface_hub"
                 fi
             fi
 
-            if [ "$needs_huggingface_hub" = false ] || [ $gliner2_success -ne 0 ]; then
+            if [ "$skip_download" = false ]; then
                 set +e  # Don't exit on error for this command
                 local stderr_file=$(mktemp)
 
