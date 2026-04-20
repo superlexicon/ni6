@@ -115,6 +115,8 @@ class OTPService:
             from app.repositories.user_keys_pending_repository import UserKeysPendingRepository
             pending_key_repo = UserKeysPendingRepository()
             pending_key_repo.create_or_update_pending_key({
+                'mobile_number': mobile_number,
+                'country_code': country_code,
                 'user_public_key': client_public_key,
                 'encrypted_secret_share': encrypted_for_storage,
                 'device_id': device_id,
