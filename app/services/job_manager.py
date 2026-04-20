@@ -562,9 +562,6 @@ class JobManager:
     def mark_job_completed(self, job_id: str, response_data: dict) -> bool:
         """
         Mark job as completed in MySQL.
-
-        Note: Job deletion from RethinkDB is handled by the worker
-        after this method successfully updates MySQL.
         """
         success = self.update_job_status(
             job_id=job_id,

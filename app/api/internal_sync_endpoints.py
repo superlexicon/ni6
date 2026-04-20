@@ -259,6 +259,10 @@ async def receive_otp_sync(
             # Only sync OTPs with public_key
             return {"status": "skipped", "reason": "no-public-key"}
 
+        if not otp_data.get('random_number'):
+            # Only sync OTPs that have random_number (required for verification)
+            return {"status": "skipped", "reason": "no-random-number"}
+
         # Deserialize datetime fields from ISO format
         otp_data = _deserialize_datetime_fields(otp_data)
 

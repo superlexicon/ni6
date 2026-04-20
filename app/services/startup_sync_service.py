@@ -238,6 +238,10 @@ class StartupSyncService:
             if not public_key:
                 return
 
+            # Only sync OTPs that have random_number (required for verification)
+            if not otp_data.get('random_number'):
+                return
+
             existing = self.otp_repo.get_otp_by_public_key(public_key)
 
             # Prepare OTP data for database

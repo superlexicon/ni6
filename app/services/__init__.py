@@ -55,7 +55,6 @@ key_service = KeyService(user_key_repository,
                          )
 
 # Initialize OTP broadcast service for HTTP-based inter-instance communication
-# RethinkDB OTP sync service removed - using HTTP-based OTP broadcast instead
 otp_broadcast_service = None
 try:
     from .otp_broadcast_service import otp_broadcast_service as broadcast_svc
@@ -68,7 +67,6 @@ except Exception as e:
 otp_service = OTPService(
     unique_random_generator,
     otp_repository,
-    otp_sync_service=None,  # RethinkDB OTP sync removed
     otp_broadcast_service=otp_broadcast_service
 )
 

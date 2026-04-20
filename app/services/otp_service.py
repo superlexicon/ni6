@@ -12,7 +12,6 @@ from app.services.aws_sms_service import AWSSMSService
 from app.config.aws_config import aws_settings
 
 if TYPE_CHECKING:
-    from app.services.otp_sync_service import OTPSyncService
     from app.services.otp_broadcast_service import OTPBroadcastService
 
 
@@ -21,13 +20,11 @@ class OTPService:
                  unique_random_generator: UniqueRandomGenerator,
                  otp_repository: OTPRepository,
                  aws_sms_service: Optional[AWSSMSService] = None,
-                 otp_sync_service: Optional["OTPSyncService"] = None,
                  otp_broadcast_service: Optional["OTPBroadcastService"] = None):
         self.logger = logger
         self.unique_random_generator = unique_random_generator
         self.otp_repository = otp_repository
         self.aws_sms_service = aws_sms_service
-        self.otp_sync_service = otp_sync_service
         self.otp_broadcast_service = otp_broadcast_service
 
         # Initialize AWS SMS service if not provided
@@ -237,12 +234,6 @@ class OTPService:
                     except Exception as sync_error:
                         self.logger.error(f"Failed to broadcast OTP creation: {sync_error}")
                         # Continue - local DB has the OTP, sync is best-effort
-                elif self.otp_sync_service:
-                    # Fallback to RethinkDB sync for compatibility during migration
-                    try:
-                        self.otp_sync_service.publish_otp_event(otp_data)
-                    except Exception as sync_error:
-                        self.logger.error(f"Failed to sync OTP to RethinkDB: {sync_error}")
 
             # Send OTP via SMS
             if not self.aws_sms_service:

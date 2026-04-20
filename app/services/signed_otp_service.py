@@ -52,7 +52,6 @@ class SignedOTPService:
         self.otp_service = OTPService(
             unique_random_generator=None,  # Will be initialized by OTPService
             otp_repository=None,  # Will be initialized by OTPService
-            otp_sync_service=None,  # RethinkDB OTP sync removed
             otp_broadcast_service=self.otp_broadcast_service
         )
 
