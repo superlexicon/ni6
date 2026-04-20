@@ -39,32 +39,33 @@ class OTPRepository(BaseRepository):
                         mobile = otp_data['mobile_number']
 
                         # Try UPDATE first with conditional SET for encrypted_secret_share
-                        # Build update data with conditional SET logic
+                        # Build update data with conditional SET logic using positional parameters
                         update_items = []
-                        update_params = {}
+                        update_values = []
                         for k, v in otp_data.items():
                             if k == 'mobile_number':
                                 continue  # Skip mobile_number in SET clause
                             elif k == 'encrypted_secret_share':
                                 # Only update encrypted_secret_share if new value is NOT NULL
-                                update_items.append(f"{k} = CASE WHEN %({k})s IS NOT NULL THEN %({k})s ELSE {k} END")
+                                update_items.append(f"{k} = CASE WHEN %s IS NOT NULL THEN %s ELSE {k} END")
+                                update_values.extend([v, v])
                             else:
-                                update_items.append(f"{k} = %({k})s")
-                            update_params[k] = v
+                                update_items.append(f"{k} = %s")
+                                update_values.append(v)
 
                         if update_items:
                             set_clause = ", ".join(update_items)
-                            update_params['identifier'] = mobile
+                            update_values.append(mobile)  # For WHERE clause
 
                             # Try UPDATE first
                             update_query = f"""
                                 UPDATE otp
                                 SET {set_clause}, updated_at = CURRENT_TIMESTAMP
-                                WHERE mobile_number = %(identifier)s
+                                WHERE mobile_number = %s
                             """
 
                             with conn.cursor(buffered=True) as cursor:
-                                cursor.execute(update_query, update_params)
+                                cursor.execute(update_query, tuple(update_values))
                                 conn.commit()
                                 if cursor.rowcount > 0:
                                     # UPDATE succeeded - fetch and return the updated record
@@ -86,23 +87,24 @@ class OTPRepository(BaseRepository):
                         # Build dynamic INSERT query
                         base_fields = ['mobile_number', 'random_number', 'otp_id', 'delivery_method',
                                       'expires_at', 'attempts', 'max_attempts', 'is_verified']
-                        base_values = ['%(mobile_number)s', '%(random_number)s', '%(otp_id)s',
-                                      '%(delivery_method)s', '%(expires_at)s', '%(attempts)s', '%(max_attempts)s',
-                                      '%(is_verified)s']
+                        insert_values = [otp_data.get('mobile_number'), otp_data.get('random_number'),
+                                        otp_data.get('otp_id'), otp_data.get('delivery_method'),
+                                        otp_data.get('expires_at'), otp_data.get('attempts', 0),
+                                        otp_data.get('max_attempts', 3), otp_data.get('is_verified', False)]
 
                         # Add optional fields if provided
                         optional_fields = ['public_key', 'country_code', 'encrypted_secret_share', 'device_id', 'api_url']
                         for field in optional_fields:
-                            if field in otp_data and otp_data[field] is not None:
+                            if field in otp_data and otp_data.get(field) is not None:
                                 base_fields.append(field)
-                                base_values.append(f'%({field})s')
+                                insert_values.append(otp_data[field])
 
                         fields_str = ', '.join(base_fields)
-                        values_str = ', '.join(base_values)
+                        placeholders = ', '.join(['%s'] * len(base_fields))
 
                         query = f"""
                             INSERT INTO otp ({fields_str})
-                            VALUES ({values_str})
+                            VALUES ({placeholders})
                         """
                     else:
                         # Check if this is public_key based OTP (no mobile_number, no email)
@@ -114,27 +116,27 @@ class OTPRepository(BaseRepository):
                                 logger.debug(f"Updating existing OTP for public_key: {otp_data['public_key'][:16]}...")
                                 return self.update_otp_by_public_key(otp_data['public_key'], otp_data)
 
-                            # Build dynamic INSERT query (similar to mobile_number logic)
+                            # Build dynamic INSERT query (using positional parameters)
                             base_fields = ['public_key', 'random_number', 'otp_id', 'delivery_method',
                                           'expires_at', 'attempts', 'max_attempts', 'is_verified']
-                            base_values = ['%(public_key)s', '%(random_number)s', '%(otp_id)s',
-                                          '%(delivery_method)s', '%(expires_at)s', '%(attempts)s', '%(max_attempts)s',
-                                          '%(is_verified)s']
+                            insert_values = [otp_data.get('public_key'), otp_data.get('random_number'),
+                                            otp_data.get('otp_id'), otp_data.get('delivery_method'),
+                                            otp_data.get('expires_at'), otp_data.get('attempts', 0),
+                                            otp_data.get('max_attempts', 3), otp_data.get('is_verified', False)]
 
                             # Add optional fields if provided
                             optional_fields = ['country_code', 'encrypted_secret_share', 'device_id', 'api_url']
                             for field in optional_fields:
-                                if field in otp_data and otp_data[field] is not None:
+                                if field in otp_data and otp_data.get(field) is not None:
                                     base_fields.append(field)
-                                    base_values.append(f'%({field})s')
+                                    insert_values.append(otp_data[field])
 
                             fields_str = ', '.join(base_fields)
-                            values_str = ', '.join(base_values)
-                            # select_fields built later based on base_fields
+                            placeholders = ', '.join(['%s'] * len(base_fields))
 
                             query = f"""
                                 INSERT INTO otp ({fields_str})
-                                VALUES ({values_str})
+                                VALUES ({placeholders})
                             """
                         else:
                             # Email OTP (legacy) - keep existing logic
@@ -144,11 +146,18 @@ class OTPRepository(BaseRepository):
 
                             query = """
                                 INSERT INTO otp (email, random_number)
-                                VALUES (%(email)s, %(random_number)s)
+                                VALUES (%s, %s)
                             """
+                            insert_values = [otp_data['email'], otp_data['random_number']]
 
                     with conn.cursor(dictionary=True, buffered=True) as cursor:
-                        cursor.execute(query, otp_data)
+                        # Execute query with appropriate parameters
+                        if 'mobile_number' in otp_data and otp_data['mobile_number']:
+                            cursor.execute(query, tuple(insert_values))
+                        elif 'public_key' in otp_data and otp_data['public_key']:
+                            cursor.execute(query, tuple(insert_values))
+                        else:
+                            cursor.execute(query, tuple(insert_values))
                         conn.commit()
 
                         # Fetch the inserted record via separate SELECT (MySQL doesn't support RETURNING)
@@ -401,14 +410,18 @@ class OTPRepository(BaseRepository):
         # Build SET clause with special handling for encrypted_secret_share
         # Use MySQL's conditional assignment to preserve existing value when new value is NULL
         set_items = []
-        for k in update_data.keys():
+        update_values = []
+        for k, v in update_data.items():
             if k == 'encrypted_secret_share':
                 # Only update encrypted_secret_share if new value is NOT NULL
                 # This prevents broadcasts from clearing the secret share
-                set_items.append(f"{k} = CASE WHEN %({k})s IS NOT NULL THEN %({k})s ELSE {k} END")
+                set_items.append(f"{k} = CASE WHEN %s IS NOT NULL THEN %s ELSE {k} END")
+                update_values.extend([v, v])
             else:
-                set_items.append(f"{k} = %({k})s")
+                set_items.append(f"{k} = %s")
+                update_values.append(v)
         set_clause = ", ".join(set_items)
+        update_values.append(identifier)  # For WHERE clause
 
         # Include new columns in returning fields
         returning_fields = "id, email, mobile_number, country_code, public_key, encrypted_secret_share, device_id, api_url, random_number, otp_id, delivery_method, expires_at, attempts, max_attempts, is_verified, created_at, updated_at"
@@ -416,24 +429,21 @@ class OTPRepository(BaseRepository):
         query = f"""
             UPDATE otp
             SET {set_clause}, updated_at = CURRENT_TIMESTAMP
-            WHERE {identifier_field} = %(identifier)s
+            WHERE {identifier_field} = %s
         """
-
-        params = update_data.copy()
-        params['identifier'] = identifier
 
         try:
             with get_db_connection_context() as conn:
                 with conn.cursor(dictionary=True) as cursor:
-                    cursor.execute(query, params)
+                    cursor.execute(query, tuple(update_values))
                     conn.commit()
                     # Fetch the updated record (MariaDB doesn't support UPDATE ... RETURNING)
                     select_query = f"""
                         SELECT {returning_fields}
                         FROM otp
-                        WHERE {identifier_field} = %(identifier)s
+                        WHERE {identifier_field} = %s
                     """
-                    cursor.execute(select_query, params)
+                    cursor.execute(select_query, (identifier,))
                     result = cursor.fetchone()
                     if result:
                         logger.debug(f"Updated OTP record: {result.get('id')}")
@@ -460,28 +470,29 @@ class OTPRepository(BaseRepository):
 
         # Build SET clause with special handling for encrypted_secret_share
         set_items = []
-        for k in update_data.keys():
+        update_values = []
+        for k, v in update_data.items():
             if k == 'encrypted_secret_share':
-                set_items.append(f"{k} = CASE WHEN %({k})s IS NOT NULL THEN %({k})s ELSE {k} END")
+                set_items.append(f"{k} = CASE WHEN %s IS NOT NULL THEN %s ELSE {k} END")
+                update_values.extend([v, v])
             else:
-                set_items.append(f"{k} = %({k})s")
+                set_items.append(f"{k} = %s")
+                update_values.append(v)
         set_clause = ", ".join(set_items)
+        update_values.append(public_key)  # For WHERE clause
 
         returning_fields = "id, email, mobile_number, country_code, public_key, encrypted_secret_share, device_id, api_url, random_number, otp_id, delivery_method, expires_at, attempts, max_attempts, is_verified, created_at, updated_at"
 
         query = f"""
             UPDATE otp
             SET {set_clause}, updated_at = CURRENT_TIMESTAMP
-            WHERE public_key = %(public_key)s
+            WHERE public_key = %s
         """
 
         try:
             with get_db_connection_context() as conn:
                 with conn.cursor(dictionary=True) as cursor:
-                    # Create params dict with all update_data values
-                    params = update_data.copy()
-                    params['public_key'] = public_key
-                    cursor.execute(query, params)
+                    cursor.execute(query, tuple(update_values))
                     conn.commit()
                     # Fetch the updated record
                     select_query = f"""
