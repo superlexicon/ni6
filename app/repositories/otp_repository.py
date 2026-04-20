@@ -84,9 +84,9 @@ class OTPRepository(BaseRepository):
                         logger.debug(f"No existing OTP found for {mobile}, proceeding with INSERT")
 
                         # Build dynamic INSERT query
-                        base_fields = ['id', 'mobile_number', 'random_number', 'otp_id', 'delivery_method',
+                        base_fields = ['mobile_number', 'random_number', 'otp_id', 'delivery_method',
                                       'expires_at', 'attempts', 'max_attempts', 'is_verified']
-                        base_values = ['UUID()', '%(mobile_number)s', '%(random_number)s', '%(otp_id)s',
+                        base_values = ['%(mobile_number)s', '%(random_number)s', '%(otp_id)s',
                                       '%(delivery_method)s', '%(expires_at)s', '%(attempts)s', '%(max_attempts)s',
                                       '%(is_verified)s']
 
@@ -115,9 +115,9 @@ class OTPRepository(BaseRepository):
                                 return self.update_otp_by_public_key(otp_data['public_key'], otp_data)
 
                             # Build dynamic INSERT query (similar to mobile_number logic)
-                            base_fields = ['id', 'public_key', 'random_number', 'otp_id', 'delivery_method',
+                            base_fields = ['public_key', 'random_number', 'otp_id', 'delivery_method',
                                           'expires_at', 'attempts', 'max_attempts', 'is_verified']
-                            base_values = ['UUID()', '%(public_key)s', '%(random_number)s', '%(otp_id)s',
+                            base_values = ['%(public_key)s', '%(random_number)s', '%(otp_id)s',
                                           '%(delivery_method)s', '%(expires_at)s', '%(attempts)s', '%(max_attempts)s',
                                           '%(is_verified)s']
 
@@ -143,8 +143,8 @@ class OTPRepository(BaseRepository):
                                 return self.update_otp(otp_data['email'], otp_data)
 
                             query = """
-                                INSERT INTO otp (id, email, random_number)
-                                VALUES (UUID(), %(email)s, %(random_number)s)
+                                INSERT INTO otp (email, random_number)
+                                VALUES (%(email)s, %(random_number)s)
                             """
 
                     with conn.cursor(dictionary=True, buffered=True) as cursor:
