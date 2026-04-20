@@ -192,6 +192,8 @@ async def sync_otps(
     up after an OTP expired and still needs to verify against it.
     Expiry should only be checked during OTP verification, not during sync.
 
+    Only returns OTPs that have public_key and random_number (complete OTPs).
+
     Returns:
         {"otps": [...], "count": N}
     """
@@ -199,9 +201,13 @@ async def sync_otps(
 
     # Get all unverified OTPs (regardless of expiry)
     # Expiry check happens during verification, not here
-    otps = otp_repo.get_all_unverified_otps()
+    all_otps = otp_repo.get_all_unverified_otps()
 
-    logger.info(f"Returning {len(otps)} unverified OTPs for sync")
+    # Filter to only sync OTPs that have public_key AND random_number
+    # OTPs without random_number are incomplete and shouldn't be synced
+    otps = [otp for otp in all_otps if otp.get('public_key') and otp.get('random_number')]
+
+    logger.info(f"Returning {len(otps)} unverified OTPs for sync (filtered from {len(all_otps)} total)")
 
     return {
         "otps": [_serialize_otp(otp) for otp in otps],
@@ -255,12 +261,17 @@ async def receive_otp_sync(
         otp_data = event.get("otp_data", {})
         public_key = otp_data.get('public_key')
 
+        logger.info(f"🔍 Received OTP data keys: {list(otp_data.keys())}")
+        logger.info(f"🔍 Received OTP data: {otp_data}")
+
         if not public_key:
             # Only sync OTPs with public_key
             return {"status": "skipped", "reason": "no-public-key"}
 
-        if not otp_data.get('random_number'):
+        random_number = otp_data.get('random_number')
+        if not random_number or random_number is None:
             # Only sync OTPs that have random_number (required for verification)
+            logger.warning(f"⚠️ Skipping OTP without random_number: public_key={public_key[:16]}..., random_number={random_number}")
             return {"status": "skipped", "reason": "no-random-number"}
 
         # Deserialize datetime fields from ISO format

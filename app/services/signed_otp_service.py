@@ -214,26 +214,9 @@ class SignedOTPService:
                 else:
                     self.logger.info(f"Updating existing OTP record for public_key: {client_public_key[:16]}...")
                     otp_repo.update_otp_by_public_key(client_public_key, otp_update_data)
-            elif not generate_otp:
-                # No existing OTP and not generating OTP - create record with encrypted_secret_share now
-                # This ensures each node stores its own secret share before broadcast arrives
-                otp_create_data = {
-                    'mobile_number': full_mobile_number,
-                    'public_key': client_public_key,
-                    'country_code': country_code,
-                    'encrypted_secret_share': encrypted_for_storage,
-                    'device_id': device_id,
-                    'api_url': api_url,
-                    'is_verified': False,
-                    'delivery_method': 'sms',  # Will be sent by another node
-                    'attempts': 0,
-                    'max_attempts': 3
-                }
-                otp_repo.create_otp(otp_create_data)
-                if full_mobile_number:
-                    self.logger.info(f"Created OTP record with encrypted_secret_share for mobile_number: {full_mobile_number} (generate_otp=false)")
-                else:
-                    self.logger.info(f"Created OTP record with encrypted_secret_share for public_key: {client_public_key[:16]}... (generate_otp=false)")
+            # NOTE: When generate_otp=False, we do NOT create an OTP record
+            # OTP table is only populated when there's an actual OTP code (generate_otp=True)
+            # The encrypted_secret_share is already stored in user_keys_pending table
 
             # Step 6: Generate OTP and send via SMS (only if generate_otp is True)
             # Note: generate_and_send_otp_via_sms will create the OTP record if it doesn't exist

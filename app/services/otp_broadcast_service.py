@@ -48,6 +48,7 @@ class OTPBroadcastService:
         Args:
             otp_data: OTP data dict containing mobile_number, random_number, etc.
         """
+        self.logger.info(f"📤 Broadcasting OTP created: keys={list(otp_data.keys())}, random_number={otp_data.get('random_number')}")
         await self._broadcast_event({
             "event_type": "create",
             "instance_id": self.instance_id,
