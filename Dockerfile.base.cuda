@@ -54,6 +54,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpng-dev \
     libjpeg-dev \
     libtiff-dev \
+    libgles2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Python 3.11 as default and install pip/Poetry
