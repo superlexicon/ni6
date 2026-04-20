@@ -1,389 +1,297 @@
+"""
+OTP Service - Public Key Only
 
-from typing import Optional, TYPE_CHECKING, Dict, Any
-from datetime import datetime, timedelta, timezone
-import uuid
+Unified service for OTP generation, verification, and signed request processing.
+"""
+
 import asyncio
+import uuid
+from typing import Dict, Any, Optional
+from datetime import datetime, timedelta, timezone
 
-from app.core import logger
-from app.dto import OTPResponse
+from app.core.logger import get_logger
+from app.core.key.ecdsa_recovery import ECDSARecovery
+from app.core.key.hybrid_crypto import HybridCrypto
+from app.repositories.user_identity_repository import UserIdentityRepository
+from app.repositories.user_key_repository import UserKeyRepository
+from app.repositories.otp_repository import OTPRepository
 from app.utils.unique_random_generator import UniqueRandomGenerator
-from app.repositories import OTPRepository
-from app.services.aws_sms_service import AWSSMSService
 from app.config.aws_config import aws_settings
-
-if TYPE_CHECKING:
-    from app.services.otp_broadcast_service import OTPBroadcastService
 
 
 class OTPService:
+    """Unified OTP service using public_key only."""
+
     def __init__(self,
-                 unique_random_generator: UniqueRandomGenerator,
-                 otp_repository: OTPRepository,
-                 aws_sms_service: Optional[AWSSMSService] = None,
+                 unique_random_generator: UniqueRandomGenerator = None,
+                 otp_repository: OTPRepository = None,
                  otp_broadcast_service: Optional["OTPBroadcastService"] = None):
-        self.logger = logger
-        self.unique_random_generator = unique_random_generator
-        self.otp_repository = otp_repository
-        self.aws_sms_service = aws_sms_service
-        self.otp_broadcast_service = otp_broadcast_service
+        from app.services.otp_broadcast_service import otp_broadcast_service as broadcast_svc
 
-        # Initialize AWS SMS service if not provided
-        if not self.aws_sms_service:
-            try:
-                self.aws_sms_service = AWSSMSService(
-                    aws_access_key_id=aws_settings.aws_access_key_id,
-                    aws_secret_access_key=aws_settings.aws_secret_access_key,
-                    aws_region=aws_settings.aws_region,
-                    sns_topic_arn=aws_settings.sns_topic_arn
-                )
-                self.logger.info("AWS SMS service initialized successfully")
-            except Exception as e:
-                self.logger.error(f"Failed to initialize AWS SMS service: {str(e)}")
-                self.aws_sms_service = None
+        self.user_identity_repo = UserIdentityRepository()
+        self.user_key_repo = UserKeyRepository()
+        self.otp_repo = otp_repository if otp_repository else OTPRepository()
+        self.hybrid_crypto = HybridCrypto()
+        self.logger = get_logger()
+        self.unique_random_generator = unique_random_generator if unique_random_generator else UniqueRandomGenerator()
 
-    def generate_otp_without_sms(
+        # OTP broadcast service
+        try:
+            self.otp_broadcast_service = otp_broadcast_service if otp_broadcast_service else broadcast_svc
+            self.logger.info("OTP broadcast service initialized")
+        except Exception as e:
+            self.logger.warning(f"OTP broadcast service not available: {e}")
+            self.otp_broadcast_service = None
+
+    async def process_signed_request(
         self,
-        length: int,
-        client_public_key: Optional[str] = None,
-        gesture_mode: bool = False
+        client_public_key: str,
+        secret_share: Optional[str] = None,
+        secret_share_encrypted: Optional[Dict[str, str]] = None,
+        timestamp: int = 0,
+        signature_r: str = "",
+        signature_s: str = "",
+        target_server_public_key: str = "",
+        otp_length: int = 6,
+        generate_otp: bool = True,
+        gesture_mode: bool = False,
+        device_id: Optional[str] = None,
+        api_url: Optional[str] = None,
+        mobile_number: Optional[str] = None,
+        country_code: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Generate OTP code without sending SMS (for encrypted response delivery).
-
-        Args:
-            length: Length of OTP code to generate
-            client_public_key: Client's public key for security binding
-            gesture_mode: If True, restrict OTP to digits 1-5 only
+        Process signed OTP request (public_key only).
 
         Returns:
-            Dict with OTP details
-        """
-        try:
-            # Generate new OTP code using secure random generator
-            allowed_digits = '12345' if gesture_mode else None
-            otp_code = self.unique_random_generator.generate_random_number(length, allowed_digits=allowed_digits)
-
-            # Generate unique OTP request ID
-            otp_id = str(uuid.uuid4())
-
-            # Calculate expiry time (use UTC)
-            expiry_minutes = aws_settings.otp_expiry_minutes
-            expires_at = datetime.now(timezone.utc) + timedelta(minutes=expiry_minutes)
-
-            return {
-                'otp': otp_code,
-                'otp_id': otp_id,
-                'expires_at': expires_at,
-                'sent_at': datetime.now(timezone.utc),
-                'delivery_method': 'encrypted_response',
-                'otp_length': length
+            {
+                'success': bool,
+                'user_identity_id': str (if successful),
+                'encrypted_response': dict (if successful),
+                'error': str (if failed)
             }
-        except Exception as e:
-            self.logger.error(f"Failed to generate OTP without SMS: {type(e).__name__}")
-            raise
-
-    async def generate_and_send_otp_via_sms(
-        self,
-        length: int,
-        mobile_number: str,
-        client_public_key: Optional[str] = None,
-        country_code: Optional[str] = None,
-        expiry_minutes: Optional[int] = None,
-        gesture_mode: bool = False
-    ) -> OTPResponse:
-        """
-        Generate OTP code and send it via AWS SMS.
-
-        Args:
-            length: Length of OTP code to generate
-            mobile_number: Mobile number to send OTP to (with country code)
-            client_public_key: Client's public key for security binding
-            country_code: Country code for the mobile number (e.g., '+1', '+44')
-            expiry_minutes: Optional custom expiry time
-            gesture_mode: If True, restrict OTP to digits 1-5 only (for hand gesture verification, 0 mis-detected as 1)
-
-        Returns:
-            OTPResponse with delivery confirmation (no actual OTP returned for security)
         """
         try:
-            # Check if there's already a valid (unexpired and unverified) OTP for this mobile number
-            existing_valid_otp = self.otp_repository.get_valid_otp_by_mobile_number(mobile_number)
+            # Step 1: Verify signature
+            message = f"otp:{timestamp}"
+            if not ECDSARecovery.verify_signature(
+                message=message,
+                r=signature_r,
+                s=signature_s,
+                public_key=client_public_key
+            ):
+                self.logger.warning(f"Signature verification failed for {client_public_key[:16]}...")
+                return {'success': False, 'error': 'Invalid signature'}
 
-            # Determine if we should reuse existing OTP or generate a new one
-            should_generate_new = True
-            existing_valid_otp = self.otp_repository.get_valid_otp_by_mobile_number(mobile_number)
+            self.logger.info(f"✅ Signature verified for {client_public_key[:16]}...")
 
-            if existing_valid_otp:
-                otp_code = existing_valid_otp['random_number']
+            # Step 2: Decrypt and encrypt secret_share
+            actual_secret_share = None
+            if secret_share_encrypted:
+                from app.core.key.secp256k1 import KeyPair
+                from app.services.ecies_encryption_service import get_ecies_encryption_service
+                server_keys = KeyPair.generate_secp256k1_keys()
+                ecies_service = get_ecies_encryption_service()
+                actual_secret_share = ecies_service.decrypt_message_from_client(
+                    envelope=secret_share_encrypted,
+                    server_private_key=server_keys.private_key
+                )
+            elif secret_share:
+                actual_secret_share = secret_share
 
-                # Check if existing OTP is compatible with gesture_mode
-                if gesture_mode:
-                    # For gesture mode, OTP must only contain digits 1-5
-                    if any(d not in '12345' for d in otp_code):
-                        self.logger.info(f"Existing OTP has digits 6-9 but gesture_mode=True, regenerating...")
-                        # Delete the old OTP and generate a new one
-                        self.otp_repository.delete_otp(mobile_number)
-                        should_generate_new = True
-                    else:
-                        # Reuse existing valid OTP - calculate ACTUAL remaining time
-                        otp_id = existing_valid_otp['otp_id']
-                        expires_at = existing_valid_otp['expires_at']
-                        # Normalize timezone: treat naive datetimes as UTC
-                        if expires_at.tzinfo is None:
-                            expires_at = expires_at.replace(tzinfo=timezone.utc)
-                        remaining_delta = expires_at - datetime.now(timezone.utc)
-                        remaining_seconds = int(remaining_delta.total_seconds())
-                        remaining_minutes = remaining_seconds // 60
-                        remaining_secs = remaining_seconds % 60
+            # Encrypt with NaCl for storage
+            encrypted_for_storage = None
+            if actual_secret_share:
+                from app.core.key_injection.key_injection_manager import key_injection_manager
+                encrypted_for_storage = key_injection_manager.encrypt_data(actual_secret_share)
 
-                        # Format as "X minute(s)" or "X minute(s) Y second(s)"
-                        if remaining_minutes > 0 and remaining_secs > 0:
-                            min_text = "minute" if remaining_minutes == 1 else "minutes"
-                            sec_text = "second" if remaining_secs == 1 else "seconds"
-                            expiry_text = f"{remaining_minutes} {min_text} {remaining_secs} {sec_text}"
-                        elif remaining_minutes > 0:
-                            min_text = "minute" if remaining_minutes == 1 else "minutes"
-                            expiry_text = f"{remaining_minutes} {min_text}"
-                        else:
-                            sec_text = "second" if remaining_secs == 1 else "seconds"
-                            expiry_text = f"{remaining_secs} {sec_text}"
+            # Step 3: Check existing user
+            existing_user = self.user_key_repo.get_key_by_public_key(client_public_key)
+            user_identity_id = existing_user.get('user_identity_id') if existing_user else None
+            if existing_user:
+                self.logger.info(f"User already verified: {user_identity_id[:16]}...")
 
-                        should_generate_new = False
-                        self.logger.debug(f"Reusing existing valid OTP for mobile number: {mobile_number}, expires at: {expires_at}")
-                else:
-                    # Not gesture mode, reuse any existing OTP - calculate ACTUAL remaining time
-                    otp_id = existing_valid_otp['otp_id']
-                    expires_at = existing_valid_otp['expires_at']
-                    # Normalize timezone: treat naive datetimes as UTC
-                    if expires_at.tzinfo is None:
-                        expires_at = expires_at.replace(tzinfo=timezone.utc)
-                    remaining_delta = expires_at - datetime.now(timezone.utc)
-                    remaining_seconds = int(remaining_delta.total_seconds())
-                    remaining_minutes = remaining_seconds // 60
-                    remaining_secs = remaining_seconds % 60
+            # Step 4: Store in user_keys_pending
+            from app.repositories.user_keys_pending_repository import UserKeysPendingRepository
+            pending_key_repo = UserKeysPendingRepository()
+            pending_key_repo.create_or_update_pending_key({
+                'user_public_key': client_public_key,
+                'encrypted_secret_share': encrypted_for_storage,
+                'device_id': device_id,
+                'api_url': api_url
+            })
+            self.logger.info(f"✅ Stored in user_keys_pending for {client_public_key[:16]}...")
 
-                    # Format as "X minute(s)" or "X minute(s) Y second(s)"
-                    if remaining_minutes > 0 and remaining_secs > 0:
-                        min_text = "minute" if remaining_minutes == 1 else "minutes"
-                        sec_text = "second" if remaining_secs == 1 else "seconds"
-                        expiry_text = f"{remaining_minutes} {min_text} {remaining_secs} {sec_text}"
-                    elif remaining_minutes > 0:
-                        min_text = "minute" if remaining_minutes == 1 else "minutes"
-                        expiry_text = f"{remaining_minutes} {min_text}"
-                    else:
-                        sec_text = "second" if remaining_secs == 1 else "seconds"
-                        expiry_text = f"{remaining_secs} {sec_text}"
+            # Step 5: Generate OTP (if requested)
+            otp_data = {'otp_id': None, 'expires_at': None, 'sent_at': None, 'otp': None}
 
-                    should_generate_new = False
-                    self.logger.debug(f"Reusing existing valid OTP for mobile number: {mobile_number}, expires at: {expires_at}")
+            if generate_otp:
+                otp_result = self._generate_otp(
+                    length=otp_length,
+                    client_public_key=client_public_key,
+                    gesture_mode=gesture_mode
+                )
 
-            if should_generate_new:
-                # No valid OTP found or existing OTP incompatible - clean up any expired/verified OTP
-                existing_stale = self.otp_repository.get_otp_by_mobile_number(mobile_number)
-                if existing_stale:
-                    self.otp_repository.delete_otp(mobile_number)
-                    self.logger.debug(f"Deleted stale OTP for mobile_number: {mobile_number}")
-
-                # Generate new OTP code using secure random generator
-                # For gesture mode, restrict to digits 1-5 (single-hand finger representation, 0 mis-detected as 1)
-                allowed_digits = '12345' if gesture_mode else None
-                otp_code = self.unique_random_generator.generate_random_number(length, allowed_digits=allowed_digits)
-
-                # Generate unique OTP request ID
-                otp_id = str(uuid.uuid4())
-
-                # Calculate expiry time (use UTC)
-                expiry_minutes = expiry_minutes or aws_settings.otp_expiry_minutes
-                expires_at = datetime.now(timezone.utc) + timedelta(minutes=expiry_minutes)
-
-                # Format expiry time for new OTP (e.g., "30 minutes")
-                min_text = "minute" if expiry_minutes == 1 else "minutes"
-                expiry_text = f"{expiry_minutes} {min_text}"
-
-                # Store OTP in database with new schema fields
-                otp_data = {
-                    'mobile_number': mobile_number,
-                    'country_code': country_code,
-                    'random_number': otp_code,
-                    'otp_id': otp_id,
-                    'expires_at': expires_at,
-                    'delivery_method': 'sms',
+                # Prepare OTP data for database and broadcast
+                otp_broadcast_data = {
+                    'public_key': client_public_key,
+                    'random_number': otp_result['otp'],
+                    'otp_id': otp_result['otp_id'],
+                    'expires_at': otp_result['expires_at'],
+                    'delivery_method': 'encrypted_response',
                     'attempts': 0,
                     'max_attempts': 3,
                     'is_verified': False
                 }
+                if encrypted_for_storage is not None:
+                    otp_broadcast_data['encrypted_secret_share'] = encrypted_for_storage
+                if device_id is not None:
+                    otp_broadcast_data['device_id'] = device_id
+                if api_url is not None:
+                    otp_broadcast_data['api_url'] = api_url
 
-                # Add client public key if provided for linking to selfie verification
-                if client_public_key:
-                    otp_data['public_key'] = client_public_key
-
-                # Check if mobile number already has an OTP (expired or verified)
-                existing_otp = self.otp_repository.get_otp_by_mobile_number(mobile_number)
-                if existing_otp:
-                    self.otp_repository.update_otp(mobile_number, otp_data)
-                    self.logger.debug(f"Updated existing OTP for mobile number: {mobile_number}")
+                # Check for existing OTP
+                existing_otp = self.otp_repo.get_unverified_otp_by_public_key(client_public_key)
+                if not existing_otp:
+                    self.otp_repo.create_otp(otp_broadcast_data)
+                    self.logger.info(f"Created OTP for {client_public_key[:16]}...")
                 else:
-                    self.otp_repository.create_otp(otp_data)
-                    self.logger.debug(f"Created new OTP for mobile number: {mobile_number}")
+                    self.otp_repo.update_otp_by_public_key(client_public_key, otp_broadcast_data)
+                    self.logger.info(f"Updated OTP for {client_public_key[:16]}...")
 
-                # Sync OTP to peer instances via HTTP broadcast
+                # Broadcast to peer instances
                 if self.otp_broadcast_service:
-                    try:
-                        # Create background task for broadcast (non-blocking)
-                        asyncio.create_task(self.otp_broadcast_service.broadcast_otp_created(otp_data))
-                    except Exception as sync_error:
-                        self.logger.error(f"Failed to broadcast OTP creation: {sync_error}")
-                        # Continue - local DB has the OTP, sync is best-effort
+                    self.logger.info(f"📢 Broadcasting OTP to peer instances")
+                    asyncio.create_task(self.otp_broadcast_service.broadcast_otp_created(otp_broadcast_data))
+                else:
+                    self.logger.warning("⚠️ OTP broadcast service not available")
 
-            # Send OTP via SMS
-            if not self.aws_sms_service:
-                raise RuntimeError("AWS SMS service not available - cannot send OTP")
-
-            # Format message with expiry time
-            message_template = aws_settings.otp_message_template.format(
-                otp_code=otp_code,
-                expiry_minutes=expiry_text
-            )
-
-            sms_result = await self.aws_sms_service.send_otp_sms(
-                mobile_number=mobile_number,
-                otp_code=otp_code,
-                message_template=message_template,
-                sender_id=aws_settings.sms_sender_id,
-                sms_type=aws_settings.sms_type
-            )
-
-            if not sms_result.get('success'):
-                # SMS delivery failed - we should consider cleaning up the stored OTP
-                error_msg = f"Failed to send SMS to {mobile_number}: {sms_result.get('error_message', 'Unknown error')}"
-                self.logger.error(error_msg)
-
-                # Delete the OTP since it couldn't be delivered
-                try:
-                    self.otp_repository.delete_otp(mobile_number)
-                except Exception as cleanup_error:
-                    self.logger.error(f"Failed to cleanup OTP after SMS failure: {str(cleanup_error)}")
-
-                raise RuntimeError(error_msg)
-
-            # Log successful delivery
-            self.logger.debug(f"OTP successfully sent via SMS to {mobile_number}, Message ID: {sms_result.get('message_id')}")
-
-            # Determine appropriate response message
-            if not should_generate_new:
-                response_message = f"Existing OTP resent to {mobile_number} (valid until {expires_at.strftime('%Y-%m-%d %H:%M:%S')} UTC)"
+                otp_data = {
+                    'otp_id': otp_result['otp_id'],
+                    'expires_at': otp_result['expires_at'],
+                    'sent_at': otp_result['sent_at'],
+                    'otp': otp_result['otp']
+                }
+                self.logger.info(f"✅ OTP generated for {client_public_key[:16]}...")
             else:
-                response_message = f"New OTP successfully sent to {mobile_number}"
+                self.logger.info(f"⏭️ Skipping OTP generation (generate_otp=False)")
 
-            # Return success response (without the actual OTP code)
-            return OTPResponse(
-                message=response_message,
-                mobile_number=mobile_number,
-                otp_length=length,
-                delivery_method="sms",
-                sent_at=datetime.now(timezone.utc),
-                otp_id=otp_id,
-                expires_at=expires_at,
-                random_number=None  # Explicitly set to None for security
+            # Step 6: Prepare and encrypt response
+            response_payload = {
+                'otp': otp_data.get('otp'),
+                'otp_id': otp_data.get('otp_id'),
+                'expires_at': otp_data.get('expires_at').isoformat() if otp_data.get('expires_at') else None,
+                'sent_at': otp_data.get('sent_at').isoformat() if otp_data.get('sent_at') else None,
+                'user_identity_id': user_identity_id
+            }
+
+            encrypted_response = self._encrypt_response(
+                payload=response_payload,
+                client_public_key=client_public_key
             )
+
+            self.logger.info(f"✅ Encrypted OTP response for {client_public_key[:16]}...")
+
+            return {
+                'success': True,
+                'user_identity_id': user_identity_id,
+                'encrypted_response': encrypted_response
+            }
 
         except Exception as e:
-            masked_number = f"+******{mobile_number[-4:]}" if mobile_number and len(mobile_number) > 4 else mobile_number
-            self.logger.error(f"Failed to generate and send OTP to {masked_number}: {type(e).__name__}")
-            raise
+            self.logger.error(f"Error processing signed OTP request: {str(e)}")
+            return {'success': False, 'error': f'Failed to process OTP request: {str(e)}'}
 
-    async def get_random_number(self, length: int, email: str) -> OTPResponse:
-        """
-        Legacy method for backward compatibility.
-
-        Args:
-            length: Length of OTP code to generate
-            email: Email address (legacy parameter)
-
-        Returns:
-            OTPResponse (legacy format)
-        """
-        # For backward compatibility, generate OTP but don't send via SMS
-        random_number = self.unique_random_generator.generate_random_number(length)
-
-        exists = self.otp_repository.otp_exists(email)
-        if exists:
-            self.otp_repository.update_otp(email, {
-                'random_number': random_number
-            })
-        else:
-            self.otp_repository.create_otp({
-                'email': email,
-                'random_number': random_number
-            })
-
-        # Return legacy response format
-        return OTPResponse(
-            message=f"Generated OTP code: {random_number} (legacy mode - not sent via SMS)",
-            mobile_number="N/A",
-            otp_length=length,
-            delivery_method="legacy",
-            random_number=random_number  # Include in legacy mode for compatibility
-        )
-
-    def verify_otp_from_selfie(
+    async def process_recovery_request(
         self,
-        mobile_number: str,
-        otp_code: str,
-        client_public_key: Optional[str] = None
-    ) -> dict:
+        client_public_key: str,
+        timestamp: int = 0,
+        signature_r: str = "",
+        signature_s: str = "",
+        target_server_public_key: str = "",
+        otp_length: int = 6,
+        generate_otp: bool = True,
+        gesture_mode: bool = False,
+        mobile_number: Optional[str] = None,
+        country_code: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
-        Verify OTP code extracted from selfie against stored value.
-        This method is called during selfie document processing.
-
-        Args:
-            mobile_number: Mobile number (optional, not required if otp_code provided)
-            otp_code: OTP code extracted from selfie via gesture detection
-            client_public_key: Optional client public key for additional verification
+        Process signed OTP request for recovery flow (no persistence).
 
         Returns:
-            Dict with verification result
+            {
+                'success': bool,
+                'encrypted_response': dict (if successful),
+                'error': str (if failed)
+            }
         """
         try:
-            # Primary lookup: by OTP code (most reliable - what we extracted from video)
-            if otp_code:
-                stored_otp = self.otp_repository.get_otp_by_otp_code(otp_code)
-                if stored_otp:
-                    self.logger.debug(
-                        f"Found OTP by code: {otp_code[:4]}*** "
-                        f"for mobile: {stored_otp.get('mobile_number')}"
-                    )
-                else:
-                    self.logger.warning(f"No valid OTP found for code: {otp_code[:4]}***")
-                    return {
-                        'valid': False,
-                        'message': 'OTP not found, expired, or already used',
-                        'otp_status': 'not_found'
-                    }
-            else:
-                # Fallback: lookup by mobile_number (for backward compatibility)
-                self.logger.debug(f"No otp_code provided, trying mobile_number lookup: {mobile_number}")
-                stored_otp = self.otp_repository.get_valid_otp_by_mobile_number(mobile_number)
-                if not stored_otp:
-                    all_otp = self.otp_repository.get_otp_by_mobile_number(mobile_number)
-                    if not all_otp:
-                        return {
-                            'valid': False,
-                            'message': 'No OTP found for this mobile number',
-                            'otp_status': 'not_found'
-                        }
-                    elif all_otp.get('is_verified'):
-                        return {
-                            'valid': False,
-                            'message': 'OTP has already been used',
-                            'otp_status': 'already_used'
-                        }
-                    else:
-                        return {
-                            'valid': False,
-                            'message': f'OTP has expired',
-                            'otp_status': 'expired'
-                        }
+            # Verify signature
+            message = f"otp:{timestamp}"
+            if not ECDSARecovery.verify_signature(
+                message=message,
+                r=signature_r,
+                s=signature_s,
+                public_key=client_public_key
+            ):
+                return {'success': False, 'error': 'Invalid signature'}
+
+            self.logger.info(f"✅ Recovery signature verified for {client_public_key[:16]}...")
+
+            # Generate OTP (if requested)
+            otp_data = {'otp_id': None, 'expires_at': None, 'sent_at': None, 'otp': None}
+
+            if generate_otp:
+                otp_result = self._generate_otp(
+                    length=otp_length,
+                    client_public_key=client_public_key,
+                    gesture_mode=gesture_mode
+                )
+                otp_data = {
+                    'otp_id': otp_result['otp_id'],
+                    'expires_at': otp_result['expires_at'],
+                    'sent_at': otp_result['sent_at'],
+                    'otp': otp_result['otp']
+                }
+                self.logger.info(f"✅ Recovery OTP generated for {client_public_key[:16]}...")
+
+            # Prepare and encrypt response (no user_identity_id for recovery)
+            response_payload = {
+                'otp': otp_data.get('otp'),
+                'otp_id': otp_data.get('otp_id'),
+                'expires_at': otp_data.get('expires_at').isoformat() if otp_data.get('expires_at') else None,
+                'sent_at': otp_data.get('sent_at').isoformat() if otp_data.get('sent_at') else None,
+            }
+
+            encrypted_response = self._encrypt_response(
+                payload=response_payload,
+                client_public_key=client_public_key
+            )
+
+            return {'success': True, 'encrypted_response': encrypted_response}
+
+        except Exception as e:
+            self.logger.error(f"Error processing recovery OTP request: {str(e)}")
+            return {'success': False, 'error': f'Failed to process recovery OTP request: {str(e)}'}
+
+    def verify_otp(
+        self,
+        public_key: str,
+        otp_code: str
+    ) -> dict:
+        """
+        Verify OTP code for public_key.
+        """
+        try:
+            # Get OTP by public_key
+            stored_otp = self.otp_repo.get_unverified_otp_by_public_key(public_key)
+
+            if not stored_otp:
+                return {
+                    'valid': False,
+                    'message': 'OTP not found, expired, or already used',
+                    'otp_status': 'not_found'
+                }
 
             # Check attempts limit
             attempts = stored_otp.get('attempts', 0)
@@ -395,167 +303,106 @@ class OTPService:
                     'otp_status': 'max_attempts_exceeded'
                 }
 
-            # Determine identifier for OTP operations
-            # Prioritize stored_otp's mobile_number (from DB lookup) over potentially empty parameter
-            identifier_for_operations = (
-                stored_otp.get('mobile_number') or
-                stored_otp.get('email') or
-                mobile_number or
-                client_public_key
-            )
-
-            # Increment attempts counter
-            self.otp_repository.increment_otp_attempts(identifier_for_operations)
+            # Increment attempts
+            self.otp_repo.increment_otp_attempts(public_key, identifier_type='public_key')
 
             # Verify OTP code
             if stored_otp.get('random_number') == otp_code:
-                # Delete OTP after successful verification (one-time use)
-                self.otp_repository.delete_otp(identifier_for_operations)
+                # Mark as verified
+                self.otp_repo.mark_otp_verified_by_public_key(public_key)
 
-                # Broadcast deletion to peer instances
+                # Broadcast verification to peer instances
                 if self.otp_broadcast_service:
                     try:
-                        public_key = stored_otp.get('public_key')
-                        if public_key:
-                            asyncio.create_task(self.otp_broadcast_service.broadcast_otp_deleted(public_key, "public_key"))
+                        asyncio.create_task(self.otp_broadcast_service.broadcast_otp_verified(public_key, "public_key"))
                     except Exception as sync_error:
-                        self.logger.error(f"Failed to broadcast OTP deletion: {sync_error}")
+                        self.logger.error(f"Failed to broadcast OTP verification: {sync_error}")
 
-                self.logger.debug(f"OTP successfully verified and deleted via selfie processing")
+                self.logger.info(f"✅ OTP verified for {public_key[:16]}...")
 
                 return {
                     'valid': True,
-                    'message': 'OTP verified successfully via selfie',
+                    'message': 'OTP verified successfully',
                     'otp_status': 'verified',
-                    'otp_code': stored_otp.get('random_number'),
+                    'public_key': public_key,
                     'otp_id': stored_otp.get('otp_id'),
                     'expires_at': stored_otp.get('expires_at')
                 }
             else:
                 return {
                     'valid': False,
-                    'message': f'Invalid OTP code found in selfie. Expected: {stored_otp.get("random_number")}, Got: {otp_code}',
-                    'otp_status': 'invalid_code',
-                    'expected_otp': stored_otp.get('random_number')
+                    'message': f'Invalid OTP code',
+                    'otp_status': 'invalid_code'
                 }
 
         except Exception as e:
-            masked_number = f"+******{mobile_number[-4:]}" if mobile_number and len(mobile_number) > 4 else mobile_number
-            self.logger.error(f"OTP verification failed for {masked_number}: {type(e).__name__}")
+            self.logger.error(f"OTP verification failed for {public_key[:16]}...: {type(e).__name__}")
             return {
                 'valid': False,
                 'message': 'Verification failed due to server error',
                 'otp_status': 'error'
             }
 
-    def verify_mobile_and_otp_from_selfie(
+    def _generate_otp(
         self,
-        mobile_number: str,
-        otp_code: Optional[str] = None,
-        client_public_key: Optional[str] = None
-    ) -> dict:
+        length: int,
+        client_public_key: str,
+        gesture_mode: bool = False
+    ) -> Dict[str, Any]:
         """
-        Enhanced verification for selfie processing that checks mobile number and OTP.
+        Generate OTP code for public_key.
 
-        This method validates:
-        1. Mobile number format and existence in OTP table
-        2. If OTP code is provided, validates it against stored valid OTP
-        3. Returns comprehensive result including OTP status
-
-        Args:
-            mobile_number: Mobile number from selfie request
-            otp_code: OTP code extracted from selfie via OCR (optional)
-            client_public_key: Optional client public key for additional verification
-
-        Returns:
-            Dict with comprehensive verification result including mobile and OTP validation
+        Returns dict with OTP details.
         """
-        try:
-            result = {
-                'mobile_number_valid': False,
-                'otp_check_passed': False,
-                'otp_status': None,
-                'overall_valid': False,
-                'details': {}
-            }
+        # Generate new OTP code
+        allowed_digits = '12345' if gesture_mode else None
+        otp_code = self.unique_random_generator.generate_random_number(length, allowed_digits=allowed_digits)
 
-            # Validate mobile number format
-            if not mobile_number or not mobile_number.startswith('+'):
-                result['details']['mobile_number_error'] = 'Invalid mobile number format - must start with +'
-                result['otp_status'] = 'invalid_mobile_format'
-                return result
+        # Generate unique OTP request ID
+        otp_id = str(uuid.uuid4())
 
-            # Check if there's any OTP record for this mobile number (valid or not)
-            all_otp = self.otp_repository.get_otp_by_mobile_number(mobile_number)
-            if not all_otp:
-                result['details']['mobile_number_error'] = f'No OTP records found for mobile number: {mobile_number}'
-                result['otp_status'] = 'no_otp_records'
-                return result
+        # Calculate expiry time (use UTC)
+        expiry_minutes = aws_settings.otp_expiry_minutes
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=expiry_minutes)
 
-            result['mobile_number_valid'] = True
-            result['details']['mobile_number'] = mobile_number
+        return {
+            'otp': otp_code,
+            'otp_id': otp_id,
+            'expires_at': expires_at,
+            'sent_at': datetime.now(timezone.utc),
+            'public_key': client_public_key
+        }
 
-            # If no OTP code provided, just check mobile number validity
-            if not otp_code:
-                # Check if there's a valid unexpired OTP
-                valid_otp = self.otp_repository.get_valid_otp_by_mobile_number(mobile_number)
-                if valid_otp:
-                    result['otp_check_passed'] = True
-                    result['otp_status'] = 'valid_otp_exists'
-                    result['details']['otp_exists'] = True
-                    result['details']['otp_expires_at'] = valid_otp.get('expires_at')
-                    result['details']['otp_id'] = valid_otp.get('otp_id')
-                else:
-                    result['otp_status'] = 'no_valid_otp'
-                    result['details']['otp_exists'] = False
-                    if all_otp.get('is_verified'):
-                        result['details']['reason'] = 'OTP already used'
-                    elif all_otp.get('expires_at'):
-                        expires_at = all_otp.get('expires_at')
-                        now_utc = datetime.now(timezone.utc)
-                        # Handle naive datetime
-                        if expires_at.tzinfo is None:
-                            expires_at = expires_at.replace(tzinfo=timezone.utc)
-                        if now_utc > expires_at:
-                            result['details']['reason'] = 'OTP expired'
-                        else:
-                            result['details']['reason'] = 'OTP not valid'
-                    else:
-                        result['details']['reason'] = 'OTP not valid'
+    def _encrypt_response(
+        self,
+        payload: Dict[str, Any],
+        client_public_key: str
+    ) -> Dict[str, str]:
+        """Encrypt OTP response using hybrid encryption."""
+        encrypted_envelope = self.hybrid_crypto.encrypt_envelope(
+            payload=payload,
+            server_public_key=client_public_key
+        )
+        return {
+            'client_public_key': encrypted_envelope['client_public_key'],
+            'encrypted_key': encrypted_envelope['encrypted_key'],
+            'key_iv': encrypted_envelope['key_iv'],
+            'encrypted_payload': encrypted_envelope['encrypted_payload'],
+            'payload_iv': encrypted_envelope['payload_iv']
+        }
 
-                result['overall_valid'] = result['mobile_number_valid'] and result['otp_check_passed']
-                return result
+    # Legacy methods for backward compatibility
+    def generate_otp(
+        self,
+        length: int,
+        client_public_key: str,
+        gesture_mode: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Generate OTP code for public_key (legacy method).
+        """
+        return self._generate_otp(length, client_public_key, gesture_mode)
 
-            # If OTP code is provided, perform full validation
-            verification_result = self.verify_otp_from_selfie(mobile_number, otp_code, client_public_key)
-
-            result['otp_check_passed'] = verification_result['valid']
-            result['otp_status'] = verification_result.get('otp_status', verification_result.get('valid') and 'verified' or 'invalid')
-            result['details']['verification_result'] = verification_result
-
-            if verification_result['valid']:
-                result['details']['verification_message'] = verification_result['message']
-                result['details']['verified_otp'] = verification_result.get('otp_code')
-                result['details']['verified_otp_id'] = verification_result.get('otp_id')
-                result['details']['expires_at'] = verification_result.get('expires_at')
-            else:
-                result['details']['verification_error'] = verification_result['message']
-                if 'expected_otp' in verification_result:
-                    result['details']['expected_otp'] = verification_result['expected_otp']
-
-            result['overall_valid'] = result['mobile_number_valid'] and result['otp_check_passed']
-            return result
-
-        except Exception as e:
-            masked_number = f"+******{mobile_number[-4:]}" if mobile_number and len(mobile_number) > 4 else mobile_number
-            self.logger.error(f"Mobile and OTP verification failed for {masked_number}: {type(e).__name__}")
-            return {
-                'mobile_number_valid': False,
-                'otp_check_passed': False,
-                'otp_status': 'error',
-                'overall_valid': False,
-                'details': {'error': f'Verification failed: {str(e)}'}
-            }
-
-
-
+    def generate_otp_without_sms(self, *args, **kwargs) -> Dict[str, Any]:
+        """Legacy method - use generate_otp instead."""
+        return self.generate_otp(*args, **kwargs)

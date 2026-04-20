@@ -6,7 +6,7 @@ from app.dto import DataResponse, OTPResponse
 from app.dto.otp import SignedOTPRequest, EncryptedOTPResponse
 from app.utils import HTTPExceptionHelper
 from app.services import otp_service
-from app.services.signed_otp_service import SignedOTPService
+from app.services.otp_service import OTPService
 from app.core.logger import get_logger
 
 router = APIRouter(tags=["OTP"])
@@ -135,11 +135,11 @@ async def request_signed_otp(
             rate_limit_key = f"mobile:{request.mobile_number}" if request.mobile_number else f"key:{request.client_public_key[:16]}"
             limiter._check_request_limit(http_request, lambda r: rate_limit_key, "3/10minutes")
 
-        # Create signed OTP service
-        signed_otp_service = SignedOTPService()
+        # Create OTP service
+        otp = OTPService()
 
         # Process signed OTP request
-        result = await signed_otp_service.process_signed_request(
+        result = await otp.process_signed_request(
             client_public_key=request.client_public_key,
             mobile_number=request.mobile_number,
             country_code=request.country_code,
@@ -218,11 +218,11 @@ async def request_recovery_otp(
             rate_limit_key = f"mobile:{request.mobile_number}" if request.mobile_number else f"key:{request.client_public_key[:16]}"
             limiter._check_request_limit(http_request, lambda r: rate_limit_key, "3/10minutes")
 
-        # Create signed OTP service
-        signed_otp_service = SignedOTPService()
+        # Create OTP service
+        otp = OTPService()
 
         # Process recovery OTP request (no user_keys insert)
-        result = await signed_otp_service.process_recovery_request(
+        result = await otp.process_recovery_request(
             client_public_key=request.client_public_key,
             mobile_number=request.mobile_number,
             country_code=request.country_code,

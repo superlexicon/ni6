@@ -221,57 +221,37 @@ class StartupSyncService:
             self.logger.error(f"Failed to insert job into local queue: {e}", exc_info=True)
 
     def _insert_otp_into_mariadb(self, otp_data: Dict[str, Any]) -> None:
-        """
-        Insert OTP into MariaDB (upsert to handle duplicates).
-
-        The OTP data should be in the format returned by the internal API:
-        {
-            "id": "otp-id",
-            "mobile_number": "+1234567890",
-            "random_number": "123456",
-            ...
-        }
-        """
+        """Insert OTP into MariaDB (upsert to handle duplicates)."""
         try:
             # Only sync OTPs that have public_key
             public_key = otp_data.get('public_key')
             if not public_key:
                 return
 
-            # Only sync OTPs that have random_number (required for verification)
+            # Only sync OTPs that have random_number
             if not otp_data.get('random_number'):
                 return
 
             existing = self.otp_repo.get_otp_by_public_key(public_key)
 
-            # Prepare OTP data for database
-            # Remove fields that shouldn't be inserted/updated
+            # Deserialize datetime fields
             db_otp_data = {
                 'public_key': public_key,
                 'random_number': otp_data.get('random_number'),
                 'otp_id': otp_data.get('otp_id'),
-                'delivery_method': otp_data.get('delivery_method', 'sms'),
+                'delivery_method': otp_data.get('delivery_method', 'encrypted_response'),
                 'expires_at': otp_data.get('expires_at'),
                 'attempts': otp_data.get('attempts', 0),
                 'max_attempts': otp_data.get('max_attempts', 3),
                 'is_verified': otp_data.get('is_verified', False)
             }
 
-            # Add optional fields if present
-            if otp_data.get('mobile_number'):
-                db_otp_data['mobile_number'] = otp_data['mobile_number']
-
-            if otp_data.get('country_code'):
-                db_otp_data['country_code'] = otp_data['country_code']
-
             if existing:
-                # Update existing OTP
                 self.otp_repo.update_otp_by_public_key(public_key, db_otp_data)
-                self.logger.debug(f"Updated existing OTP for public_key {public_key[:16]}... from sync")
+                self.logger.debug(f"Updated OTP for {public_key[:16]}... from sync")
             else:
-                # Insert new OTP
                 self.otp_repo.create_otp(db_otp_data)
-                self.logger.debug(f"Inserted new OTP for public_key {public_key[:16]}... from sync")
+                self.logger.debug(f"Inserted OTP for {public_key[:16]}... from sync")
 
         except Exception as e:
             self.logger.error(f"Failed to insert OTP from sync: {e}", exc_info=True)
