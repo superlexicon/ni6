@@ -83,6 +83,14 @@ class VideoSelfieService:
         self.otp_service = otp_service
         self.detailed_analysis = DetailedAnalysisService()
 
+        # Initialize OTP broadcast service for HTTP-based inter-instance communication
+        try:
+            from app.services.otp_broadcast_service import otp_broadcast_service as broadcast_svc
+            self.otp_broadcast_service = broadcast_svc
+        except Exception as e:
+            self.logger.warning(f"OTP broadcast service not available: {e}")
+            self.otp_broadcast_service = None
+
         # PhotoHolmes service (singleton) - DISABLED
         # from app.services import comprehensive_photoholmes_service
         # self.photoholmes_service = comprehensive_photoholmes_service
@@ -115,18 +123,20 @@ class VideoSelfieService:
         job_id = f"video_selfie_{uuid.uuid4().hex[:12]}"
         start_time = time.time()
 
-        # Step 1: Validate user and get identity
-        user_key = self.user_key_repository.get_key_by_public_key(client_public_key)
-        if not user_key:
-            self.logger.error(f"User not found for public_key: {client_public_key[:16]}...")
+        # Step 1: Look up OTP record (instead of user_keys - follow SequentialSelfieService pattern)
+        otp_record = self.otp_repository.get_otp_by_public_key(client_public_key)
+
+        if not otp_record:
+            self.logger.error(f"OTP not found for public_key: {client_public_key[:16]}...")
             return self._error_response(
                 job_id=job_id,
-                error="User not found. Please request OTP first",
+                error="OTP not found. Please request OTP first",
                 start_time=start_time,
             )
 
-        user_identity_id = user_key.get('user_identity_id')
-        self.logger.info(f"Processing video selfie for user: {user_identity_id[:16]}...")
+        self.logger.info(f"Found OTP record for public_key: {client_public_key[:16]}...")
+        # Note: user_identity_id will be created after verification (like SequentialSelfieService)
+        user_identity_id = None
 
         # Step 2: Process video and extract OTP
         try:
@@ -184,14 +194,48 @@ class VideoSelfieService:
                     forgery_checks=video_result.forgery_checks,
                 )
 
-            # Step 5: Check for duplicate face
+            # Build other_checks with face data
+            face_other_checks = face_result.get('other_checks', {})
             face_embedding = face_result.get('face_embedding')
+
+            # ========================================
+            # At this point, ALL verification checks have passed
+            # Now we create user_identity (if needed) and user_keys
+            # ========================================
+
+            # Step 5: Check for duplicate face and determine user_identity_id
+            is_resubmission = False
+            is_multi_device_link = False
+
             if face_embedding:
-                duplicate_check = self.face_biometrics_repo.check_duplicate_embedding(
-                    face_embedding=face_embedding
-                )
-                if duplicate_check and duplicate_check.get('user_identity_id') != user_identity_id:
-                    self.logger.error(f"Duplicate face detected for different user")
+                from app.repositories.face_biometrics_repository import DuplicateFaceError
+                try:
+                    duplicate_check = self.face_biometrics_repo.check_duplicate_embedding(
+                        face_embedding=face_embedding
+                    )
+
+                    if duplicate_check:
+                        matched_user_identity_id = duplicate_check.get('user_identity_id')
+
+                        if matched_user_identity_id:
+                            # Check if this public key already has a user_keys record
+                            existing_key = self.user_key_repository.get_key_by_public_key(client_public_key)
+
+                            if existing_key and existing_key.get('user_identity_id') == matched_user_identity_id:
+                                # Same user, same device - this is a resubmission
+                                is_resubmission = True
+                                user_identity_id = matched_user_identity_id
+                                self.logger.info(f"Video selfie resubmission detected for user: {user_identity_id[:16]}...")
+                            else:
+                                # Different device (public_key) but same face - MULTI-DEVICE LINK
+                                is_multi_device_link = True
+                                user_identity_id = matched_user_identity_id
+                                self.logger.info(
+                                    f"Multi-device: Linking new device {client_public_key[:16]}... "
+                                    f"to existing identity {user_identity_id[:16]}..."
+                                )
+                except DuplicateFaceError as e:
+                    self.logger.error(f"Duplicate face error: {str(e)}")
                     return self._error_response(
                         job_id=job_id,
                         error="Duplicate face detected - this face is already registered",
@@ -199,8 +243,53 @@ class VideoSelfieService:
                         extracted_data=video_result.extracted_data,
                     )
 
-            # Step 6: Store face biometric
-            if face_embedding:
+            # Step 6: Create user_identity if needed (ONLY after ALL checks pass)
+            if not user_identity_id:
+                user_identity_id = self.user_identity_repository.create_empty_identity()
+                if not user_identity_id:
+                    self.logger.error("Failed to create user identity")
+                    return self._error_response(
+                        job_id=job_id,
+                        error="Failed to create user identity",
+                        start_time=start_time,
+                        extracted_data=video_result.extracted_data,
+                    )
+                self.logger.info(f"Created new user_identity: {user_identity_id[:16]}...")
+
+            # Step 7: Handle resubmission - delete old embeddings and add new one
+            if is_resubmission and user_identity_id:
+                self.face_biometrics_repo.delete_user_embeddings(user_identity_id)
+
+                biometric_id = self.face_biometrics_repo.create_face_biometric(
+                    user_identity_id=user_identity_id,
+                    face_embedding=face_embedding,
+                    model_name=get_model_name()
+                )
+                if biometric_id:
+                    self.logger.info(f"Added new face biometric {biometric_id} for resubmission")
+
+                current_state = self.state_service.get_verification_state(client_public_key)
+                current_seq = self.state_service.get_sequence_no(client_public_key)
+                return SequentialJobResponse(
+                    result=True,
+                    job_id=job_id,
+                    verification_state=current_state,
+                    sequence_no=current_seq,
+                    processing_time_seconds=round(time.time() - start_time, 2),
+                    user_identity_id=user_identity_id,
+                    extracted_data=video_result.extracted_data,
+                    forgery_checks=video_result.forgery_checks,
+                    other_checks={
+                        **video_result.other_checks,
+                        **face_other_checks,
+                        "otp_verified": True,
+                        "is_resubmission": True,
+                        "is_multi_device_link": False,
+                    },
+                )
+
+            # Step 8: Insert face biometric (skip for multi-device link)
+            if face_embedding and not is_multi_device_link:
                 try:
                     biometric_id = self.face_biometrics_repo.create_face_biometric(
                         user_identity_id=user_identity_id,
@@ -218,24 +307,91 @@ class VideoSelfieService:
                         extracted_data=video_result.extracted_data,
                     )
 
-            # Step 7: Increment verification state (0 -> 1) and sequence_no (0 -> 1)
-            # ONLY if this is the first submission (not a resubmission)
+            # Step 9: Insert into user_keys (after ALL verification passes)
+            from app.repositories.user_keys_pending_repository import UserKeysPendingRepository
+            pending_key_repo = UserKeysPendingRepository()
+
+            # Check if user_keys record already exists for this public_key
+            existing_key = self.user_key_repository.get_key_by_public_key(client_public_key)
+
+            if existing_key:
+                # Update existing record (shouldn't happen in normal flow, but handle it)
+                self.logger.info(f"Updating existing user_keys record for {client_public_key[:16]}...")
+                self.user_key_repository.update_key_by_public_key(
+                    public_key=client_public_key,
+                    update_data={
+                        'user_identity_id': user_identity_id
+                    }
+                )
+                # Delete from pending table since we updated existing record
+                pending_key_repo.delete_pending_key(client_public_key)
+            else:
+                # Move pending key to user_keys (this is the normal flow)
+                moved = pending_key_repo.move_pending_to_user_keys(client_public_key, user_identity_id)
+
+                if not moved:
+                    self.logger.error(f"Failed to move pending key to user_keys for {client_public_key[:16]}...")
+                    # Fallback: Try to create from otp_record data (for backward compatibility)
+                    self.logger.info(f"Fallback: Creating user_keys from otp_record data for {client_public_key[:16]}...")
+                    key_data = {
+                        'mobile_number': otp_record.get('mobile_number'),
+                        'country_code': otp_record.get('country_code'),
+                        'user_public_key': client_public_key,
+                        'encrypted_secret_share': otp_record.get('encrypted_secret_share'),
+                        'user_identity_id': user_identity_id
+                    }
+                    self.user_key_repository.create_key(key_data)
+                    pending_key_repo.delete_pending_key(client_public_key)
+
+            self.logger.info(f"✅ Moved pending key to user_keys for public_key: {client_public_key[:16]}...")
+
+            # Step 10: Mark OTP as verified (but DON'T delete yet - wait for user key creation)
+            if otp_code and otp_record.get('mobile_number'):
+                self.otp_repository.mark_otp_verified(otp_record['mobile_number'])
+
+                # Broadcast verification to peer instances
+                if self.otp_broadcast_service:
+                    try:
+                        asyncio.create_task(self.otp_broadcast_service.broadcast_otp_verified(otp_record['mobile_number']))
+                    except Exception as sync_error:
+                        self.logger.error(f"Failed to broadcast OTP verification: {sync_error}")
+
+            # Step 10.5: Delete OTP AFTER user key is successfully created
+            # This prevents the authentication gap where OTP is deleted but user_key doesn't exist yet
+            if otp_record.get('mobile_number'):
+                deleted = self.otp_repository.delete_otp(otp_record['mobile_number'])
+                if deleted:
+                    self.logger.info(f"✅ OTP deleted AFTER user key creation for mobile: {otp_record['mobile_number']}")
+                else:
+                    self.logger.warning(f"Failed to delete OTP for mobile: {otp_record['mobile_number']}")
+
+            # Step 11: Increment verification state (0 -> 1) and sequence_no (0 -> 1)
+            # ONLY if this is the first submission for this device
+            # This applies to both new users AND multi-device links
             current_state = self.state_service.get_verification_state(client_public_key)
             current_seq = self.state_service.get_sequence_no(client_public_key)
 
-            if current_state == 0:  # First submission only
+            if current_state == 0 and not is_resubmission:
+                # First submission for this device - set state in BOTH tables
+                # This applies to both new users AND multi-device links
                 new_state = 1
                 new_seq = 1
-                # Update state in BOTH user_keys (per-device) AND user_identity_index (overall)
+
+                # Update user_keys (per-device state)
                 self.user_key_repository.update_state_and_sequence(
                     user_public_key=client_public_key,
                     verification_state=new_state,
                     sequence_no=new_seq
                 )
-                # Update user_identity_index to match (use SET, not INCREMENT)
-                self.user_identity_repo.set_verification_state(user_identity_id, new_state)
-                self.user_identity_repo.set_sequence_no(user_identity_id, new_seq)
-                self.logger.info(f"First video selfie submission - state updated to {new_state}")
+
+                # Update user_identity_index (overall identity state) to match
+                self.user_identity_repository.set_verification_state(user_identity_id, new_state)
+                self.user_identity_repository.set_sequence_no(user_identity_id, new_seq)
+
+                self.logger.info(
+                    f"First video selfie submission for device - state updated to {new_state}. "
+                    f"{'(Multi-device link)' if is_multi_device_link else '(New user)'}"
+                )
             else:
                 # Resubmission - keep current state and sequence
                 new_state = current_state
@@ -261,9 +417,11 @@ class VideoSelfieService:
                 forgery_checks=video_result.forgery_checks,
                 other_checks={
                     **video_result.other_checks,
-                    **face_result.get('other_checks', {}),
+                    **face_other_checks,
                     "otp_verified": True,
                     "hand_detection_rate": video_result.other_checks.get("hand_detection_rate", 0.0),
+                    "is_resubmission": is_resubmission,
+                    "is_multi_device_link": is_multi_device_link,
                 },
             )
 
