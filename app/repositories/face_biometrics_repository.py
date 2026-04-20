@@ -230,7 +230,7 @@ class FaceBiometricsRepository:
                 cursor = conn.cursor(dictionary=True)
                 embedding_hex = VectorHelper.to_hex(face_embedding)
 
-                sql = """
+                sql = f"""
                 SELECT id, user_identity_id, model_name, VEC_DISTANCE_COSINE(embedding_vec, x'{embedding_hex}') AS distance
                 FROM face_biometrics
                 WHERE VEC_DISTANCE_COSINE(embedding_vec, x'{embedding_hex}') < %s
@@ -309,7 +309,7 @@ class FaceBiometricsRepository:
                 embedding_hex = VectorHelper.to_hex(face_embedding)
 
                 # Build SQL with optional model filter
-                sql = """
+                sql = f"""
                 SELECT id, model_name, VEC_DISTANCE_COSINE(embedding_vec, x'{embedding_hex}') AS distance
                 FROM face_biometrics
                 WHERE user_identity_id = %s
@@ -372,7 +372,7 @@ class FaceBiometricsRepository:
                 embedding_hex = VectorHelper.to_hex(face_embedding)
 
                 # Build SQL with optional model filter
-                sql = """
+                sql = f"""
                 SELECT
                 id AS biometric_id,
                 user_identity_id AS identity_id,
