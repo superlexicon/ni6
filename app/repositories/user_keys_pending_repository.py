@@ -42,7 +42,7 @@ class UserKeysPendingRepository(BaseRepository):
 
         try:
             with get_db_connection_context() as conn:
-                with conn.cursor(dictionary=True) as cursor:
+                with conn.cursor(dictionary=True, buffered=True) as cursor:
                     cursor.execute(query, key_data)
                     conn.commit()
                     # Fetch the created/updated record

@@ -31,6 +31,7 @@ class OTPRepository(BaseRepository):
             try:
                 with get_db_connection_context() as conn:
                     # Determine if this is SMS or email OTP
+                    base_fields = []  # Declare in outer scope for use in SELECT later
                     if 'mobile_number' in otp_data and otp_data['mobile_number']:
                         # SMS OTP - try UPDATE first (minimizes lock contention)
                         # If UPDATE affects 0 rows, then INSERT
@@ -62,7 +63,7 @@ class OTPRepository(BaseRepository):
                                 WHERE mobile_number = %(identifier)s
                             """
 
-                            with conn.cursor() as cursor:
+                            with conn.cursor(buffered=True) as cursor:
                                 cursor.execute(update_query, update_params)
                                 conn.commit()
                                 if cursor.rowcount > 0:
@@ -98,12 +99,10 @@ class OTPRepository(BaseRepository):
 
                         fields_str = ', '.join(base_fields)
                         values_str = ', '.join(base_values)
-                        returning_str = ', '.join([f for f in base_fields if f != 'id'] + ['id', 'created_at'])
 
                         query = f"""
                             INSERT INTO otp ({fields_str})
                             VALUES ({values_str})
-                            RETURNING {returning_str}
                         """
                     else:
                         # Check if this is public_key based OTP (no mobile_number, no email)
@@ -131,12 +130,11 @@ class OTPRepository(BaseRepository):
 
                             fields_str = ', '.join(base_fields)
                             values_str = ', '.join(base_values)
-                            returning_str = ', '.join([f for f in base_fields if f != 'id'] + ['id', 'created_at'])
+                            # select_fields built later based on base_fields
 
                             query = f"""
                                 INSERT INTO otp ({fields_str})
                                 VALUES ({values_str})
-                                RETURNING {returning_str}
                             """
                         else:
                             # Email OTP (legacy) - keep existing logic
@@ -147,13 +145,39 @@ class OTPRepository(BaseRepository):
                             query = """
                                 INSERT INTO otp (id, email, random_number)
                                 VALUES (UUID(), %(email)s, %(random_number)s)
-                                RETURNING id, email, random_number, created_at
                             """
 
-                    with conn.cursor(dictionary=True) as cursor:
+                    with conn.cursor(dictionary=True, buffered=True) as cursor:
                         cursor.execute(query, otp_data)
-                        result = cursor.fetchone()
                         conn.commit()
+
+                        # Fetch the inserted record via separate SELECT (MySQL doesn't support RETURNING)
+                        # Determine which field to use for lookup based on OTP type
+                        if 'mobile_number' in otp_data and otp_data['mobile_number']:
+                            # Mobile OTP - build dynamic SELECT based on fields inserted
+                            select_fields = ', '.join([f for f in base_fields if f != 'id'] + ['id', 'created_at'])
+                            select_query = f"""
+                                SELECT {select_fields}
+                                FROM otp WHERE mobile_number = %s
+                            """
+                            cursor.execute(select_query, (otp_data['mobile_number'],))
+                        elif 'public_key' in otp_data and otp_data['public_key']:
+                            # Public key OTP - build dynamic SELECT based on fields inserted
+                            select_fields = ', '.join([f for f in base_fields if f != 'id'] + ['id', 'created_at'])
+                            select_query = f"""
+                                SELECT {select_fields}
+                                FROM otp WHERE public_key = %s
+                            """
+                            cursor.execute(select_query, (otp_data['public_key'],))
+                        else:
+                            # Email OTP (legacy)
+                            select_query = """
+                                SELECT id, email, random_number, created_at
+                                FROM otp WHERE email = %s
+                            """
+                            cursor.execute(select_query, (otp_data['email'],))
+
+                        result = cursor.fetchone()
                         logger.info(f"Created OTP record: {result.get('id')}")
                         return result
 

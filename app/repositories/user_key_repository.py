@@ -41,11 +41,10 @@ class UserKeyRepository(BaseRepository):
                 # Handle optional user_identity_id
                 user_identity_id = key_data.get('user_identity_id')
 
-                with conn.cursor(dictionary=True) as cursor:
+                with conn.cursor(dictionary=True, buffered=True) as cursor:
                     query = """
                         INSERT INTO user_keys (id, mobile_number, country_code, user_public_key, encrypted_secret_share, user_identity_id, device_id, api_url)
                         VALUES (UUID(), %(mobile_number)s, %(country_code)s, %(user_public_key)s, %(encrypted_secret_share)s, %(user_identity_id)s, %(device_id)s, %(api_url)s)
-                        RETURNING id, mobile_number, country_code, user_public_key, encrypted_secret_share, user_identity_id, device_id, api_url, created_at
                     """
                     # Ensure user_identity_id, device_id, api_url are in the dict for the query
                     key_data_with_identity = {
@@ -55,8 +54,14 @@ class UserKeyRepository(BaseRepository):
                         'api_url': key_data.get('api_url')
                     }
                     cursor.execute(query, key_data_with_identity)
-                    result = cursor.fetchone()
                     conn.commit()
+                    # Fetch the inserted record via separate SELECT (MySQL doesn't support RETURNING)
+                    cursor.execute("""
+                        SELECT id, mobile_number, country_code, user_public_key, encrypted_secret_share,
+                               user_identity_id, device_id, api_url, created_at
+                        FROM user_keys WHERE user_public_key = %s
+                    """, (key_data['user_public_key'],))
+                    result = cursor.fetchone()
                     logger.debug(f"Created user key for public key: {key_data['user_public_key'][:8]}...")
                     return result
         except ValueError as e:
