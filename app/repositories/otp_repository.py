@@ -472,7 +472,7 @@ class OTPRepository(BaseRepository):
         query = f"""
             UPDATE otp
             SET {set_clause}, updated_at = CURRENT_TIMESTAMP
-            WHERE public_key = %s
+            WHERE public_key = %(public_key)s
         """
 
         try:
@@ -480,9 +480,8 @@ class OTPRepository(BaseRepository):
                 with conn.cursor(dictionary=True) as cursor:
                     # Create params dict with all update_data values
                     params = update_data.copy()
-                    # Add public_key at the end for WHERE clause
-                    params_list = list(params.values()) + [public_key]
-                    cursor.execute(query, params_list)
+                    params['public_key'] = public_key
+                    cursor.execute(query, params)
                     conn.commit()
                     # Fetch the updated record
                     select_query = f"""
