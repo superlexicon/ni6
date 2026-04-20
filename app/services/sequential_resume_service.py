@@ -230,7 +230,7 @@ class SequentialResumeService(DocumentProcessorBase):
 
     async def process_resume(
         self, client_public_key: str, file_data: str, filename: str,
-        iv: str, callback_url: Optional[str] = None
+        callback_url: Optional[str] = None
     ):
         """
         Process a resume/CV document.
@@ -241,6 +241,5 @@ class SequentialResumeService(DocumentProcessorBase):
             client_public_key=client_public_key,
             file_data=file_data,
             filename=filename,
-            iv=iv,
             callback_url=callback_url
         )

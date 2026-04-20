@@ -221,7 +221,7 @@ class SequentialNationalIdService(DocumentProcessorBase):
 
     async def process_national_id(
         self, client_public_key: str, file_data: str, filename: str,
-        iv: str, callback_url: Optional[str] = None
+        callback_url: Optional[str] = None
     ):
         """
         Process a national ID document.
@@ -232,6 +232,5 @@ class SequentialNationalIdService(DocumentProcessorBase):
             client_public_key=client_public_key,
             file_data=file_data,
             filename=filename,
-            iv=iv,
             callback_url=callback_url
         )

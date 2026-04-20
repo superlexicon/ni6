@@ -190,7 +190,7 @@ class SequentialPassportService:
         return mrz_rows
 
     async def process_passport(self, client_public_key: str, file_data: str, filename: str,
-                             iv: str, callback_url: Optional[str] = None,
+                             callback_url: Optional[str] = None,
                              document_type: str = "passport") -> SequentialJobResponse:
         """
         Process an identity document (passport or ID card) in sequential mode.
@@ -1098,7 +1098,6 @@ class SequentialPassportService:
         client_public_key: str,
         file_data: str,
         filename: str,
-        iv: str,
         callback_url: Optional[str] = None,
         document_type: str = "passport"
     ) -> SequentialJobResponse:

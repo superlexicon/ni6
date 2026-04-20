@@ -381,7 +381,6 @@ class DocumentAnalysisWorker:
                     'file_type': 'selfie',  # For classification
                     'document_type': 'secret_share_recovery'  # For routing
                 }]
-                request_data['iv'] = ''  # Not used for recovery
                 self.logger.info(f"Job {job_id}: Transformed recovery payload successfully")
 
             # Extract sequential job parameters
@@ -436,7 +435,6 @@ class DocumentAnalysisWorker:
                         raise ValueError(rate_error)
                     self.logger.info(f"Job {job_id}: Rate limit check passed for user {user_identity_id[:16]}...")
 
-            iv = request_data["iv"]
             callback_url = request_data.get("callback_url")
 
             # Extract request-level selfie parameters
@@ -461,7 +459,6 @@ class DocumentAnalysisWorker:
                     client_public_key=client_public_key,
                     video_bytes=video_bytes,
                     filename=file_data["filename"],
-                    iv=iv,
                     mobile_number=mobile_number,
                     country_code=country_code,
                     callback_url=callback_url
@@ -478,7 +475,6 @@ class DocumentAnalysisWorker:
                     client_public_key=client_public_key,
                     file_data=file_data["file_data"],
                     filename=file_data["filename"],
-                    iv=iv,
                     secret_share=secret_share,
                     mobile_number=mobile_number,
                     country_code=country_code,
@@ -493,7 +489,6 @@ class DocumentAnalysisWorker:
                     client_public_key=client_public_key,
                     file_data=file_data["file_data"],
                     filename=file_data["filename"],
-                    iv=iv,
                     callback_url=callback_url
                 )
                 response = loop.run_until_complete(
@@ -505,7 +500,6 @@ class DocumentAnalysisWorker:
                     client_public_key=client_public_key,
                     file_data=file_data["file_data"],
                     filename=file_data["filename"],
-                    iv=iv,
                     callback_url=callback_url
                 )
                 response = loop.run_until_complete(
@@ -516,7 +510,6 @@ class DocumentAnalysisWorker:
                     client_public_key=client_public_key,
                     file_data=file_data["file_data"],
                     filename=file_data["filename"],
-                    iv=iv,
                     callback_url=callback_url
                 )
                 response = loop.run_until_complete(
@@ -528,7 +521,6 @@ class DocumentAnalysisWorker:
                     client_public_key=client_public_key,
                     file_data=file_data["file_data"],
                     filename=file_data["filename"],
-                    iv=iv,
                     callback_url=callback_url
                 )
                 response = loop.run_until_complete(
@@ -540,7 +532,6 @@ class DocumentAnalysisWorker:
                     client_public_key=client_public_key,
                     file_data=file_data["file_data"],
                     filename=file_data["filename"],
-                    iv=iv,
                     callback_url=callback_url
                 )
                 response = loop.run_until_complete(

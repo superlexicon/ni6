@@ -1137,7 +1137,7 @@ class SequentialBankStatementService(DocumentProcessorBase):
 
     async def process_bank_statement(
         self, client_public_key: str, file_data: str, filename: str,
-        iv: str, callback_url: Optional[str] = None
+        callback_url: Optional[str] = None
     ):
         """
         Process a bank statement document.

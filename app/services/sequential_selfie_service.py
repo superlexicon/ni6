@@ -66,7 +66,7 @@ class SequentialSelfieService:
             self.otp_broadcast_service = None
 
     async def process_selfie(self, client_public_key: str, file_data: str, filename: str,
-                           iv: str, secret_share: str,
+                           secret_share: str,
                            mobile_number: str, country_code: str, callback_url: Optional[str] = None) -> SequentialJobResponse:
         """
         Process a selfie document in sequential mode.

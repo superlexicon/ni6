@@ -178,7 +178,6 @@ class DocumentProcessorBase(ABC):
         client_public_key: str,
         file_data: str,
         filename: str,
-        iv: str,
         user_identity_id: Optional[str] = None,
         stored_full_name: Optional[str] = None,
         callback_url: Optional[str] = None

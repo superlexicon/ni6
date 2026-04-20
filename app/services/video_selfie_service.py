@@ -94,7 +94,6 @@ class VideoSelfieService:
         client_public_key: str,
         video_bytes: bytes,
         filename: str,
-        iv: str,
         mobile_number: Optional[str] = None,
         country_code: Optional[str] = None,
         callback_url: Optional[str] = None,
@@ -106,7 +105,6 @@ class VideoSelfieService:
             client_public_key: Client's public key
             video_bytes: Video file as bytes
             filename: Video filename
-            iv: IV for decryption
             mobile_number: User's mobile number
             country_code: Country code for mobile
             callback_url: Optional callback URL

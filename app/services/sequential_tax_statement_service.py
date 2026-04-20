@@ -39,7 +39,6 @@ class SequentialTaxStatementService:
         client_public_key: str,
         file_data: str,
         filename: str,
-        iv: str,
         callback_url: Optional[str] = None
     ) -> SequentialJobResponse:
         """

@@ -389,7 +389,7 @@ class SequentialIDCardService(DocumentProcessorBase):
 
     async def process_id_card(
         self, client_public_key: str, file_data: str, filename: str,
-        iv: str, callback_url: Optional[str] = None
+        callback_url: Optional[str] = None
     ):
         """
         Process an ID card document (PAN, national ID, driver's license).
@@ -400,7 +400,6 @@ class SequentialIDCardService(DocumentProcessorBase):
             client_public_key: Client's public key
             file_data: Base64 encoded file data
             filename: File name
-            iv: Initialization vector (for encrypted data)
             callback_url: Optional callback URL
 
         Returns:
@@ -410,6 +409,5 @@ class SequentialIDCardService(DocumentProcessorBase):
             client_public_key=client_public_key,
             file_data=file_data,
             filename=filename,
-            iv=iv,
             callback_url=callback_url
         )
