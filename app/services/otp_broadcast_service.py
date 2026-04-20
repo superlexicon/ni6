@@ -54,30 +54,32 @@ class OTPBroadcastService:
             "otp_data": otp_data
         })
 
-    async def broadcast_otp_verified(self, mobile_number: str) -> None:
+    async def broadcast_otp_verified(self, identifier: str, identifier_type: str = "mobile_number") -> None:
         """
         Broadcast OTP verification to all peer instances.
 
         Args:
-            mobile_number: Mobile number whose OTP was verified
+            identifier: The identifier (mobile_number, public_key, etc.)
+            identifier_type: The type of identifier (default: "mobile_number")
         """
         await self._broadcast_event({
             "event_type": "verify",
             "instance_id": self.instance_id,
-            "mobile_number": mobile_number
+            identifier_type: identifier
         })
 
-    async def broadcast_otp_deleted(self, mobile_number: str) -> None:
+    async def broadcast_otp_deleted(self, identifier: str, identifier_type: str = "mobile_number") -> None:
         """
         Broadcast OTP deletion to all peer instances.
 
         Args:
-            mobile_number: Mobile number whose OTP was deleted
+            identifier: The identifier (mobile_number, public_key, etc.)
+            identifier_type: The type of identifier (default: "mobile_number")
         """
         await self._broadcast_event({
             "event_type": "delete",
             "instance_id": self.instance_id,
-            "mobile_number": mobile_number
+            identifier_type: identifier
         })
 
     async def _broadcast_event(self, event: Dict[str, Any]) -> None:

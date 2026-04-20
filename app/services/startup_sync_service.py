@@ -233,18 +233,17 @@ class StartupSyncService:
         }
         """
         try:
-            # Check if OTP already exists by mobile_number
-            mobile = otp_data.get('mobile_number')
-            if not mobile:
-                self.logger.warning("OTP data missing mobile_number, skipping")
+            # Only sync OTPs that have public_key
+            public_key = otp_data.get('public_key')
+            if not public_key:
                 return
 
-            existing = self.otp_repo.get_otp_by_mobile_number(mobile)
+            existing = self.otp_repo.get_otp_by_public_key(public_key)
 
             # Prepare OTP data for database
             # Remove fields that shouldn't be inserted/updated
             db_otp_data = {
-                'mobile_number': mobile,
+                'public_key': public_key,
                 'random_number': otp_data.get('random_number'),
                 'otp_id': otp_data.get('otp_id'),
                 'delivery_method': otp_data.get('delivery_method', 'sms'),
@@ -255,20 +254,20 @@ class StartupSyncService:
             }
 
             # Add optional fields if present
-            if otp_data.get('public_key'):
-                db_otp_data['public_key'] = otp_data['public_key']
+            if otp_data.get('mobile_number'):
+                db_otp_data['mobile_number'] = otp_data['mobile_number']
 
             if otp_data.get('country_code'):
                 db_otp_data['country_code'] = otp_data['country_code']
 
             if existing:
                 # Update existing OTP
-                self.otp_repo.update_otp(mobile, db_otp_data)
-                self.logger.debug(f"Updated existing OTP for {mobile} from sync")
+                self.otp_repo.update_otp_by_public_key(public_key, db_otp_data)
+                self.logger.debug(f"Updated existing OTP for public_key {public_key[:16]}... from sync")
             else:
                 # Insert new OTP
                 self.otp_repo.create_otp(db_otp_data)
-                self.logger.debug(f"Inserted new OTP for {mobile} from sync")
+                self.logger.debug(f"Inserted new OTP for public_key {public_key[:16]}... from sync")
 
         except Exception as e:
             self.logger.error(f"Failed to insert OTP from sync: {e}", exc_info=True)

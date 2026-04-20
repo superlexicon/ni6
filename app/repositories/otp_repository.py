@@ -562,6 +562,37 @@ class OTPRepository(BaseRepository):
             logger.error(f"Error marking OTP as verified for {identifier_field} {identifier}: {e}")
             return False
 
+    def mark_otp_verified_by_public_key(self, public_key: str) -> bool:
+        """
+        Mark OTP as verified by public_key.
+
+        Args:
+            public_key: The public key identifier
+
+        Returns:
+            True if successful
+        """
+        from app.core.db.database import get_db_connection_context
+
+        query = """
+            UPDATE otp
+            SET is_verified = TRUE, updated_at = CURRENT_TIMESTAMP
+            WHERE public_key = %s
+        """
+
+        try:
+            with get_db_connection_context() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(query, (public_key,))
+                    conn.commit()
+                    success = cursor.rowcount > 0
+                    if success:
+                        logger.info(f"Marked OTP as verified for public_key: {public_key[:16]}...")
+                    return success
+        except MySQLError as e:
+            logger.error(f"Error marking OTP as verified for public_key {public_key[:16]}...: {e}")
+            return False
+
     def delete_otp(self, identifier: str) -> bool:
         """
         Delete OTP record by email or mobile number.

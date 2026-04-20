@@ -153,9 +153,9 @@ class OTPSyncWorker:
         This allows schema changes without requiring code updates.
         """
         try:
-            mobile_number = event_data.get("mobile_number")
-            if not mobile_number:
-                self.logger.warning("Received OTP event without mobile_number, skipping")
+            public_key = event_data.get("public_key")
+            if not public_key:
+                # Only sync OTPs with public_key
                 return
 
             # Get the otp_data from the flexible JSON field

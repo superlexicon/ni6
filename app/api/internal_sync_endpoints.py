@@ -253,37 +253,40 @@ async def receive_otp_sync(
 
     if event_type == "create":
         otp_data = event.get("otp_data", {})
-        mobile = otp_data.get('mobile_number')
+        public_key = otp_data.get('public_key')
 
-        if not mobile:
-            raise HTTPException(status_code=400, detail="mobile_number required in otp_data")
+        if not public_key:
+            # Only sync OTPs with public_key
+            return {"status": "skipped", "reason": "no-public-key"}
 
         # Deserialize datetime fields from ISO format
         otp_data = _deserialize_datetime_fields(otp_data)
 
         # Upsert OTP (insert or update if exists)
-        existing = otp_repo.get_otp_by_mobile_number(mobile)
+        existing = otp_repo.get_otp_by_public_key(public_key)
         if existing:
             # Preserve encrypted_secret_share if it exists in DB but not in broadcast
             # Each node has its own encrypted_secret_share (encrypted for that node)
             # Broadcasts don't include it, so we must preserve it on peer nodes
             if existing.get('encrypted_secret_share') and 'encrypted_secret_share' not in otp_data:
                 otp_data['encrypted_secret_share'] = existing['encrypted_secret_share']
-            otp_repo.update_otp(mobile, otp_data)
-            logger.info(f"Updated OTP for {mobile} from peer broadcast")
+            otp_repo.update_otp_by_public_key(public_key, otp_data)
+            logger.info(f"Updated OTP for public_key {public_key[:16]}... from peer broadcast")
         else:
             otp_repo.create_otp(otp_data)
-            logger.info(f"Created OTP for {mobile} from peer broadcast")
+            logger.info(f"Created OTP for public_key {public_key[:16]}... from peer broadcast")
 
         return {"status": "created"}
 
     elif event_type == "verify":
-        mobile = event.get("mobile_number")
-        if not mobile:
-            raise HTTPException(status_code=400, detail="mobile_number required")
+        public_key = event.get("public_key")
 
-        otp_repo.mark_otp_verified(mobile)
-        logger.info(f"Marked OTP for {mobile} as verified from peer broadcast")
+        if not public_key:
+            # Only sync OTPs with public_key
+            return {"status": "skipped", "reason": "no-public-key"}
+
+        otp_repo.mark_otp_verified_by_public_key(public_key)
+        logger.info(f"Marked OTP for public_key {public_key[:16]}... as verified from peer broadcast")
         return {"status": "verified"}
 
     else:

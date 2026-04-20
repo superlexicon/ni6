@@ -424,8 +424,9 @@ class OTPService:
                 # Broadcast deletion to peer instances
                 if self.otp_broadcast_service:
                     try:
-                        mobile = stored_otp.get('mobile_number') or mobile_number
-                        asyncio.create_task(self.otp_broadcast_service.broadcast_otp_deleted(mobile))
+                        public_key = stored_otp.get('public_key')
+                        if public_key:
+                            asyncio.create_task(self.otp_broadcast_service.broadcast_otp_deleted(public_key, "public_key"))
                     except Exception as sync_error:
                         self.logger.error(f"Failed to broadcast OTP deletion: {sync_error}")
 
