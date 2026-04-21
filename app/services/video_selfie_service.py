@@ -158,6 +158,8 @@ class VideoSelfieService:
         timing3 = int(expected_otp[4])  # Digit 5: delay after second gesture (seconds)
         gesture3 = int(expected_otp[5])  # Digit 6: expected finger count (1-5)
 
+        otp_code = expected_otp  # For use in logging and face extraction
+
         self.logger.info(
             f"Gesture OTP {expected_otp}: "
             f"After {timing1}s show {gesture1} fingers, "
