@@ -79,17 +79,20 @@ class GestureOTPExtractor:
     def extract_otp_guided(
         self,
         finger_counts: List[int],
-        confidences: List[float]
+        confidences: List[float],
+        frame_timestamps: Optional[List[float]] = None
     ) -> OTPExtractionResult:
         """
-        Extract OTP from guided recording where each frame = one digit position.
+        Extract 6-digit gesture OTP from guided recording.
 
-        Frame 0 = digit 1, Frame 1 = digit 2, etc.
-        Much simpler than transition detection.
+        New format: [gesture1][seconds1][gesture2][seconds2][gesture3][seconds3]
+        - Detects 3 stable gesture segments
+        - Each segment contributes 2 digits: finger count (1-5) + duration (1-5)
 
         Args:
             finger_counts: List of finger counts per frame (0-5, -1 for no hand)
             confidences: Detection confidence per frame
+            frame_timestamps: Optional list of frame timestamps in seconds
 
         Returns:
             OTPExtractionResult with extracted OTP or error
@@ -113,45 +116,83 @@ class GestureOTPExtractor:
                 hand_detection_rate=hand_detection_rate
             )
 
-        # Build OTP directly from finger counts (each frame = one digit)
-        otp_digits = []
-        transitions = []
+        # Use transition detection to find stable gesture segments
+        # Apply stability filter
+        stable_counts = self.apply_stability_filter(finger_counts)
+        stable_count = sum(1 for c in stable_counts if c >= 0)
 
-        for idx, count in enumerate(finger_counts):
-            if count >= 0:  # Valid detection
-                otp_digits.append(str(count))
-                # Create a simple transition object for compatibility
-                transitions.append(GestureTransition(
-                    digit=count,
-                    frame_start=idx,
-                    frame_end=idx,
-                    duration_seconds=0.0,
-                    confidence=confidences[idx] if idx < len(confidences) else 0.0
-                ))
+        if stable_count < self.min_stability_frames:
+            self.logger.warning(
+                f"Insufficient stable frames: {stable_count}/{frames_total}"
+            )
+            return OTPExtractionResult(
+                otp="",
+                transitions=[],
+                success=False,
+                error=ExtractionError.INSUFFICIENT_FRAMES.value,
+                frames_processed=frames_total,
+                hand_detection_rate=hand_detection_rate
+            )
+
+        # Find transitions (stable gesture segments)
+        transitions = self.find_transitions(stable_counts, confidences)
+
+        if not transitions:
+            self.logger.warning("No gesture transitions detected")
+            return OTPExtractionResult(
+                otp="",
+                transitions=[],
+                success=False,
+                error=ExtractionError.NO_TRANSITIONS.value,
+                frames_processed=frames_total,
+                hand_detection_rate=hand_detection_rate
+            )
+
+        # Build 6-digit OTP from transitions
+        # Format: [gesture1][seconds1][gesture2][seconds2][gesture3][seconds3]
+        otp_digits = []
+
+        for trans in transitions[:3]:  # Take first 3 transitions
+            # Gesture digit (1-5)
+            gesture_digit = trans.digit
+            if gesture_digit < 1 or gesture_digit > 5:
+                self.logger.warning(f"Invalid gesture count: {gesture_digit} (must be 1-5)")
+                return OTPExtractionResult(
+                    otp="",
+                    transitions=[],
+                    success=False,
+                    error="Gesture count must be between 1-5",
+                    frames_processed=frames_total,
+                    hand_detection_rate=hand_detection_rate
+                )
+            otp_digits.append(str(gesture_digit))
+
+            # Duration digit (1-5 seconds)
+            # Round duration to nearest integer and clamp to 1-5
+            duration_seconds = trans.duration_seconds
+            duration_digit = max(1, min(5, int(round(duration_seconds))))
+            otp_digits.append(str(duration_digit))
 
         otp = ''.join(otp_digits)
 
-        # Validate OTP length
-        min_len = video_config.otp_min_length
-        max_len = video_config.otp_max_length
-
-        if len(otp) < min_len or len(otp) > max_len:
+        # Validate OTP is exactly 6 digits
+        if len(otp) != 6:
             self.logger.warning(
-                f"Invalid OTP length: {len(otp)} (expected {min_len}-{max_len})"
+                f"Invalid OTP length: {len(otp)} (expected 6 for gesture OTP)"
             )
             return OTPExtractionResult(
                 otp=otp,
                 transitions=transitions,
                 success=False,
-                error=ExtractionError.INVALID_OTP_LENGTH.value,
+                error=f"Gesture OTP must be exactly 6 digits, got {len(otp)}",
                 frames_processed=frames_total,
                 hand_detection_rate=hand_detection_rate
             )
 
-        # Validate OTP contains only allowed digits (1-5, configured in video_config)
-        allowed = set(video_config.otp_allowed_digits)
+        # Validate OTP contains only digits 1-5
+        allowed = set('12345')
         if not all(d in allowed for d in otp):
-            self.logger.warning(f"OTP contains invalid digits: {otp}")
+            self.logger.warning(f"OTP contains invalid digits: {otp} (only 1-5 allowed)")
             return OTPExtractionResult(
                 otp=otp,
                 transitions=transitions,
@@ -162,7 +203,9 @@ class GestureOTPExtractor:
             )
 
         self.logger.info(
-            f"Successfully extracted OTP from guided recording: {otp} from {len(finger_counts)} frames"
+            f"Successfully extracted gesture OTP: {otp} from {len(transitions)} transitions "
+            f"(gestures: {[t.digit for t in transitions[:3]]}, "
+            f"durations: {[max(1, min(5, int(round(t.duration_seconds)))) for t in transitions[:3]]}s)"
         )
 
         return OTPExtractionResult(

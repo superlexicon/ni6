@@ -138,12 +138,41 @@ class VideoSelfieService:
         # Note: user_identity_id will be created after verification (like SequentialSelfieService)
         user_identity_id = None
 
-        # Step 2: Process video and extract OTP
+        # Step 2: Get expected OTP from record
+        expected_otp = otp_record.get('random_number')
+        if not expected_otp or len(expected_otp) != 6:
+            self.logger.error(f"Invalid gesture OTP format: {expected_otp}")
+            return self._error_response(
+                job_id=job_id,
+                error=f"Invalid gesture OTP format: expected 6 digits, got {len(expected_otp) if expected_otp else 0}",
+                start_time=start_time,
+            )
+
+        # Parse OTP: odd positions = delays, even positions = expected gestures
+        # Example: 131241 -> delay1=1s, gesture1=3, delay2=2s, gesture2=1, delay3=4s, gesture3=2
+        # Each delay is "show gesture AFTER X seconds from previous gesture start"
+        timing1 = int(expected_otp[0])  # Digit 1: delay before first gesture (seconds)
+        gesture1 = int(expected_otp[1])  # Digit 2: expected finger count (1-5)
+        timing2 = int(expected_otp[2])  # Digit 3: delay after first gesture (seconds)
+        gesture2 = int(expected_otp[3])  # Digit 4: expected finger count (1-5)
+        timing3 = int(expected_otp[4])  # Digit 5: delay after second gesture (seconds)
+        gesture3 = int(expected_otp[5])  # Digit 6: expected finger count (1-5)
+
+        self.logger.info(
+            f"Gesture OTP {expected_otp}: "
+            f"After {timing1}s show {gesture1} fingers, "
+            f"after reaction+1s gap+{timing2}s show {gesture2} fingers, "
+            f"after reaction+1s gap+{timing3}s show {gesture3} fingers"
+        )
+
+        # Step 3: Process video and verify gestures
         try:
-            video_result = await self._process_video_and_extract_otp(
+            video_result = await self._process_video_and_verify_gestures(
                 video_bytes=video_bytes,
                 filename=filename,
                 public_key=client_public_key,
+                expected_gestures=[gesture1, gesture2, gesture3],
+                timings=[timing1, timing2, timing3],
             )
 
             if not video_result.result:
@@ -157,26 +186,8 @@ class VideoSelfieService:
                     gesture_transitions=video_result.gesture_transitions,
                 )
 
-            # Step 3: Verify OTP
-            otp_code = video_result.extracted_data.get("otp_number")
-            otp_verification = self.otp_service.verify_otp_from_selfie(
-                mobile_number=mobile_number,
-                otp_code=otp_code,
-                client_public_key=client_public_key,
-            )
-
-            if not otp_verification.get('valid'):
-                self.logger.error(f"OTP verification failed: {otp_verification.get('message')}")
-                return self._error_response(
-                    job_id=job_id,
-                    error=otp_verification.get('message', 'OTP verification failed'),
-                    start_time=start_time,
-                    extracted_data=video_result.extracted_data,
-                    other_checks={
-                        **video_result.other_checks,
-                        "otp_verified": False,
-                    },
-                )
+            # Step 4: OTP verification successful (already done in _process_video_and_verify_gestures)
+            self.logger.info(f"Gesture OTP verification successful for {client_public_key[:16]}...")
 
             # Step 4: Face extraction and embedding (from best frame)
             face_result = await self._extract_face_from_video(
@@ -462,49 +473,143 @@ class VideoSelfieService:
                 start_time=start_time,
             )
 
-    async def _process_video_and_extract_otp(
+    async def _process_video_and_verify_gestures(
         self,
         video_bytes: bytes,
         filename: str,
         public_key: str,
+        expected_gestures: List[int],
+        timings: List[int],
     ) -> VideoSelfieResult:
         """
-        Process video and extract OTP from hand gestures.
+        Process video and verify hand gestures against expected OTP.
+
+        OTP Format: [delay1][gesture1][delay2][gesture2][delay3][gesture3]
+        - Odd positions (1, 3, 5): Delays in seconds (1-5)
+        - Even positions (2, 4, 6): Expected finger counts (1-5)
+
+        Timeline (with 1s reaction time + 1s gap between gestures):
+        - Gesture 1 display: delay1
+        - Frame 1: delay1 + reaction_time
+        - Gesture 2 display: delay1 + reaction_time + gap + delay2
+        - Frame 2: Gesture 2 display + reaction_time
+        - Gesture 3 display: Gesture 2 display + reaction_time + gap + delay3
+        - Frame 3: Gesture 3 display + reaction_time
 
         Args:
             video_bytes: Video file as bytes
             filename: Video filename
             public_key: User's public key
+            expected_gestures: List of 3 expected finger counts (digits 2, 4, 6 from OTP)
+            timings: List of 3 delay values (digits 1, 3, 5 from OTP)
 
         Returns:
-            VideoSelfieResult with OTP and gesture data
+            VideoSelfieResult with verification result and gesture data
         """
         # Step 1: Validate format
         format_ext = validate_video_format(filename)
 
-        # Step 2: Extract frames
-        frames, metadata = extract_frames(video_bytes)
+        # Step 2: Create temp file for video processing
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp:
+            tmp.write(video_bytes)
+            tmp_path = tmp.name
 
-        # Step 3: Detect gestures in all frames
+        try:
+            # Get video metadata
+            metadata = get_video_metadata(tmp_path)
+
+            # Step 3: Calculate frame extraction timestamps
+            # Each delay is "show gesture AFTER X seconds from previous gesture display"
+            # Timeline:
+            #   Gesture 1 display at: delay1
+            #   Frame 1 at: delay1 + reaction_time
+            #   1 second gap
+            #   Gesture 2 display at: delay1 + reaction_time + gap + delay2
+            #   Frame 2 at: Gesture 2 display + reaction_time
+            #   1 second gap
+            #   Gesture 3 display at: Gesture 2 display + reaction_time + gap + delay3
+            #   Frame 3 at: Gesture 3 display + reaction_time
+
+            reaction_time = 1.0  # 1 second reaction time for user to form gesture
+            gesture_gap = 1.0  # 1 second gap between gestures (after reaction time)
+
+            # Gesture 1 display and frame extraction
+            gesture1_display_time = float(timings[0])
+            frame1_time = gesture1_display_time + reaction_time
+
+            # Gesture 2 display and frame extraction
+            gesture2_display_time = gesture1_display_time + reaction_time + gesture_gap + float(timings[1])
+            frame2_time = gesture2_display_time + reaction_time
+
+            # Gesture 3 display and frame extraction
+            gesture3_display_time = gesture2_display_time + reaction_time + gesture_gap + float(timings[2])
+            frame3_time = gesture3_display_time + reaction_time
+
+            frame_times = [frame1_time, frame2_time, frame3_time]
+            self.logger.info(
+                f"Gesture display times: {gesture1_display_time}s, {gesture2_display_time}s, {gesture3_display_time}s "
+                f"(with {reaction_time}s reaction + {gesture_gap}s gap between)"
+            )
+            self.logger.info(
+                f"Extracting frames at {frame1_time}s, {frame2_time}s, {frame3_time}s "
+                f"(display time + {reaction_time}s reaction)"
+            )
+
+            # Step 4: Extract frames at calculated timestamps using FFmpeg
+            extracted_frames = []
+
+            from app.utils.video_utils import _extract_frame_with_ffmpeg
+
+            for i, target_time in enumerate(frame_times):
+                frame = _extract_frame_with_ffmpeg(tmp_path, target_time)
+
+                if frame is None or frame.size == 0:
+                    self.logger.error(f"Failed to extract frame {i+1} at {target_time}s")
+                    return VideoSelfieResult(
+                        result=False,
+                        status="failed",
+                        error=f"Failed to extract frame {i+1} at {target_time}s from video",
+                        video_metadata=VideoMetadata(
+                            duration_seconds=metadata.duration_seconds,
+                            frame_count=metadata.frame_count,
+                            fps=metadata.fps,
+                            width=metadata.width,
+                            height=metadata.height,
+                            format=metadata.format,
+                            size_bytes=metadata.size_bytes,
+                        ),
+                        frames_processed=i,
+                        gesture_transitions=[],
+                        other_checks={},
+                    )
+
+                extracted_frames.append((i, target_time, frame))
+                self.logger.info(f"Successfully extracted frame {i+1} at {target_time}s")
+
+        finally:
+            # Clean up temp file
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+        # Step 5: Detect gestures in extracted frames
         detector = get_detector()
-        finger_counts = []
-        confidences = []
+        detected_gestures = []
         frame_results = []
 
-        for i, frame_result in enumerate(frames):
-            gesture_result = detector.detect_gesture(frame_result.frame)
+        for i, target_time, frame in extracted_frames:
+            gesture_result = detector.detect_gesture(frame)
 
-            # Save frame if hand detection FAILED for debugging
-            if not gesture_result.hand_detected:
-                failed_dir = "/tmp/video_frames_failed"
-                os.makedirs(failed_dir, exist_ok=True)
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                failed_path = os.path.join(
-                    failed_dir,
-                    f"failed_digit{i+1}_t{frame_result.timestamp_seconds}s_{timestamp}.jpg"
-                )
-                cv2.imwrite(failed_path, frame_result.frame)
-                self.logger.warning(f"Saved failed detection frame to {failed_path}")
+            # Save frame for debugging
+            debug_dir = "/tmp/video_frames_gesture"
+            os.makedirs(debug_dir, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            debug_path = os.path.join(
+                debug_dir,
+                f"gesture_frame{i+1}_t{target_time}s_{timestamp}.jpg"
+            )
+            cv2.imwrite(debug_path, frame)
+            self.logger.info(f"Saved frame {i+1} to {debug_path}")
 
             frame_results.append(FrameGestureResult(
                 finger_count=gesture_result.finger_count,
@@ -512,34 +617,49 @@ class VideoSelfieService:
                 hand_detected=gesture_result.hand_detected,
                 handedness=gesture_result.handedness,
                 frame_index=i,
-                timestamp_seconds=frame_result.timestamp_seconds,
+                timestamp_seconds=target_time,
             ))
-            finger_counts.append(gesture_result.finger_count if gesture_result.hand_detected else -1)
-            confidences.append(gesture_result.confidence if gesture_result.hand_detected else 0.0)
+
+            if not gesture_result.hand_detected:
+                self.logger.error(f"No hand detected in frame {i+1} at {target_time}s")
+                return VideoSelfieResult(
+                    result=False,
+                    status="failed",
+                    error=f"No hand detected in frame {i+1} at {target_time}s. Please ensure your hand is clearly visible.",
+                    video_metadata=VideoMetadata(
+                        duration_seconds=metadata.duration_seconds,
+                        frame_count=metadata.frame_count,
+                        fps=metadata.fps,
+                        width=metadata.width,
+                        height=metadata.height,
+                        format=metadata.format,
+                        size_bytes=metadata.size_bytes,
+                    ),
+                    frames_processed=len(extracted_frames),
+                    gesture_transitions=[],
+                    other_checks={"hand_detection_rate": i / len(extracted_frames)},
+                )
+
+            detected_gestures.append(gesture_result.finger_count)
 
         # Don't close the singleton detector - it will be reused
 
-        # Step 4: Extract OTP using guided recording (each frame = one digit position)
-        extractor = GestureOTPExtractor()
-        otp_result = extractor.extract_otp_guided(finger_counts, confidences)
+        # Step 6: Compare detected gestures with expected gestures
+        all_match = True
+        mismatches = []
 
-        # Step 5: Build transitions list (from result for compatibility)
-        transitions = [
-            GestureTransition(
-                digit=t.digit,
-                frame_start=t.frame_start,
-                frame_end=t.frame_end,
-                duration_seconds=t.duration_seconds,
-                confidence=t.confidence,
-            )
-            for t in otp_result.transitions
-        ]
+        for i, (detected, expected) in enumerate(zip(detected_gestures, expected_gestures)):
+            if detected != expected:
+                all_match = False
+                mismatches.append(f"Frame {i+1}: expected {expected} fingers, detected {detected}")
+                self.logger.warning(f"Gesture mismatch at frame {i+1}: expected {expected}, got {detected}")
 
-        if not otp_result.success:
+        if not all_match:
+            mismatch_detail = "; ".join(mismatches)
             return VideoSelfieResult(
                 result=False,
                 status="failed",
-                error=otp_result.error,
+                error=f"Gesture verification failed: {mismatch_detail}",
                 video_metadata=VideoMetadata(
                     duration_seconds=metadata.duration_seconds,
                     frame_count=metadata.frame_count,
@@ -549,15 +669,42 @@ class VideoSelfieService:
                     format=metadata.format,
                     size_bytes=metadata.size_bytes,
                 ),
-                frames_processed=otp_result.frames_processed,
-                gesture_transitions=transitions,
+                frames_processed=len(extracted_frames),
+                gesture_transitions=[
+                    GestureTransition(
+                        digit=detected,
+                        frame_start=i,
+                        frame_end=i,
+                        duration_seconds=0.0,
+                        confidence=frame_results[i].confidence,
+                    )
+                    for i, detected in enumerate(detected_gestures)
+                ],
                 other_checks={
-                    "hand_detection_rate": otp_result.hand_detection_rate,
+                    "hand_detection_rate": 1.0,
+                    "detected_gestures": detected_gestures,
+                    "expected_gestures": expected_gestures,
                 },
             )
 
-        # Step 6: Run PhotoHolmes forgery detection (on first frame) - DISABLED
-        # forgery_checks = await self._run_photoholmes_on_frame(frames[0].frame)
+        self.logger.info(
+            f"All gestures matched: {detected_gestures} == {expected_gestures}"
+        )
+
+        # Step 7: Build transitions list for response
+        transitions = [
+            GestureTransition(
+                digit=detected,
+                frame_start=i,
+                frame_end=i,
+                duration_seconds=0.0,
+                confidence=frame_results[i].confidence,
+            )
+            for i, detected in enumerate(detected_gestures)
+        ]
+
+        # Step 8: Run PhotoHolmes forgery detection (on first frame) - DISABLED
+        # forgery_checks = await self._run_photoholmes_on_frame(extracted_frames[0][2])
         forgery_checks = {}
 
         return VideoSelfieResult(
@@ -572,13 +719,15 @@ class VideoSelfieService:
                 format=metadata.format,
                 size_bytes=metadata.size_bytes,
             ),
-            frames_processed=len(frames),
-            extracted_data={"otp_number": otp_result.otp},
+            frames_processed=len(extracted_frames),
+            extracted_data={"otp_number": "".join(map(str, expected_gestures))},
             gesture_transitions=transitions,
             forgery_checks=forgery_checks,
             other_checks={
-                "hand_detection_rate": otp_result.hand_detection_rate,
-                "gesture_count": len(transitions),
+                "hand_detection_rate": 1.0,
+                "detected_gestures": detected_gestures,
+                "expected_gestures": expected_gestures,
+                "gesture_count": len(detected_gestures),
             },
         )
 

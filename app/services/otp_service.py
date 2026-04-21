@@ -276,6 +276,34 @@ class OTPService:
             self.logger.error(f"Error processing recovery OTP request: {str(e)}")
             return {'success': False, 'error': f'Failed to process recovery OTP request: {str(e)}'}
 
+    def verify_otp_from_selfie(
+        self,
+        mobile_number: Optional[str],
+        otp_code: str,
+        client_public_key: str
+    ) -> dict:
+        """
+        Verify OTP code from video selfie submission.
+
+        For gesture OTP, we look up by public_key since the OTP was generated
+        for that specific public key. The mobile_number parameter is kept
+        for backward compatibility but is not used for lookup.
+
+        Args:
+            mobile_number: User's mobile number (not used for gesture OTP lookup)
+            otp_code: The 6-digit gesture OTP extracted from video
+            client_public_key: Client's public key used for OTP lookup
+
+        Returns:
+            {
+                'valid': bool,
+                'message': str,
+                'otp_status': str,
+            }
+        """
+        # For gesture OTP, we verify using public_key (the OTP was generated for this key)
+        return self.verify_otp(public_key=client_public_key, otp_code=otp_code)
+
     def verify_otp(
         self,
         public_key: str,
@@ -345,6 +373,51 @@ class OTPService:
                 'otp_status': 'error'
             }
 
+    def _generate_gesture_otp(self, client_public_key: str) -> Dict[str, Any]:
+        """
+        Generate a 6-digit gesture OTP for video selfie verification.
+
+        Format: [gesture1][seconds1][gesture2][seconds2][gesture3][seconds3]
+        All digits are 1-5.
+
+        Args:
+            client_public_key: The client's public key for OTP association
+
+        Returns:
+            {
+                'otp': '131241',
+                'otp_id': str,
+                'expires_at': datetime,
+                'sent_at': datetime,
+                'public_key': str,
+            }
+        """
+        # Gesture OTP is always 6 digits, all in range 1-5
+        GESTURE_OTP_LENGTH = 6
+        GESTURE_ALLOWED_DIGITS = '12345'
+
+        otp_code = self.unique_random_generator.generate_random_number(
+            GESTURE_OTP_LENGTH,
+            allowed_digits=GESTURE_ALLOWED_DIGITS
+        )
+
+        # Generate unique OTP request ID
+        otp_id = str(uuid.uuid4())
+
+        # Calculate expiry time (use UTC)
+        expiry_minutes = aws_settings.otp_expiry_minutes
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=expiry_minutes)
+
+        self.logger.info(f"Generated gesture OTP: {otp_code} for {client_public_key[:16]}...")
+
+        return {
+            'otp': otp_code,
+            'otp_id': otp_id,
+            'expires_at': expires_at,
+            'sent_at': datetime.now(timezone.utc),
+            'public_key': client_public_key
+        }
+
     def _generate_otp(
         self,
         length: int,
@@ -356,9 +429,11 @@ class OTPService:
 
         Returns dict with OTP details.
         """
-        # Generate new OTP code
-        allowed_digits = '12345' if gesture_mode else None
-        otp_code = self.unique_random_generator.generate_random_number(length, allowed_digits=allowed_digits)
+        if gesture_mode:
+            return self._generate_gesture_otp(client_public_key)
+
+        # Generate new OTP code for regular OTP
+        otp_code = self.unique_random_generator.generate_random_number(length)
 
         # Generate unique OTP request ID
         otp_id = str(uuid.uuid4())
