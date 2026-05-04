@@ -79,64 +79,31 @@ async def request_secret_share(
     """
     try:
         from app.repositories.user_key_repository import UserKeyRepository
-        from app.repositories.otp_repository import OTPRepository
         from app.core.key.ecdsa_recovery import ECDSARecovery
 
-        # Step 1: Get mobile_number and identity_id
-        # For image selfies: OTP code is provided, look up mobile_number from OTP record
-        # For video selfies: OTP will be extracted from video gestures by worker (no pre-validation)
-        mobile_number = None
-        identity_id = None
+        # Step 1: Get user_key and identity_id directly from public_key
+        user_key_repo = UserKeyRepository()
+        user_key = user_key_repo.get_key_by_public_key(request.public_key)
 
-        if request.otp_code:
-            # Image selfie flow: look up mobile_number and identity_id from OTP code
-            otp_repo = OTPRepository()
-            otp_record = otp_repo.get_otp_by_otp_code(request.otp_code)
+        if not user_key:
+            logger.error(f"No user key found for public_key: {request.public_key[:16]}...")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No registered account found. Please complete verification first."
+            )
 
-            if not otp_record:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Invalid OTP or OTP not found"
-                )
+        identity_id = user_key.get('user_identity_id')
+        if not identity_id:
+            logger.error(f"User key found but no identity_id: {request.public_key[:16]}...")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Account not fully verified. Please complete all verification steps."
+            )
 
-            mobile_number = otp_record.get('mobile_number')
+        logger.info(f"Found user_key for public_key: {request.public_key[:16]}..., identity_id: {identity_id}")
 
-            if not mobile_number:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="OTP record missing mobile_number"
-                )
-
-            # Extract country_code from OTP record for precise matching
-            country_code = otp_record.get('country_code')
-            logger.info(f"Found mobile_number for OTP code: {mobile_number[:7]}***, country_code: {country_code}")
-
-            # Get identity_id from mobile_number AND country_code for reliable matching
-            user_key_repo = UserKeyRepository()
-            user_keys = user_key_repo.get_keys_by_mobile_number(mobile_number, country_code=country_code)
-
-            if not user_keys:
-                # Log the actual values for debugging
-                logger.error(
-                    f"NO user_keys found! Looking for mobile_number='{mobile_number}', country_code='{country_code}'"
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="No shares found for this mobile number. Please ensure you're using the same number you registered with."
-                )
-
-            identity_id = user_keys[0].get('user_identity_id')
-            if not identity_id:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="No identity found for this mobile number"
-                )
-
-            logger.info(f"Found identity_id: {identity_id[:16]}...")
-        else:
-            # Video selfie flow: OTP will be extracted from video hand gestures by worker
-            # No pre-validation needed - worker will handle OTP extraction and lookup
-            logger.info("Video selfie flow - OTP will be extracted from video by worker")
+        # For reference in job processing, get mobile_number from user_key
+        mobile_number = user_key.get('mobile_number')
 
         # Step 2: Verify signature with temp_public_key (user's recovery key)
         message = f"request:{request.timestamp}"
@@ -158,8 +125,7 @@ async def request_secret_share(
 
         logger.info(f"Signature verified for temp_public_key {request.temp_public_key[:16]}...")
 
-        # Step 3: Create job with identity_id and mobile_number (if available for image selfies)
-        # For video selfies, these are None - worker will extract OTP and lookup
+        # Step 3: Create job with identity_id and mobile_number
         # The temp_public_key (request.temp_public_key) will be used for re-encryption
         job_request = JobRequest(
             client_public_key=request.temp_public_key,  # temp_public_key for re-encryption
