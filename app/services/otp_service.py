@@ -151,6 +151,10 @@ class OTPService:
                     otp_broadcast_data['device_id'] = device_id
                 if api_url is not None:
                     otp_broadcast_data['api_url'] = api_url
+                if mobile_number is not None:
+                    otp_broadcast_data['mobile_number'] = mobile_number
+                if country_code is not None:
+                    otp_broadcast_data['country_code'] = country_code
 
                 # Check for existing OTP
                 existing_otp = self.otp_repo.get_unverified_otp_by_public_key(client_public_key)
@@ -160,6 +164,46 @@ class OTPService:
                 else:
                     self.otp_repo.update_otp_by_public_key(client_public_key, otp_broadcast_data)
                     self.logger.info(f"Updated OTP for {client_public_key[:16]}...")
+
+                # Send SMS if mobile_number provided
+                if mobile_number is not None:
+                    try:
+                        from app.services.aws_sms_service import AWSSMSService
+
+                        aws_sms = AWSSMSService(
+                            aws_access_key_id=aws_settings.aws_access_key_id,
+                            aws_secret_access_key=aws_settings.aws_secret_access_key,
+                            aws_region=aws_settings.aws_region,
+                            sns_topic_arn=aws_settings.sns_topic_arn
+                        )
+
+                        # Format mobile number with country code
+                        formatted_mobile = f"+{country_code}{mobile_number}" if country_code else mobile_number
+
+                        # Calculate expiry for message
+                        expiry_minutes = aws_settings.otp_expiry_minutes
+                        expiry_text = f"{expiry_minutes} minute{'s' if expiry_minutes != 1 else ''}"
+
+                        # Format message with OTP and expiry
+                        message = aws_settings.otp_message_template.format(
+                            otp_code=otp_result['otp'],
+                            expiry_minutes=expiry_text
+                        )
+
+                        sms_result = await aws_sms.send_otp_sms(
+                            mobile_number=formatted_mobile,
+                            otp_code=otp_result['otp'],
+                            message_template=message,
+                            sender_id=aws_settings.sms_sender_id,
+                            sms_type=aws_settings.sms_type
+                        )
+
+                        if sms_result['success']:
+                            self.logger.info(f"✅ OTP SMS sent to {formatted_mobile}")
+                        else:
+                            self.logger.warning(f"⚠️ Failed to send SMS: {sms_result.get('error_message')}")
+                    except Exception as sms_error:
+                        self.logger.error(f"SMS sending error: {sms_error}")
 
                 # Broadcast to peer instances
                 if self.otp_broadcast_service:
@@ -256,6 +300,46 @@ class OTPService:
                     'otp': otp_result['otp']
                 }
                 self.logger.info(f"✅ Recovery OTP generated for {client_public_key[:16]}...")
+
+                # Send SMS if mobile_number provided
+                if mobile_number is not None:
+                    try:
+                        from app.services.aws_sms_service import AWSSMSService
+
+                        aws_sms = AWSSMSService(
+                            aws_access_key_id=aws_settings.aws_access_key_id,
+                            aws_secret_access_key=aws_settings.aws_secret_access_key,
+                            aws_region=aws_settings.aws_region,
+                            sns_topic_arn=aws_settings.sns_topic_arn
+                        )
+
+                        # Format mobile number with country code
+                        formatted_mobile = f"+{country_code}{mobile_number}" if country_code else mobile_number
+
+                        # Calculate expiry for message
+                        expiry_minutes = aws_settings.otp_expiry_minutes
+                        expiry_text = f"{expiry_minutes} minute{'s' if expiry_minutes != 1 else ''}"
+
+                        # Format message with OTP and expiry
+                        message = aws_settings.otp_message_template.format(
+                            otp_code=otp_result['otp'],
+                            expiry_minutes=expiry_text
+                        )
+
+                        sms_result = await aws_sms.send_otp_sms(
+                            mobile_number=formatted_mobile,
+                            otp_code=otp_result['otp'],
+                            message_template=message,
+                            sender_id=aws_settings.sms_sender_id,
+                            sms_type=aws_settings.sms_type
+                        )
+
+                        if sms_result['success']:
+                            self.logger.info(f"✅ Recovery OTP SMS sent to {formatted_mobile}")
+                        else:
+                            self.logger.warning(f"⚠️ Failed to send recovery SMS: {sms_result.get('error_message')}")
+                    except Exception as sms_error:
+                        self.logger.error(f"Recovery SMS sending error: {sms_error}")
 
             # Prepare and encrypt response (no user_identity_id for recovery)
             response_payload = {
