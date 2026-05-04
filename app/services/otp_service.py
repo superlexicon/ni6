@@ -264,7 +264,7 @@ class OTPService:
         country_code: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Process signed OTP request for recovery flow (no persistence).
+        Process signed OTP request for recovery flow.
 
         Returns:
             {
@@ -344,6 +344,35 @@ class OTPService:
                             self.logger.warning(f"⚠️ Failed to send recovery SMS: {sms_result.get('error_message')}")
                     except Exception as sms_error:
                         self.logger.error(f"Recovery SMS sending error: {sms_error}")
+
+                # Store OTP in database for verification (recovery flow needs persistence too!)
+                otp_broadcast_data = {
+                    'public_key': client_public_key,
+                    'random_number': otp_result['otp'],
+                    'otp_id': otp_result['otp_id'],
+                    'expires_at': otp_result['expires_at'],
+                    'delivery_method': 'encrypted_response',
+                    'attempts': 0,
+                    'max_attempts': 3,
+                    'is_verified': False
+                }
+                if mobile_number is not None:
+                    otp_broadcast_data['mobile_number'] = mobile_number
+                if country_code is not None:
+                    otp_broadcast_data['country_code'] = country_code
+
+                # Check for existing OTP and create or update
+                existing_otp = self.otp_repo.get_unverified_otp_by_public_key(client_public_key)
+                if not existing_otp:
+                    self.otp_repo.create_otp(otp_broadcast_data)
+                    self.logger.info(f"Created recovery OTP for {client_public_key[:16]}...")
+                else:
+                    self.otp_repo.update_otp_by_public_key(client_public_key, otp_broadcast_data)
+                    self.logger.info(f"Updated recovery OTP for {client_public_key[:16]}...")
+
+                # Broadcast to peer instances
+                if self.otp_broadcast_service:
+                    asyncio.create_task(self.otp_broadcast_service.broadcast_otp_created(otp_broadcast_data))
 
             # Prepare and encrypt response (no user_identity_id for recovery)
             response_payload = {
