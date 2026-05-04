@@ -361,7 +361,7 @@ class UserKeyRepository(BaseRepository):
             logger.error(f"Error fetching key for mobile number {masked_number}: {type(e).__name__}")
             return None
 
-    def get_keys_by_mobile_number(self, mobile_number: str) -> Optional[List[Dict[str, Any]]]:
+    def get_keys_by_mobile_number(self, mobile_number: str, country_code: str = None) -> Optional[List[Dict[str, Any]]]:
         """
         Get ALL user_keys for a mobile number (may be multiple shares for same identity).
 
@@ -369,7 +369,9 @@ class UserKeyRepository(BaseRepository):
         shares associated with a mobile number (multiple devices for same identity).
 
         Args:
-            mobile_number: Mobile number with country code
+            mobile_number: Mobile number (without country code)
+            country_code: Country code (e.g., "+91", "+1") - optional for backward compatibility,
+                          but recommended for precise matching
 
         Returns:
             List of user_keys records or None if not found
@@ -381,15 +383,23 @@ class UserKeyRepository(BaseRepository):
                    created_at, updated_at
             FROM user_keys
             WHERE mobile_number = %s
-            ORDER BY created_at DESC
         """
+        params = [mobile_number]
+
+        if country_code:
+            query += " AND country_code = %s"
+            params.append(country_code)
+
+        query += " ORDER BY created_at DESC"
+
         try:
             with get_db_connection_context() as conn:
                 with conn.cursor(dictionary=True) as cursor:
-                    cursor.execute(query, (mobile_number,))
+                    cursor.execute(query, tuple(params))
                     results = cursor.fetchall()
                     if results:
-                        logger.debug(f"Found {len(results)} user_keys for mobile_number: {mobile_number}")
+                        match_desc = f"{mobile_number[:7]}*** with country_code={country_code}" if country_code else f"{mobile_number[:7]}***"
+                        logger.debug(f"Found {len(results)} user_keys for {match_desc}")
                     return results
         except MySQLError as e:
             masked_number = f"+******{mobile_number[-4:]}" if mobile_number and len(mobile_number) > 4 else mobile_number

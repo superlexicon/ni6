@@ -107,16 +107,22 @@ async def request_secret_share(
                     detail="OTP record missing mobile_number"
                 )
 
-            logger.info(f"Found mobile_number for OTP code: {mobile_number[:7]}***")
+            # Extract country_code from OTP record for precise matching
+            country_code = otp_record.get('country_code')
+            logger.info(f"Found mobile_number for OTP code: {mobile_number[:7]}***, country_code: {country_code}")
 
-            # Get identity_id from mobile_number
+            # Get identity_id from mobile_number AND country_code for reliable matching
             user_key_repo = UserKeyRepository()
-            user_keys = user_key_repo.get_keys_by_mobile_number(mobile_number)
+            user_keys = user_key_repo.get_keys_by_mobile_number(mobile_number, country_code=country_code)
 
             if not user_keys:
+                # Log the actual values for debugging
+                logger.error(
+                    f"NO user_keys found! Looking for mobile_number='{mobile_number}', country_code='{country_code}'"
+                )
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail="No shares found for this mobile number"
+                    detail="No shares found for this mobile number. Please ensure you're using the same number you registered with."
                 )
 
             identity_id = user_keys[0].get('user_identity_id')
