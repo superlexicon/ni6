@@ -178,7 +178,9 @@ class OTPService:
                         )
 
                         # Format mobile number with country code
-                        formatted_mobile = f"+{country_code}{mobile_number}" if country_code else mobile_number
+                        # Strip any existing + from country_code to avoid double formatting
+                        clean_country_code = country_code.lstrip('+') if country_code else ''
+                        formatted_mobile = f"+{clean_country_code}{mobile_number}" if clean_country_code else mobile_number
 
                         # Calculate expiry for message
                         expiry_minutes = aws_settings.otp_expiry_minutes
@@ -314,7 +316,9 @@ class OTPService:
                         )
 
                         # Format mobile number with country code
-                        formatted_mobile = f"+{country_code}{mobile_number}" if country_code else mobile_number
+                        # Strip any existing + from country_code to avoid double formatting
+                        clean_country_code = country_code.lstrip('+') if country_code else ''
+                        formatted_mobile = f"+{clean_country_code}{mobile_number}" if clean_country_code else mobile_number
 
                         # Calculate expiry for message
                         expiry_minutes = aws_settings.otp_expiry_minutes
