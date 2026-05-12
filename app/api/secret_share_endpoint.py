@@ -102,8 +102,9 @@ async def request_secret_share(
 
         logger.info(f"Found user_key for public_key: {request.public_key[:16]}..., identity_id: {identity_id}")
 
-        # For reference in job processing, get mobile_number from user_key
+        # For reference in job processing, get mobile_number and country_code from user_key
         mobile_number = user_key.get('mobile_number')
+        country_code = user_key.get('country_code')
 
         # Step 2: Verify signature with temp_public_key (user's recovery key)
         message = f"request:{request.timestamp}"
@@ -125,7 +126,7 @@ async def request_secret_share(
 
         logger.info(f"Signature verified for temp_public_key {request.temp_public_key[:16]}...")
 
-        # Step 3: Create job with identity_id and mobile_number
+        # Step 3: Create job with identity_id, mobile_number, and country_code
         # The temp_public_key (request.temp_public_key) will be used for re-encryption
         job_request = JobRequest(
             client_public_key=request.temp_public_key,  # temp_public_key for re-encryption
@@ -136,9 +137,10 @@ async def request_secret_share(
                 file_type="selfie",  # For classification (selfie vs document)
                 document_type="secret_share_recovery"  # For routing to correct processor
             )],
-            identity_id=identity_id,  # For image selfies (video: None, worker extracts)
-            mobile_number=mobile_number,  # For image selfies (video: None, worker extracts)
-            otp_code=request.otp_code,  # For image selfies (video: None, extracted from video)
+            identity_id=identity_id,
+            mobile_number=mobile_number,
+            country_code=country_code,  # Required for SMS formatting
+            otp_code=request.otp_code,
             callback_url=request.callback_url,
             target_server_public_key=request.target_server_public_key,
             api_url=request.api_url  # Optional: filter shares by API URL
