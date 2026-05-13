@@ -168,11 +168,17 @@ class SelfieValidationService:
                 return False, "OTP validation failed - no mobile number found", None, None, DocumentErrorCode.PROCESSING_ERROR
 
             # Step 2: Get identity_id from user_keys using mobile_number
+            # NOTE: OTP table stores mobile_number and country_code separately,
+            # but user_keys table stores the full number with country code in mobile_number column.
+            # We need to combine them for the lookup.
+            country_code = otp_record.get('country_code')
+            full_mobile_number = f"{country_code}{mobile_number}" if country_code else mobile_number
+
             user_key_repo = UserKeyRepository()
-            identity_id = user_key_repo.get_identity_id_by_mobile_number(mobile_number)
+            identity_id = user_key_repo.get_identity_id_by_mobile_number(full_mobile_number)
 
             if not identity_id:
-                self.logger.error(f"OTP validation failed - no identity found for mobile: {mobile_number}")
+                self.logger.error(f"OTP validation failed - no identity found for mobile: {full_mobile_number}")
                 return False, "OTP validation failed - no identity found", None, None, DocumentErrorCode.PROCESSING_ERROR
 
             # Step 3: Verify OTP matches (redundant since we looked up by code, but for safety)
@@ -196,8 +202,8 @@ class SelfieValidationService:
                 self.logger.error("OTP validation failed - OTP already used")
                 return False, "OTP validation failed - OTP already verified", None, None, DocumentErrorCode.SELFIE_OTP_ALREADY_VERIFIED
 
-            self.logger.info(f"OTP validated successfully for mobile: {mobile_number}, identity: {identity_id[:16]}...")
-            return True, None, mobile_number, identity_id, None
+            self.logger.info(f"OTP validated successfully for mobile: {full_mobile_number}, identity: {identity_id[:16]}...")
+            return True, None, full_mobile_number, identity_id, None
 
         except Exception as e:
             self.logger.error(f"OTP validation error: {str(e)}")
