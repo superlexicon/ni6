@@ -151,7 +151,7 @@ class JobTimingService:
 
     def get_queue_position_time(
         self,
-        pending_jobs: List[Dict[str, any]]
+        pending_jobs: List
     ) -> Optional[float]:
         """
         Calculate expected wait time based on jobs ahead in queue.
@@ -160,7 +160,7 @@ class JobTimingService:
         of the newly submitted job.
 
         Args:
-            pending_jobs: List of pending job dicts, each containing 'document_type'
+            pending_jobs: List of pending JobDatabaseRecord objects or dicts
 
         Returns:
             Total expected wait time in seconds, or None if no timing data available
@@ -174,14 +174,33 @@ class JobTimingService:
 
         with self.lock:
             for job in pending_jobs:
-                doc_type = job.get('document_type', '').lower()
-                avg_time = self.job_type_averages.get(doc_type)
-
-                if avg_time:
-                    total_time += avg_time
-                    has_valid_data = True
+                # Handle both JobDatabaseRecord (Pydantic) and dict types
+                if hasattr(job, 'request_data'):
+                    # JobDatabaseRecord - extract from request_data
+                    request_data = job.request_data
                 else:
-                    self.logger.debug(f"No timing data for document type: {doc_type}")
+                    # Dict type
+                    request_data = job
+
+                # Extract document_type from request_data.files[0]
+                doc_type = None
+                if isinstance(request_data, dict):
+                    files = request_data.get('files', [])
+                    if files and len(files) > 0:
+                        file_obj = files[0]
+                        doc_type = file_obj.get('document_type') or file_obj.get('file_type')
+
+                if doc_type:
+                    doc_type = doc_type.lower()
+                    avg_time = self.job_type_averages.get(doc_type)
+
+                    if avg_time:
+                        total_time += avg_time
+                        has_valid_data = True
+                    else:
+                        self.logger.debug(f"No timing data for document type: {doc_type}")
+                else:
+                    self.logger.debug(f"No document_type found in job")
 
         return total_time if has_valid_data else None
 

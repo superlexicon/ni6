@@ -553,7 +553,7 @@ class SelfieVerificationFlow:
             # Step 4: Extract frames at calculated timestamps using FFmpeg
             import datetime
             os.makedirs('/tmp', exist_ok=True)
-            tmp_path = os.path.join('/tmp', f'temp_video_{os.getpid()}_{datetime.now().timestamp()}.mp4')
+            tmp_path = os.path.join('/tmp', f'temp_video_{os.getpid()}_{datetime.datetime.now().timestamp()}.mp4')
             with open(tmp_path, 'wb') as tmp:
                 tmp.write(video_bytes)
 
