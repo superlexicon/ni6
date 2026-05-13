@@ -505,7 +505,7 @@ class SelfieVerificationFlow:
                     return SelfieVerificationResult(
                         success=False,
                         error="Video selfie requires 6-digit OTP for gesture timing (format: D1G1D2G2D3G3)",
-                        error_code=DocumentErrorCode.SELFIE_INVALID_OTP
+                        error_code=DocumentErrorCode.SELFIE_OTP_INCORRECT
                     )
             else:
                 # For testing without OTP, use default timing values
