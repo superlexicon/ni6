@@ -430,7 +430,6 @@ class SelfieVerificationFlow:
         video_bytes: bytes,
         public_key: Optional[str],
         filename: str,
-        otp_code: Optional[str] = None,  # Accept OTP code directly (like registration)
         require_otp: bool = True,
         photoholmes_threshold: Optional[int] = None,
         anti_spoofing_threshold: Optional[float] = None,
@@ -444,21 +443,20 @@ class SelfieVerificationFlow:
 
         Flow:
         1. Validate video format
-        2. Parse OTP for timing values (delay/gesture pattern)
-        3. Calculate dynamic frame timestamps from OTP
-        4. Extract frames at guided timestamps
-        5. Detect hand gestures in frames
-        6. Extract OTP from gesture sequence
-        7. Validate OTP (recovery mode)
+        2. Look up OTP record by public_key (same as registration)
+        3. Parse OTP for timing values (delay/gesture pattern)
+        4. Calculate dynamic frame timestamps from OTP
+        5. Extract frames at guided timestamps
+        6. Detect hand gestures in frames
+        7. Validate by gesture matching (same as registration)
         8. Extract face from best frame
         9. Validate anti-spoofing score
         10. Return SelfieVerificationResult
 
         Args:
             video_bytes: Raw bytes of the video file
-            public_key: User's public key (for OTP lookup) - None for recovery mode
+            public_key: User's public key (for OTP lookup) - required for video selfie
             filename: Video filename
-            otp_code: 6-digit OTP code (format: D1G1D2G2D3G3 - delay,gesture,delay,gesture,delay,gesture)
             require_otp: Whether OTP is mandatory (default True)
             photoholmes_threshold: Forgery detection threshold (default from config)
             anti_spoofing_threshold: Liveness threshold (default from config)
@@ -494,19 +492,46 @@ class SelfieVerificationFlow:
                     error_code=DocumentErrorCode.SELFIE_INVALID_VIDEO_FORMAT
                 )
 
-            # Step 2: Parse OTP for timing values (same as video_selfie_service.py lines 151-161)
-            # OTP Format: delay1, gesture1, delay2, gesture2, delay3, gesture3
-            # Example: 255552 -> delay1=2s, gesture1=5 fingers, delay2=5s, gesture2=5 fingers, delay3=5s, gesture3=2 fingers
+            # Step 2: Look up OTP record by public_key (same as video_selfie_service.py line 127)
             if require_otp:
-                if not otp_code or len(otp_code) != 6:
+                if not public_key:
                     return SelfieVerificationResult(
                         success=False,
-                        error="Video selfie requires 6-digit OTP for gesture timing (format: D1G1D2G2D3G3)",
+                        error="Public key required for video selfie verification",
                         error_code=DocumentErrorCode.SELFIE_OTP_INCORRECT
                     )
-                expected_otp = otp_code
+
+                otp_record = self.otp_repository.get_otp_by_public_key(public_key)
+                if not otp_record:
+                    return SelfieVerificationResult(
+                        success=False,
+                        error="OTP not found for the provided public key",
+                        error_code=DocumentErrorCode.SELFIE_OTP_INCORRECT
+                    )
+
+                # Get expected OTP from record (same as video_selfie_service.py line 142)
+                expected_otp = otp_record.get('random_number')
+                if not expected_otp or len(expected_otp) != 6:
+                    return SelfieVerificationResult(
+                        success=False,
+                        error=f"Invalid gesture OTP format: expected 6 digits, got {len(expected_otp) if expected_otp else 0}",
+                        error_code=DocumentErrorCode.SELFIE_OTP_INCORRECT
+                    )
+
+                # Store mobile_number and identity_id from OTP record for later use
+                mobile_number = otp_record.get('mobile_number')
+                identity_id = otp_record.get('user_identity_id')  # May be None for new users
+
+                self.logger.info(f"Found OTP record for public_key: {public_key[:16]}..., OTP: {expected_otp}")
             else:
-                expected_otp = "255552"  # Default for testing
+                # For testing without OTP
+                expected_otp = "255552"
+                mobile_number = None
+                identity_id = None
+
+            # Step 3: Parse OTP for timing values (same as video_selfie_service.py lines 151-161)
+            # OTP Format: delay1, gesture1, delay2, gesture2, delay3, gesture3
+            # Example: 255552 -> delay1=2s, gesture1=5 fingers, delay2=5s, gesture2=5 fingers, delay3=5s, gesture3=2 fingers
 
             # Parse OTP: odd positions = delays, even positions = expected gestures
             timing1 = int(expected_otp[0])  # Digit 1: delay before first gesture (seconds)
@@ -526,7 +551,7 @@ class SelfieVerificationFlow:
                 f"after reaction+1s gap+{timing3}s show {gesture3} fingers"
             )
 
-            # Step 3: Calculate dynamic frame timestamps from OTP timing values
+            # Step 4: Calculate dynamic frame timestamps from OTP timing values
             reaction_time = 1.0  # 1 second reaction time for user to form gesture
             gesture_gap = 1.0  # 1 second gap between gestures
 
@@ -549,7 +574,7 @@ class SelfieVerificationFlow:
             )
             self.logger.info(f"Extracting frames at {frame_times}")
 
-            # Step 4: Extract frames at calculated timestamps using FFmpeg
+            # Step 5: Extract frames at calculated timestamps using FFmpeg
             import datetime
             os.makedirs('/tmp', exist_ok=True)
             tmp_path = os.path.join('/tmp', f'temp_video_{os.getpid()}_{datetime.datetime.now().timestamp()}.mp4')
@@ -597,7 +622,7 @@ class SelfieVerificationFlow:
                 except Exception:
                     pass
 
-            # Step 5: Detect hand gestures
+            # Step 6: Detect hand gestures
             detector = get_detector()
             finger_counts = []
 
@@ -616,7 +641,7 @@ class SelfieVerificationFlow:
 
             self.logger.info(f"Detected gestures in {len(frames)} frames")
 
-            # Step 6: Compare detected gestures with expected gestures (same as video_selfie_service.py)
+            # Step 7: Compare detected gestures with expected gestures (same as video_selfie_service.py)
             all_match = True
             mismatches = []
 
@@ -636,54 +661,14 @@ class SelfieVerificationFlow:
 
             self.logger.info(f"All gestures matched: {finger_counts} == {expected_gestures}")
 
-            # Build OTP from expected gestures (for OTP validation)
-            extracted_otp = "".join(map(str, expected_gestures))
-            self.logger.info(f"Extracted OTP from video: {extracted_otp}, hand_detection_rate: 100.0%")
+            # Step 8: Gesture matching IS the OTP validation (same as video_selfie_service.py)
+            # No need to call validate_otp() - we already validated by gesture matching
+            # mobile_number and identity_id are already from the OTP record (from Step 2)
 
-            # Step 7: Validate OTP
-            mobile_number = None
-            identity_id = None
+            self.logger.info(f"Gesture OTP verification successful for {public_key[:16] if public_key else 'None'}...")
+            self.logger.info(f"Using mobile_number: {mobile_number}, identity_id: {identity_id[:16] if identity_id else 'None'}...")
 
-            if require_otp:
-                # For recovery mode (public_key is None), use new OTP validation flow
-                if public_key is None:
-                    # Recovery mode: validate OTP by code and get mobile_number + identity_id
-                    otp_valid, otp_error, mobile_number, identity_id, otp_error_code = self.validation_service.validate_otp(
-                        extracted_otp
-                    )
-
-                    if not otp_valid:
-                        return SelfieVerificationResult(
-                            success=False,
-                            error=otp_error or "OTP validation failed",
-                            error_code=otp_error_code
-                        )
-
-                    self.logger.debug(f"OTP validation passed for recovery mode: {extracted_otp}, mobile: {mobile_number}, identity: {identity_id[:16]}...")
-                else:
-                    # Normal mode: validate OTP against specific public_key
-                    otp_valid, otp_error, otp_error_code = self.validation_service.validate_otp_against_database(
-                        extracted_otp, public_key
-                    )
-
-                    if not otp_valid:
-                        return SelfieVerificationResult(
-                            success=False,
-                            error=otp_error or "OTP validation failed",
-                            error_code=otp_error_code
-                        )
-
-                    # Get mobile_number and identity_id from user_keys
-                    from app.repositories.user_key_repository import UserKeyRepository
-                    user_key_repo = UserKeyRepository()
-                    user_key = user_key_repo.get_key_by_public_key(public_key)
-                    mobile_number = user_key.get('mobile_number') if user_key else None
-                    identity_id = user_key.get('user_identity_id') if user_key else None
-
-                    # Note: OTP deletion is now handled by the calling service
-                    # after user key creation to prevent authentication gap
-
-            # Step 8: Extract face from best frame using gesture timestamps
+            # Step 9: Extract face from best frame using gesture timestamps
             # Use gesture display times for face extraction (when user is making gestures)
             import cv2
             import tempfile
@@ -730,7 +715,7 @@ class SelfieVerificationFlow:
                     try:
                         selfie_data = await self.otp_extractor.extract_face_only(
                             content=frame_bytes,
-                            pre_extracted_otp=extracted_otp
+                            pre_extracted_otp=expected_otp
                         )
 
                         if selfie_data.face_detected:
@@ -779,13 +764,13 @@ class SelfieVerificationFlow:
 
             self.logger.info(
                 f"Video selfie verification passed all checks "
-                f"(OTP: {extracted_otp}, anti-spoofing: {face_result['anti_spoofing_score']:.2f})"
+                f"(OTP: {expected_otp}, anti-spoofing: {face_result['anti_spoofing_score']:.2f})"
             )
 
             # Return success with all extracted data
             return SelfieVerificationResult(
                 success=True,
-                extracted_otp=extracted_otp,
+                extracted_otp=expected_otp,
                 mobile_number=mobile_number,
                 identity_id=identity_id,
                 face_embedding=face_result.get('face_embedding'),

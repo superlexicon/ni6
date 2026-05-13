@@ -350,9 +350,8 @@ class KeyRecoveryService:
             self.logger.info("Using video selfie verification with hand gesture OTP")
             verification_result = await self.selfie_verification.verify_video_selfie(
                 video_bytes=selfie_bytes,
-                public_key=None,  # Recovery mode
+                public_key=temp_public_key,  # Use the temp_public_key from method parameter
                 filename=video_filename,  # Use adjusted filename with video extension
-                otp_code=otp_code,  # Pass OTP code (like registration passes expected_otp)
                 require_otp=True,
                 skip_photoholmes=True  # Skip PhotoHolmes for video (faster)
             )
