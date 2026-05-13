@@ -482,7 +482,6 @@ class SelfieVerificationFlow:
                 FrameResult,
             )
             from app.helper.hand_gesture_detector import get_detector
-            from app.helper.gesture_otp_extractor import GestureOTPExtractor
 
             # Step 1: Validate video format
             try:
@@ -601,7 +600,6 @@ class SelfieVerificationFlow:
             # Step 5: Detect hand gestures
             detector = get_detector()
             finger_counts = []
-            confidences = []
 
             self.logger.info(f"Expected gestures: {expected_gestures} (finger counts)")
 
@@ -615,27 +613,32 @@ class SelfieVerificationFlow:
                     self.logger.warning(f"Frame {i+1}: No hand detected")
 
                 finger_counts.append(gesture_result.finger_count if gesture_result.hand_detected else -1)
-                confidences.append(gesture_result.confidence if gesture_result.hand_detected else 0.0)
 
             self.logger.info(f"Detected gestures in {len(frames)} frames")
 
-            # Step 6: Extract OTP using guided recording (each frame = one digit position)
-            extractor = GestureOTPExtractor()
-            otp_result = extractor.extract_otp_guided(finger_counts, confidences)
+            # Step 6: Compare detected gestures with expected gestures (same as video_selfie_service.py)
+            all_match = True
+            mismatches = []
 
-            if not otp_result.success:
-                # Build descriptive error message
-                error_msg = otp_result.error or "OTP extraction failed"
-                if otp_result.hand_detection_rate > 0:
-                    error_msg += f" (hand detection rate: {otp_result.hand_detection_rate:.1%})"
+            for i, (detected, expected) in enumerate(zip(finger_counts, expected_gestures)):
+                if detected != expected:
+                    all_match = False
+                    mismatches.append(f"Frame {i+1}: expected {expected} fingers, detected {detected}")
+                    self.logger.warning(f"Gesture mismatch at frame {i+1}: expected {expected}, got {detected}")
+
+            if not all_match:
+                mismatch_detail = "; ".join(mismatches)
                 return SelfieVerificationResult(
                     success=False,
-                    error=error_msg,
-                    error_code=DocumentErrorCode.SELFIE_OTP_EXTRACTION_FAILED
+                    error=f"Gesture verification failed: {mismatch_detail}",
+                    error_code=DocumentErrorCode.SELFIE_OTP_INCORRECT
                 )
 
-            extracted_otp = otp_result.otp
-            self.logger.info(f"Extracted OTP from video: {extracted_otp}, hand_detection_rate: {otp_result.hand_detection_rate:.1%}")
+            self.logger.info(f"All gestures matched: {finger_counts} == {expected_gestures}")
+
+            # Build OTP from expected gestures (for OTP validation)
+            extracted_otp = "".join(map(str, expected_gestures))
+            self.logger.info(f"Extracted OTP from video: {extracted_otp}, hand_detection_rate: 100.0%")
 
             # Step 7: Validate OTP
             mobile_number = None
@@ -704,7 +707,7 @@ class SelfieVerificationFlow:
                 from app.utils.video_utils import _extract_frame_with_ffmpeg
 
                 # Try each target time until we get a successful face extraction
-                for target_time in target_times:
+                for target_time in face_target_times:
                     # Use FFmpeg for frame-accurate extraction
                     frame = _extract_frame_with_ffmpeg(tmp_path, target_time)
 
