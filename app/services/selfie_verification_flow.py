@@ -428,7 +428,7 @@ class SelfieVerificationFlow:
     async def verify_video_selfie(
         self,
         video_bytes: bytes,
-        public_key: Optional[str],
+        public_key: str,
         filename: str,
         require_otp: bool = True,
         photoholmes_threshold: Optional[int] = None,
@@ -443,19 +443,19 @@ class SelfieVerificationFlow:
 
         Flow:
         1. Validate video format
-        2. Look up OTP record by public_key (same as registration)
+        2. Look up OTP record by public_key
         3. Parse OTP for timing values (delay/gesture pattern)
         4. Calculate dynamic frame timestamps from OTP
         5. Extract frames at guided timestamps
         6. Detect hand gestures in frames
-        7. Validate by gesture matching (same as registration)
+        7. Validate by gesture matching
         8. Extract face from best frame
         9. Validate anti-spoofing score
         10. Return SelfieVerificationResult
 
         Args:
             video_bytes: Raw bytes of the video file
-            public_key: User's public key (for OTP lookup) - required for video selfie
+            public_key: User's registered public key (for OTP lookup)
             filename: Video filename
             require_otp: Whether OTP is mandatory (default True)
             photoholmes_threshold: Forgery detection threshold (default from config)
@@ -492,7 +492,7 @@ class SelfieVerificationFlow:
                     error_code=DocumentErrorCode.SELFIE_INVALID_VIDEO_FORMAT
                 )
 
-            # Step 2: Look up OTP record by public_key (same as video_selfie_service.py line 127)
+            # Step 2: Look up OTP record by public_key
             if require_otp:
                 if not public_key:
                     return SelfieVerificationResult(
@@ -509,7 +509,7 @@ class SelfieVerificationFlow:
                         error_code=DocumentErrorCode.SELFIE_OTP_INCORRECT
                     )
 
-                # Get expected OTP from record (same as video_selfie_service.py line 142)
+                # Get expected OTP from record
                 expected_otp = otp_record.get('random_number')
                 if not expected_otp or len(expected_otp) != 6:
                     return SelfieVerificationResult(
@@ -518,11 +518,11 @@ class SelfieVerificationFlow:
                         error_code=DocumentErrorCode.SELFIE_OTP_INCORRECT
                     )
 
-                # Store mobile_number and identity_id from OTP record for later use
+                # Store mobile_number and identity_id from OTP record
                 mobile_number = otp_record.get('mobile_number')
-                identity_id = otp_record.get('user_identity_id')  # May be None for new users
+                identity_id = otp_record.get('user_identity_id')
 
-                self.logger.info(f"Found OTP record for public_key: {public_key[:16]}..., OTP: {expected_otp}")
+                self.logger.info(f"Found OTP for public_key: {public_key[:16]}..., OTP: {expected_otp}")
             else:
                 # For testing without OTP
                 expected_otp = "255552"
@@ -665,7 +665,7 @@ class SelfieVerificationFlow:
             # No need to call validate_otp() - we already validated by gesture matching
             # mobile_number and identity_id are already from the OTP record (from Step 2)
 
-            self.logger.info(f"Gesture OTP verification successful for {public_key[:16] if public_key else 'None'}...")
+            self.logger.info(f"Gesture OTP verification successful for {public_key[:16]}...")
             self.logger.info(f"Using mobile_number: {mobile_number}, identity_id: {identity_id[:16] if identity_id else 'None'}...")
 
             # Step 9: Extract face from best frame using gesture timestamps

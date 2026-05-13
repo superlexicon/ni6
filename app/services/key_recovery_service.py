@@ -19,6 +19,7 @@ from app.core.key.scalsa20_crypto import Scalsa20Crypto
 from app.core.key.secp256k1 import KeyPair
 from app.core.logger import get_logger
 from app.helper.face_recognition_factory import get_model_name
+from app.dto import DocumentErrorCode
 
 
 class KeyRecoveryError(Exception):
@@ -348,9 +349,10 @@ class KeyRecoveryService:
                 video_filename = 'recovery_selfie.mp4'
 
             self.logger.info("Using video selfie verification with hand gesture OTP")
+            # Verify video selfie using the registered public key (temp_public_key parameter)
             verification_result = await self.selfie_verification.verify_video_selfie(
                 video_bytes=selfie_bytes,
-                public_key=temp_public_key,  # Use the temp_public_key from method parameter
+                public_key=temp_public_key,  # Use registered public key for OTP lookup
                 filename=video_filename,  # Use adjusted filename with video extension
                 require_otp=True,
                 skip_photoholmes=True  # Skip PhotoHolmes for video (faster)
