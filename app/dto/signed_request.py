@@ -83,6 +83,14 @@ class SignedSecretShareRequest(SignedRequest):
 
     For image selfies: Provide otp_code (extracted from image via OCR/filename)
     For video selfies: Leave otp_code empty (server extracts from hand gestures in video)
+
+    **User Lookup Strategy:**
+    - If mobile_number is provided: Lookup user by mobile_number (with country_code)
+    - If mobile_number is NOT provided: Use facial matching to identify user (recovery mode)
+
+    **Note:** The public_key field in SignedRequest is the TEMPORARY public key for
+    re-encryption, NOT the registered key. For recovery, we look up the user via
+    mobile_number or facial matching.
     """
     temp_public_key: str = Field(..., description="Ephemeral public key for result encryption")
     selfie_data: str = Field(..., description="Base64-encoded selfie image/video")
@@ -91,6 +99,8 @@ class SignedSecretShareRequest(SignedRequest):
     callback_url: Optional[str] = Field(None, description="Optional callback URL")
     target_server_public_key: Optional[str] = Field(None, description="Optional routing hint")
     api_url: Optional[str] = Field(None, description="Optional API URL to filter shares by (only return shares from this API)")
+    mobile_number: Optional[str] = Field(None, description="Mobile number for user lookup (recovery flow)")
+    country_code: Optional[str] = Field(None, description="Country code for mobile number (e.g., '+91', '+1')")
 
 
 def verify_signed_request(request: SignedRequest) -> bool:

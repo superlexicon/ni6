@@ -81,30 +81,36 @@ async def request_secret_share(
         from app.repositories.user_key_repository import UserKeyRepository
         from app.core.key.ecdsa_recovery import ECDSARecovery
 
-        # Step 1: Get user_key and identity_id directly from public_key
+        # Step 1: Get user_key and identity_id using recovery lookup strategy
         user_key_repo = UserKeyRepository()
-        user_key = user_key_repo.get_key_by_public_key(request.public_key)
+        user_key = None
+        identity_id = None
+        mobile_number = None
+        country_code = None
 
-        if not user_key:
-            logger.error(f"No user key found for public_key: {request.public_key[:16]}...")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No registered account found. Please complete verification first."
+        # Recovery lookup strategy:
+        # 1. If mobile_number provided -> lookup by mobile_number (with country code)
+        # 2. If mobile_number NOT provided -> use facial matching (NOT public_key lookup!)
+        # IMPORTANT: For recovery, temporary public_keys won't exist in user_keys table
+        if hasattr(request, 'mobile_number') and request.mobile_number:
+            # Concatenate country_code with mobile_number to match database format
+            full_mobile_number = f"{request.country_code}{request.mobile_number}" if request.country_code else request.mobile_number
+            user_key = user_key_repo.get_key_by_mobile_number(
+                mobile_number=full_mobile_number,
+                country_code=None  # Not needed - we're passing the full number
             )
-
-        identity_id = user_key.get('user_identity_id')
-        if not identity_id:
-            logger.error(f"User key found but no identity_id: {request.public_key[:16]}...")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Account not fully verified. Please complete all verification steps."
-            )
-
-        logger.info(f"Found user_key for public_key: {request.public_key[:16]}..., identity_id: {identity_id}")
-
-        # For reference in job processing, get mobile_number and country_code from user_key
-        mobile_number = user_key.get('mobile_number')
-        country_code = user_key.get('country_code')
+            if user_key:
+                identity_id = user_key.get('user_identity_id')
+                mobile_number = user_key.get('mobile_number')
+                country_code = user_key.get('country_code')
+                logger.info(f"Found user_key via mobile_number lookup: {full_mobile_number}")
+            else:
+                logger.warning(f"No user_key found for mobile_number: {full_mobile_number}")
+                # Continue - will use facial matching to identify user
+        else:
+            # No mobile_number provided - will use facial matching in job processor
+            # Do NOT attempt public_key lookup for recovery (temporary keys don't exist)
+            logger.info(f"No mobile_number provided - will use facial matching for identification")
 
         # Step 2: Verify signature with temp_public_key (user's recovery key)
         message = f"request:{request.timestamp}"
@@ -137,9 +143,9 @@ async def request_secret_share(
                 file_type="selfie",  # For classification (selfie vs document)
                 document_type="secret_share_recovery"  # For routing to correct processor
             )],
-            identity_id=identity_id,
-            mobile_number=mobile_number,
-            country_code=country_code,  # Required for SMS formatting
+            identity_id=identity_id,  # None when recovery_mode=True (will be found via facial matching)
+            mobile_number=mobile_number,  # None when no mobile_number provided
+            country_code=country_code,
             otp_code=request.otp_code,
             callback_url=request.callback_url,
             target_server_public_key=request.target_server_public_key,
