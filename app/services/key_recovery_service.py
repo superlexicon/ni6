@@ -352,6 +352,7 @@ class KeyRecoveryService:
                 video_bytes=selfie_bytes,
                 public_key=None,  # Recovery mode
                 filename=video_filename,  # Use adjusted filename with video extension
+                otp_code=otp_code,  # Pass OTP code (like registration passes expected_otp)
                 require_otp=True,
                 skip_photoholmes=True  # Skip PhotoHolmes for video (faster)
             )

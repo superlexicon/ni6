@@ -430,6 +430,7 @@ class SelfieVerificationFlow:
         video_bytes: bytes,
         public_key: Optional[str],
         filename: str,
+        otp_code: Optional[str] = None,  # Accept OTP code directly (like registration)
         require_otp: bool = True,
         photoholmes_threshold: Optional[int] = None,
         anti_spoofing_threshold: Optional[float] = None,
@@ -443,18 +444,21 @@ class SelfieVerificationFlow:
 
         Flow:
         1. Validate video format
-        2. Extract frames at guided timestamps
-        3. Detect hand gestures in frames
-        4. Extract OTP from gesture sequence
-        5. Validate OTP (recovery mode)
-        6. Extract face from best frame
-        7. Validate anti-spoofing score
-        8. Return SelfieVerificationResult
+        2. Parse OTP for timing values (delay/gesture pattern)
+        3. Calculate dynamic frame timestamps from OTP
+        4. Extract frames at guided timestamps
+        5. Detect hand gestures in frames
+        6. Extract OTP from gesture sequence
+        7. Validate OTP (recovery mode)
+        8. Extract face from best frame
+        9. Validate anti-spoofing score
+        10. Return SelfieVerificationResult
 
         Args:
             video_bytes: Raw bytes of the video file
             public_key: User's public key (for OTP lookup) - None for recovery mode
             filename: Video filename
+            otp_code: 6-digit OTP code (format: D1G1D2G2D3G3 - delay,gesture,delay,gesture,delay,gesture)
             require_otp: Whether OTP is mandatory (default True)
             photoholmes_threshold: Forgery detection threshold (default from config)
             anti_spoofing_threshold: Liveness threshold (default from config)
@@ -491,30 +495,37 @@ class SelfieVerificationFlow:
                     error_code=DocumentErrorCode.SELFIE_INVALID_VIDEO_FORMAT
                 )
 
-            # Step 2: Parse 6-digit OTP for timing values (format: delay1, gesture1, delay2, gesture2, delay3, gesture3)
-            # Example: 255552 → delay1=2s, gesture1=5 fingers, delay2=5s, gesture2=5 fingers, delay3=5s, gesture3=2 fingers
-            # For recovery mode, we need to extract OTP from filename first since we don't have it yet
+            # Step 2: Parse OTP for timing values (same as video_selfie_service.py lines 151-161)
+            # OTP Format: delay1, gesture1, delay2, gesture2, delay3, gesture3
+            # Example: 255552 -> delay1=2s, gesture1=5 fingers, delay2=5s, gesture2=5 fingers, delay3=5s, gesture3=2 fingers
             if require_otp:
-                # Extract OTP from filename for recovery mode
-                from app.helper.extractors.selfie_otp_extractor import SelfieOTPExtractor
-                otp_extractor = SelfieOTPExtractor()
-                otp_data = await otp_extractor.extract_otp_quick(video_bytes, filename)
-                parsed_otp = otp_data.get('otp')
-
-                if not parsed_otp or len(parsed_otp) != 6:
+                if not otp_code or len(otp_code) != 6:
                     return SelfieVerificationResult(
                         success=False,
                         error="Video selfie requires 6-digit OTP for gesture timing (format: D1G1D2G2D3G3)",
                         error_code=DocumentErrorCode.SELFIE_OTP_INCORRECT
                     )
+                expected_otp = otp_code
             else:
-                # For testing without OTP, use default timing values
-                parsed_otp = "255552"  # Default OTP format
+                expected_otp = "255552"  # Default for testing
 
-            timings = [int(parsed_otp[0]), int(parsed_otp[2]), int(parsed_otp[4])]  # Delay values
-            expected_gestures = [int(parsed_otp[1]), int(parsed_otp[3]), int(parsed_otp[5])]  # Finger counts
+            # Parse OTP: odd positions = delays, even positions = expected gestures
+            timing1 = int(expected_otp[0])  # Digit 1: delay before first gesture (seconds)
+            gesture1 = int(expected_otp[1])  # Digit 2: expected finger count (1-5)
+            timing2 = int(expected_otp[2])  # Digit 3: delay after first gesture (seconds)
+            gesture2 = int(expected_otp[3])  # Digit 4: expected finger count (1-5)
+            timing3 = int(expected_otp[4])  # Digit 5: delay after second gesture (seconds)
+            gesture3 = int(expected_otp[5])  # Digit 6: expected finger count (1-5)
 
-            self.logger.info(f"Parsed OTP {parsed_otp}: timings={timings}, expected_gestures={expected_gestures}")
+            timings = [timing1, timing2, timing3]
+            expected_gestures = [gesture1, gesture2, gesture3]
+
+            self.logger.info(
+                f"Gesture OTP {expected_otp}: "
+                f"After {timing1}s show {gesture1} fingers, "
+                f"after reaction+1s gap+{timing2}s show {gesture2} fingers, "
+                f"after reaction+1s gap+{timing3}s show {gesture3} fingers"
+            )
 
             # Step 3: Calculate dynamic frame timestamps from OTP timing values
             reaction_time = 1.0  # 1 second reaction time for user to form gesture
