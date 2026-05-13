@@ -472,8 +472,10 @@ class SelfieVerificationFlow:
             # Import video utilities
             from app.utils.video_utils import (
                 validate_video_format,
-                extract_frames,
+                get_video_metadata,
+                _extract_frame_with_ffmpeg,
                 VideoValidationError,
+                FrameResult,
             )
             from app.helper.hand_gesture_detector import get_detector
             from app.helper.gesture_otp_extractor import GestureOTPExtractor
@@ -489,30 +491,124 @@ class SelfieVerificationFlow:
                     error_code=DocumentErrorCode.SELFIE_INVALID_VIDEO_FORMAT
                 )
 
-            # Step 2: Extract frames
+            # Step 2: Parse 6-digit OTP for timing values (format: delay1, gesture1, delay2, gesture2, delay3, gesture3)
+            # Example: 255552 → delay1=2s, gesture1=5 fingers, delay2=5s, gesture2=5 fingers, delay3=5s, gesture3=2 fingers
+            # For recovery mode, we need to extract OTP from filename first since we don't have it yet
+            if require_otp:
+                # Extract OTP from filename for recovery mode
+                from app.helper.extractors.selfie_otp_extractor import SelfieOTPExtractor
+                otp_extractor = SelfieOTPExtractor()
+                otp_data = await otp_extractor.extract_otp_quick(video_bytes, filename)
+                parsed_otp = otp_data.get('otp')
+
+                if not parsed_otp or len(parsed_otp) != 6:
+                    return SelfieVerificationResult(
+                        success=False,
+                        error="Video selfie requires 6-digit OTP for gesture timing (format: D1G1D2G2D3G3)",
+                        error_code=DocumentErrorCode.SELFIE_INVALID_OTP
+                    )
+            else:
+                # For testing without OTP, use default timing values
+                parsed_otp = "255552"  # Default OTP format
+
+            timings = [int(parsed_otp[0]), int(parsed_otp[2]), int(parsed_otp[4])]  # Delay values
+            expected_gestures = [int(parsed_otp[1]), int(parsed_otp[3]), int(parsed_otp[5])]  # Finger counts
+
+            self.logger.info(f"Parsed OTP {parsed_otp}: timings={timings}, expected_gestures={expected_gestures}")
+
+            # Step 3: Calculate dynamic frame timestamps from OTP timing values
+            reaction_time = 1.0  # 1 second reaction time for user to form gesture
+            gesture_gap = 1.0  # 1 second gap between gestures
+
+            # Gesture 1 display and frame extraction
+            gesture1_display_time = float(timings[0])
+            frame1_time = gesture1_display_time + reaction_time
+
+            # Gesture 2 display and frame extraction
+            gesture2_display_time = gesture1_display_time + reaction_time + gesture_gap + float(timings[1])
+            frame2_time = gesture2_display_time + reaction_time
+
+            # Gesture 3 display and frame extraction
+            gesture3_display_time = gesture2_display_time + reaction_time + gesture_gap + float(timings[2])
+            frame3_time = gesture3_display_time + reaction_time
+
+            frame_times = [frame1_time, frame2_time, frame3_time]
+
+            self.logger.info(
+                f"Gesture display times: {gesture1_display_time}s, {gesture2_display_time}s, {gesture3_display_time}s"
+            )
+            self.logger.info(f"Extracting frames at {frame_times}")
+
+            # Step 4: Extract frames at calculated timestamps using FFmpeg
+            import datetime
+            os.makedirs('/tmp', exist_ok=True)
+            tmp_path = os.path.join('/tmp', f'temp_video_{os.getpid()}_{datetime.now().timestamp()}.mp4')
+            with open(tmp_path, 'wb') as tmp:
+                tmp.write(video_bytes)
+
             try:
-                frames, metadata = extract_frames(video_bytes)
-                self.logger.info(f"Extracted {len(frames)} frames from video")
-            except VideoValidationError as e:
+                metadata = get_video_metadata(tmp_path)
+
+                max_time = max(frame_times)
+                if max_time >= metadata.duration_seconds:
+                    return SelfieVerificationResult(
+                        success=False,
+                        error=f"Frame time {max_time}s exceeds video duration {metadata.duration_seconds}s",
+                        error_code=DocumentErrorCode.SELFIE_INVALID_VIDEO_FORMAT
+                    )
+
+                frames = []
+                for i, target_time in enumerate(frame_times):
+                    frame = _extract_frame_with_ffmpeg(tmp_path, target_time)
+                    if frame is None or frame.size == 0:
+                        return SelfieVerificationResult(
+                            success=False,
+                            error=f"Failed to extract frame {i+1} at {target_time}s",
+                            error_code=DocumentErrorCode.SELFIE_INVALID_VIDEO_FORMAT
+                        )
+                    frames.append(FrameResult(
+                        frame=frame,
+                        frame_index=i,
+                        timestamp_seconds=target_time
+                    ))
+
+                self.logger.info(f"Extracted {len(frames)} frames from video at dynamic timestamps")
+
+            except Exception as e:
                 return SelfieVerificationResult(
                     success=False,
-                    error=f"Frame extraction failed: {e.message}",
+                    error=f"Frame extraction failed: {str(e)}",
                     error_code=DocumentErrorCode.SELFIE_INVALID_VIDEO_FORMAT
                 )
+            finally:
+                # Clean up temp file
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
 
-            # Step 3: Detect hand gestures
+            # Step 5: Detect hand gestures
             detector = get_detector()
             finger_counts = []
             confidences = []
 
+            self.logger.info(f"Expected gestures: {expected_gestures} (finger counts)")
+
             for i, frame_result in enumerate(frames):
+                self.logger.debug(f"Processing frame {i+1}/3 (expected: {expected_gestures[i]} fingers)")
                 gesture_result = detector.detect_gesture(frame_result.frame)
+
+                if gesture_result.hand_detected:
+                    self.logger.info(f"Frame {i+1}: Detected {gesture_result.finger_count} fingers (confidence: {gesture_result.confidence:.3f})")
+                else:
+                    self.logger.warning(f"Frame {i+1}: No hand detected")
+
                 finger_counts.append(gesture_result.finger_count if gesture_result.hand_detected else -1)
                 confidences.append(gesture_result.confidence if gesture_result.hand_detected else 0.0)
 
             self.logger.info(f"Detected gestures in {len(frames)} frames")
 
-            # Step 4: Extract OTP using guided recording (each frame = one digit position)
+            # Step 6: Extract OTP using guided recording (each frame = one digit position)
             extractor = GestureOTPExtractor()
             otp_result = extractor.extract_otp_guided(finger_counts, confidences)
 
@@ -530,7 +626,7 @@ class SelfieVerificationFlow:
             extracted_otp = otp_result.otp
             self.logger.info(f"Extracted OTP from video: {extracted_otp}, hand_detection_rate: {otp_result.hand_detection_rate:.1%}")
 
-            # Step 5: Validate OTP
+            # Step 7: Validate OTP
             mobile_number = None
             identity_id = None
 
@@ -573,13 +669,19 @@ class SelfieVerificationFlow:
                     # Note: OTP deletion is now handled by the calling service
                     # after user key creation to prevent authentication gap
 
-            # Step 6: Extract face from best frame (try each frame until successful)
-            # Target timestamps for face extraction: 4.5s, 8.5s, 12.5s, 16.5s (digit display windows)
+            # Step 8: Extract face from best frame using gesture timestamps
+            # Use gesture display times for face extraction (when user is making gestures)
             import cv2
             import tempfile
 
             face_result = None
-            target_times = [4.5, 8.5, 12.5, 16.5]
+            # Use gesture display times + reaction time for face extraction
+            # These are the times when the user should be visible in the frame
+            face_target_times = [
+                gesture1_display_time + 0.5,  # Early in gesture 1
+                gesture2_display_time + 0.5,  # Early in gesture 2
+                gesture3_display_time + 0.5,  # Early in gesture 3
+            ]
 
             # Create temporary file for FFmpeg
             with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp:
@@ -657,7 +759,7 @@ class SelfieVerificationFlow:
             if not face_result or not face_result['success']:
                 return SelfieVerificationResult(
                     success=False,
-                    error=f"No face detected in video frames at {target_times}",
+                    error=f"No face detected in video frames at {face_target_times}",
                     error_code=DocumentErrorCode.SELFIE_NO_FACE_DETECTED
                 )
 
