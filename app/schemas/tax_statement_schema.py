@@ -36,3 +36,6 @@ class TaxStatementData(BaseModel):
     # - Dict[str, float] (legacy format, 0-100)
     # - Dict[str, dict] (new format with 'overall_confidence' and 'sources')
     confidence_scores: Dict[str, Union[float, Dict[str, Any]]] = {}
+
+    # Raw OCR text as concatenated string
+    raw_data: Optional[str] = None  # Full OCR text for debugging/auditing

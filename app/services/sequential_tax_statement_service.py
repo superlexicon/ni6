@@ -206,7 +206,10 @@ class SequentialTaxStatementService:
 
                 if key_injection_result.success and key_injection_result.detected_keys:
                     # Build extracted_data from key injection results
-                    extracted = self._build_extracted_data_from_keys(key_injection_result.detected_keys)
+                    extracted = self._build_extracted_data_from_keys(
+                        key_injection_result.detected_keys,
+                        text_blocks
+                    )
 
                     # Check if we have required fields
                     required_fields = ['taxpayer_name', 'tax_year', 'gross_income']
@@ -225,11 +228,15 @@ class SequentialTaxStatementService:
         tax_data = await self.tax_statement_extractor.extract(image_bytes, is_pdf)
         return self._build_extracted_data_from_schema(tax_data)
 
-    def _build_extracted_data_from_keys(self, detected_keys: list) -> Dict[str, Any]:
+    def _build_extracted_data_from_keys(self, detected_keys: list, text_blocks: list) -> Dict[str, Any]:
         """Build extracted_data dict from key injection detected keys."""
         extracted = {}
         for key in detected_keys:
             extracted[key.key_name] = key.value_candidate
+
+        # Add raw OCR text
+        extracted['raw_data'] = "\n".join([block.get('text', '') for block in text_blocks])
+
         return extracted
 
     def _build_extracted_data_from_schema(self, tax_data) -> Dict[str, Any]:
@@ -255,6 +262,7 @@ class SequentialTaxStatementService:
             "filing_date": getattr(tax_data, 'filing_date', None),
             "filing_status": getattr(tax_data, 'filing_status', None),
             "tax_authority": getattr(tax_data, 'tax_authority', None),
+            "raw_data": getattr(tax_data, 'raw_data', None),
         }
 
     async def _validate_tax_statement(self, extracted_data: Dict[str, Any]):

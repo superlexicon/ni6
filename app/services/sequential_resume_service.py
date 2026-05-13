@@ -167,6 +167,7 @@ class SequentialResumeService(DocumentProcessorBase):
             "education": getattr(resume_data, 'education', None),
             "work_experience": getattr(resume_data, 'work_experience', None),
             "skills": getattr(resume_data, 'skills', None),
+            "raw_data": getattr(resume_data, 'raw_data', None),
         }
 
     def _extract_with_regex(self, raw_text: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:

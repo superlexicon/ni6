@@ -153,6 +153,7 @@ class SequentialDrivingLicenseService(DocumentProcessorBase):
                 "address": document_data.get('address'),
                 "date_of_issue": document_data.get('issue_date'),
                 "vehicle_classes": document_data.get('vehicle_classes'),
+                "raw_data": getattr(document_data, 'raw_data', None),  # Full OCR text for debugging/auditing
             }
 
             # Filter out None values

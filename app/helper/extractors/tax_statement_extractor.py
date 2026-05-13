@@ -109,6 +109,9 @@ class TaxStatementExtractor:
                 tax_data.tax_authority = authority_match.group(1).strip()
                 tax_data.confidence_scores['tax_authority'] = 70.0
 
+            # Store raw OCR text for debugging/auditing
+            tax_data.raw_data = text
+
             return tax_data
 
         except Exception as e:

@@ -85,6 +85,7 @@ class SequentialIDCardService(DocumentProcessorBase):
                 "full_name": result.full_name,
                 "date_of_birth": result.date_of_birth,
                 "identification_number": result.identification_number,
+                "raw_data": result.raw_data,  # Full OCR text for debugging/auditing
                 **result.field_values,
             }
 
@@ -116,6 +117,7 @@ class SequentialIDCardService(DocumentProcessorBase):
                 "issuing_country": "AE",
                 "full_name": result.full_name,
                 "identification_number": result.identification_number,
+                "raw_data": result.raw_data,  # Full OCR text for debugging/auditing
                 **result.field_values,
             }
 
@@ -148,6 +150,7 @@ class SequentialIDCardService(DocumentProcessorBase):
             "date_of_birth": result.date_of_birth,
             "gender": result.gender,
             "identification_number": result.identification_number,
+            "raw_data": result.raw_data,  # Full OCR text for debugging/auditing
             # All field_values as separate fields for flexibility
             **result.field_values,
         }

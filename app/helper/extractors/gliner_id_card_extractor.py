@@ -150,7 +150,7 @@ class GLiNERIDCardExtractor:
             # Step 6: Post-process and build result
             self.logger.info("Step 5: Building result")
             result = self._build_result(
-                gliner_result, paired_fields, document_type
+                gliner_result, paired_fields, document_type, text_blocks
             )
 
             # Step 7: Auto-detect country
@@ -533,7 +533,8 @@ class GLiNERIDCardExtractor:
         self,
         gliner_result: Dict[str, Any],
         paired_fields: Dict[str, str],
-        document_type: Optional[str]
+        document_type: Optional[str],
+        text_blocks: List[Dict]
     ) -> IDCardData:
         """
         Build IDCardData from extraction results.
@@ -673,7 +674,8 @@ class GLiNERIDCardExtractor:
             identification_number=identification_number,
             field_values=field_values,
             confidence_scores=confidence_scores,
-            raw_entities=raw_entities
+            raw_entities=raw_entities,
+            raw_data="\n".join([block.get('text', '') for block in text_blocks])  # Full OCR text
         )
 
         # Calculate overall confidence

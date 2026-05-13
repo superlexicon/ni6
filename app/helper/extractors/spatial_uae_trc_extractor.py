@@ -98,6 +98,9 @@ class SpatialUAETRCExtractor:
             if confidence_scores:
                 overall_confidence = sum(confidence_scores.values()) / len(confidence_scores)
 
+            # Build raw_data from text_blocks
+            raw_data = "\n".join([block.get('text', '') for block in text_blocks])
+
             result = IDCardData(
                 document_type="UAE_TRC",
                 issuing_country="AE",
@@ -105,7 +108,8 @@ class SpatialUAETRCExtractor:
                 identification_number=certificate_number,
                 field_values=field_values,
                 confidence_scores=confidence_scores,
-                overall_confidence=overall_confidence
+                overall_confidence=overall_confidence,
+                raw_data=raw_data  # Full OCR text for debugging/auditing
             )
 
             self.logger.info("=" * 80)

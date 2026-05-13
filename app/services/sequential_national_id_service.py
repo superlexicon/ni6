@@ -151,6 +151,7 @@ class SequentialNationalIdService(DocumentProcessorBase):
                 "document_country": document_data.get('issuing_country') or document_data.country_code,
                 "address": document_data.get('address'),
                 "date_of_issue": document_data.get('issue_date'),
+                "raw_data": getattr(document_data, 'raw_data', None),  # Full OCR text for debugging/auditing
             }
 
             # Filter out None values

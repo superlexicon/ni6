@@ -1,7 +1,7 @@
 -- IM-OSINT Database Schema
--- Version: 1.9.0
+-- Version: 1.11.0
 -- Created: 2025-11-27
--- Updated: 2026-04-12
+-- Updated: 2026-05-13
 -- MySQL Requirements: MariaDB 11.7+ (for VECTOR type)
 -- Description: Complete schema for IM-OSINT KYC verification application
 -- Encryption: ECIES (ephemeral key) for user-only PII decryption
@@ -508,3 +508,23 @@ SHOW INDEX FROM sanctions_entries;
 --    Drop model_name column and indexes
 --    Restore old trigger (without model filtering)
 
+-- ===============================================
+-- Document Submissions client_public_key Column (v1.11.0)
+-- ===============================================
+-- For existing databases that are missing the client_public_key column:
+--
+-- 1. Add client_public_key column to document_submissions (run migration file):
+--    See schema/migrations/003_add_client_public_key_to_document_submissions.sql
+--
+--    This adds:
+--    - client_public_key VARCHAR(255) NULL to document_submissions
+--    - idx_client_public_key index for efficient lookups
+--
+-- 2. The column is used for:
+--    - Filtering submissions by the device that submitted them (multi-device support)
+--    - Looking up submissions by client public key
+--    - Ensuring devices can only decrypt their own encrypted submissions
+--
+-- 3. To rollback (remove the column):
+--    DROP INDEX idx_client_public_key ON document_submissions;
+--    ALTER TABLE document_submissions DROP COLUMN client_public_key;

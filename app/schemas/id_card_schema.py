@@ -54,6 +54,9 @@ class IDCardData(BaseModel):
     # Overall confidence score (0-100)
     overall_confidence: Optional[float] = None
 
+    # Raw OCR text as concatenated string
+    raw_data: Optional[str] = None  # Full OCR text for debugging/auditing
+
     def _get_confidence_float(self, value: Union[float, FieldConfidence, Dict[str, Any]]) -> float:
         """
         Extract a float confidence value from various formats.

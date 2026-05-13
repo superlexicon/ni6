@@ -46,11 +46,13 @@ class DocumentExtractionResult:
         country_code: str,
         confidence: float,
         text_blocks: Optional[List[Dict]] = None,
+        raw_data: Optional[str] = None,
         **fields
     ):
         self.document_type = document_type  # "passport" or "id_card"
         self.country_code = country_code
         self.confidence = confidence
+        self.raw_data = raw_data  # Full OCR text for debugging/auditing
         self.fields = fields
         self.text_blocks = text_blocks or []  # Raw OCR blocks with geometry
 
@@ -358,6 +360,7 @@ class UnifiedIDExtractor:
             country_code=country_code,
             confidence=confidence,
             text_blocks=text_blocks,
+            raw_data=all_text,
             **extracted_fields_copy
         )
 

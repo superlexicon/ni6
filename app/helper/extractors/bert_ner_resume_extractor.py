@@ -82,6 +82,9 @@ class BertNerResumeExtractor:
 
             self.logger.info(f"Extracted {len(text)} characters from document")
 
+            # Store the raw text for later use
+            self._raw_text = text
+
             # Get BERT NER model
             model, tokenizer = await self.model_wrapper.get_model_with_gpu()
 
@@ -90,6 +93,9 @@ class BertNerResumeExtractor:
 
             # Map to ResumeData schema
             resume_data = self._map_to_resume_data(entities)
+
+            # Store raw OCR text for debugging/auditing
+            resume_data.raw_data = self._raw_text
 
             self.logger.info(f"Successfully extracted resume data with {len(resume_data.confidence_scores)} fields")
             return resume_data
@@ -417,6 +423,9 @@ class BertNerResumeExtractor:
 
             # Map to ResumeData schema
             resume_data = self._map_to_resume_data(entities)
+
+            # Store raw OCR text for debugging/auditing
+            resume_data.raw_data = text
 
             return resume_data, entities
 
