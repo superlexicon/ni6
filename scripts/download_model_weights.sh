@@ -853,11 +853,18 @@ download_photoholmes() {
     elif check_file_exists_and_valid "$exif_original"; then
         log_info "  [3/6] EXIF as Language weights downloaded but need pruning..."
         if [ "$DRY_RUN" = "true" ]; then
-            log_info "  [3/6] Would run: python -m photoholmes.methods.exif_as_language prune-weights"
+            log_info "  [3/6] Would prune weights..."
             success_count=$((success_count + 1))
         else
             log_info "  [3/6] Pruning weights..."
-            if (cd "$exif_dir" && python -m photoholmes.methods.exif_as_language prune-weights >/dev/null 2>&1); then
+            # Change to exif directory so prune function can find wrapper_75_new.pth
+            if (cd "$exif_dir" && python -c "
+import sys
+sys.path.insert(0, '$PROJECT_ROOT/app')
+from photoholmes.methods.exif_as_language.prune_original_weights import prune_original_weights
+prune_original_weights('wrapper_75_new.pth', 'weights.pth')
+print('✓ Weights pruned successfully')
+" >/dev/null 2>&1); then
                 if [ -f "$exif_pruned" ]; then
                     log_success "  [3/6] Pruned EXIF as Language weights"
                     success_count=$((success_count + 1))
@@ -865,7 +872,7 @@ download_photoholmes() {
                     log_error "  [3/6] Pruning failed - weights.pth not created"
                 fi
             else
-                log_error "  [3/6] Pruning failed - Run manually: python -m photoholmes.methods.exif_as_language prune-weights"
+                log_error "  [3/6] Pruning failed - Run manually"
             fi
         fi
     else
@@ -879,7 +886,14 @@ download_photoholmes() {
                     log_success "  [3/6] Downloaded EXIF as Language ($(format_size "$downloaded_size"))"
                     # Prune the weights to create weights.pth
                     log_info "  [3/6] Pruning weights..."
-                    if (cd "$exif_dir" && python -m photoholmes.methods.exif_as_language prune-weights >/dev/null 2>&1); then
+                    # Change to exif directory so prune function can find wrapper_75_new.pth
+                    if (cd "$exif_dir" && python -c "
+import sys
+sys.path.insert(0, '$PROJECT_ROOT/app')
+from photoholmes.methods.exif_as_language.prune_original_weights import prune_original_weights
+prune_original_weights('wrapper_75_new.pth', 'weights.pth')
+print('✓ Weights pruned successfully')
+" >/dev/null 2>&1); then
                         if [ -f "$exif_pruned" ]; then
                             log_success "  [3/6] Pruned EXIF as Language weights"
                             success_count=$((success_count + 1))
@@ -887,7 +901,7 @@ download_photoholmes() {
                             log_error "  [3/6] Pruning failed - weights.pth not created"
                         fi
                     else
-                        log_error "  [3/6] Pruning failed - Run manually: python -m photoholmes.methods.exif_as_language prune-weights"
+                        log_error "  [3/6] Pruning failed - Run manually"
                     fi
                 else
                     rm -f "$tmp_file"
