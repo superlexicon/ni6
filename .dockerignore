@@ -177,12 +177,15 @@ Thumbs.db
 *.joblib
 *.model
 *.bin
+*.pth
+*.dat
+*.onnx
 *.ckpt
 
 # Explicitly include model weights (override exclusions above)
-!app/deepface/.deepface/weights/
-!app/photoholmes/weights/
-!app/models/
+!app/deepface/.deepface/weights/**/*
+!app/photoholmes/weights/**/*
+!app/models/**/*
 
 # Model weights locations:
 # - app/deepface/.deepface/weights/ - DeepFace face detection models

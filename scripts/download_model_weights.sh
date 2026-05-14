@@ -246,7 +246,8 @@ download_deepface() {
         for f in vgg_face_weights.h5 facenet_weights.h5 facenet512_weights.h5 openface_weights.h5 \
                  deepid_keras_weights.h5 arcface_weights.h5 face_recognition_sface_2021dec.onnx \
                  GhostFaceNet_W1.3_S1_ArcFace.h5 VGGFace2_DeepFace_weights_val-0.9034.h5 \
-                 dlib_face_recognition_resnet_model_v1.dat; do
+                 dlib_face_recognition_resnet_model_v1.dat \
+                 retinaface.h5 2.7_80x80_MiniFASNetV2.pth 4_0_0_80x80_MiniFASNetV1SE.pth; do
             if ! check_file_exists_and_valid "$DEEPFACE_TARGET/$f"; then
                 all_valid=false
                 break
@@ -266,7 +267,7 @@ download_deepface() {
     mkdir -p "$DEEPFACE_TARGET"
     local tmp_dir=$(mktemp -d)
     local success_count=0
-    local total_count=10
+    local total_count=13
 
     log_info "Downloading DeepFace weights..."
 
@@ -343,6 +344,23 @@ download_deepface() {
                 success_count=$((success_count + 1))
             fi
         fi
+    fi
+
+    # RetinaFace (face detector)
+    if download_file "https://github.com/serengil/deepface_models/releases/download/v1.0/retinaface.h5" \
+            "$DEEPFACE_TARGET/retinaface.h5" "true"; then
+        success_count=$((success_count + 1))
+    fi
+
+    # Anti-spoofing models (FASNet)
+    if download_file "https://github.com/minivision-ai/Silent-Face-Anti-Spoofing/raw/master/resources/anti_spoof_models/2.7_80x80_MiniFASNetV2.pth" \
+            "$DEEPFACE_TARGET/2.7_80x80_MiniFASNetV2.pth" "true"; then
+        success_count=$((success_count + 1))
+    fi
+
+    if download_file "https://github.com/minivision-ai/Silent-Face-Anti-Spoofing/raw/master/resources/anti_spoof_models/4_0_0_80x80_MiniFASNetV1SE.pth" \
+            "$DEEPFACE_TARGET/4_0_0_80x80_MiniFASNetV1SE.pth" "true"; then
+        success_count=$((success_count + 1))
     fi
 
     rm -rf "$tmp_dir"
@@ -827,7 +845,7 @@ download_photoholmes() {
     mkdir -p "$exif_dir"
 
     local exif_original="${exif_dir}/wrapper_75_new.pth"
-    local exif_pruned="${exif_dir}/wrapper_75_new_pruned.pth"
+    local exif_pruned="${exif_dir}/weights.pth"
 
     if check_file_exists_and_valid "$exif_pruned"; then
         log_info "  [3/6] EXIF as Language already exists (skipped)"
@@ -866,7 +884,7 @@ download_photoholmes() {
     mkdir -p "$focal_dir"
 
     # FOCAL ViT
-    local focal_vit_target="${focal_dir}/Focal_ViT_weights.pth"
+    local focal_vit_target="${focal_dir}/VIT_weights.pth"
     local focal_vit_valid=false
     if check_file_exists_and_valid "$focal_vit_target"; then
         log_info "  [4a/6] FOCAL ViT already exists (skipped)"
@@ -894,7 +912,7 @@ download_photoholmes() {
     fi
 
     # FOCAL HRNet
-    local focal_hrnet_target="${focal_dir}/Focal_HRNet_weights.pth"
+    local focal_hrnet_target="${focal_dir}/HRNet_weights.pth"
     local focal_hrnet_valid=false
     if check_file_exists_and_valid "$focal_hrnet_target"; then
         log_info "  [4b/6] FOCAL HRNet already exists (skipped)"
