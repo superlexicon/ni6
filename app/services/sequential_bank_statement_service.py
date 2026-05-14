@@ -1458,6 +1458,7 @@ class SequentialBankStatementService(DocumentProcessorBase):
             if not self._has_account_number_label(text_blocks):
                 self.logger.warning("No account number label found in document - rejecting as unsupported document type")
                 result['error_message'] = "Document rejected: No account number label found. This may be a credit card statement or unsupported document type."
+                result['extracted_data'] = {'raw_data': raw_text}  # Include raw_data since OCR completed
                 result['elapsed_seconds'] = time.time() - start_time
                 return result
 

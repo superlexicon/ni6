@@ -100,6 +100,9 @@ class SequentialTaxStatementService:
                 safe_ocr_extraction()
             )
 
+            # Build raw_text from text_blocks (for error responses)
+            raw_text = "\n".join([block.get('text', '') for block in text_blocks])
+
             # Process PhotoHolmes results
             forgery_checks = None
             if photoholmes_results:
@@ -121,7 +124,8 @@ class SequentialTaxStatementService:
                         job_id=job_id,
                         verification_state=current_state,  # Unchanged
                         processing_time_seconds=round(time.time() - start_time, 2),
-                        forgery_checks=forgery_checks
+                        forgery_checks=forgery_checks,
+                        extracted_data={'raw_data': raw_text}  # Include raw_data since OCR completed
                     )
 
             # PHASE 3: Extract tax data (hybrid approach: key injection + regex fallback)

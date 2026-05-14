@@ -317,7 +317,8 @@ class DocumentProcessorBase(ABC):
                 current_state = self.state_service.get_verification_state(client_public_key)
                 current_seq = self.state_service.get_sequence_no(client_public_key)
                 return self._build_error_response(
-                    job_id, start_time, current_state, current_seq, orientation_error, DocumentErrorCode.OCR_FAILED
+                    job_id, start_time, current_state, current_seq, orientation_error, DocumentErrorCode.OCR_FAILED,
+                    raw_text=raw_text
                 )
 
             # ============================================================
@@ -367,7 +368,8 @@ class DocumentProcessorBase(ABC):
                         processing_time_seconds=round(time.time() - start_time, 2),
                         forgery_checks=forgery_checks,
                         error=photoholmes_error,
-                        error_code=photoholmes_error_code
+                        error_code=photoholmes_error_code,
+                        extracted_data={'raw_data': raw_text}
                     )
 
             # ============================================================
@@ -743,10 +745,29 @@ class DocumentProcessorBase(ABC):
         verification_state: int,
         sequence_no: int,
         error_message: str,
-        error_code: Optional[str] = None
+        error_code: Optional[str] = None,
+        extracted_data: Optional[Dict[str, Any]] = None,
+        raw_text: Optional[str] = None
     ) -> SequentialJobResponse:
-        """Build a standard error response."""
-        return SequentialJobResponse(
+        """Build a standard error response.
+
+        Args:
+            job_id: Unique job identifier
+            start_time: Processing start time
+            verification_state: Current verification state
+            sequence_no: Current sequence number
+            error_message: Error description
+            error_code: Optional error code
+            extracted_data: Optional extracted data dict (will be included in response)
+            raw_text: Optional raw OCR text (will be added to extracted_data as raw_data)
+        """
+        # Include raw_data if OCR has completed and raw_text is provided
+        if raw_text and 'raw_data' not in (extracted_data or {}):
+            if extracted_data is None:
+                extracted_data = {}
+            extracted_data['raw_data'] = raw_text
+
+        response = SequentialJobResponse(
             result=False,
             job_id=job_id,
             verification_state=verification_state,
@@ -755,6 +776,12 @@ class DocumentProcessorBase(ABC):
             error=error_message,
             error_code=error_code or DocumentErrorCode.PROCESSING_ERROR
         )
+
+        # Only add extracted_data if it exists (may be None for early failures)
+        if extracted_data:
+            response.extracted_data = extracted_data
+
+        return response
 
     def _convert_pdf_to_image(self, pdf_bytes: bytes) -> bytes:
         """Convert PDF first page to PNG image."""

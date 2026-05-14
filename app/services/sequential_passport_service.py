@@ -326,7 +326,8 @@ class SequentialPassportService:
                             processing_time_seconds=round(time.time() - start_time, 2),
                             error=photoholmes_error,
                             error_code=photoholmes_error_code,
-                            forgery_checks=forgery_checks
+                            forgery_checks=forgery_checks,
+                            extracted_data=temp_extracted_data  # Include raw_data from OCR
                         )
 
             # Process OCR results - Build extracted_data
