@@ -852,8 +852,22 @@ download_photoholmes() {
         success_count=$((success_count + 1))
     elif check_file_exists_and_valid "$exif_original"; then
         log_info "  [3/6] EXIF as Language weights downloaded but need pruning..."
-        log_info "  [3/6] Run: python -m photoholmes.methods.exif_as_language prune-weights"
-        success_count=$((success_count + 1))
+        if [ "$DRY_RUN" = "true" ]; then
+            log_info "  [3/6] Would run: python -m photoholmes.methods.exif_as_language prune-weights"
+            success_count=$((success_count + 1))
+        else
+            log_info "  [3/6] Pruning weights..."
+            if (cd "$exif_dir" && python -m photoholmes.methods.exif_as_language prune-weights >/dev/null 2>&1); then
+                if [ -f "$exif_pruned" ]; then
+                    log_success "  [3/6] Pruned EXIF as Language weights"
+                    success_count=$((success_count + 1))
+                else
+                    log_error "  [3/6] Pruning failed - weights.pth not created"
+                fi
+            else
+                log_error "  [3/6] Pruning failed - Run manually: python -m photoholmes.methods.exif_as_language prune-weights"
+            fi
+        fi
     else
         log_info "  [3/6] Downloading EXIF as Language..."
         if command -v gdown >/dev/null 2>&1; then
@@ -862,9 +876,19 @@ download_photoholmes() {
                 local downloaded_size=$(get_file_size "$tmp_file")
                 if [ "$downloaded_size" -gt 0 ]; then
                     mv "$tmp_file" "$exif_original"
-                    log_success "  [3/6] Downloaded EXIF as Language ($(format_size "$downloaded_size"), needs pruning)"
-                    log_info "  [3/6] Run: python -m photoholmes.methods.exif_as_language prune-weights"
-                    success_count=$((success_count + 1))
+                    log_success "  [3/6] Downloaded EXIF as Language ($(format_size "$downloaded_size"))"
+                    # Prune the weights to create weights.pth
+                    log_info "  [3/6] Pruning weights..."
+                    if (cd "$exif_dir" && python -m photoholmes.methods.exif_as_language prune-weights >/dev/null 2>&1); then
+                        if [ -f "$exif_pruned" ]; then
+                            log_success "  [3/6] Pruned EXIF as Language weights"
+                            success_count=$((success_count + 1))
+                        else
+                            log_error "  [3/6] Pruning failed - weights.pth not created"
+                        fi
+                    else
+                        log_error "  [3/6] Pruning failed - Run manually: python -m photoholmes.methods.exif_as_language prune-weights"
+                    fi
                 else
                     rm -f "$tmp_file"
                     log_error "  [3/6] Downloaded file is empty"
