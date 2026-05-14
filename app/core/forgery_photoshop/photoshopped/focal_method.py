@@ -61,7 +61,7 @@ class FocalMethod:
     def _get_weights_config(self) -> Dict[str, str]:
         """Get the configuration for Focal method weights."""
         try:
-            weights_dir = Path(__file__).parent.parent.parent.parent.parent / "photoholmes" / "weights" / "focal"
+            weights_dir = Path(__file__).parent.parent.parent.parent / "photoholmes" / "weights" / "focal"
             vit_weights = weights_dir / "VIT_weights.pth"
             hrnet_weights = weights_dir / "HRNet_weights.pth"
 
