@@ -856,15 +856,25 @@ download_photoholmes() {
             log_info "  [3/6] Would prune weights..."
             success_count=$((success_count + 1))
         else
-            # Check if torch is available
+            # Ensure torch is available for pruning
+            local prune_python="python"
             if ! python -c "import torch" 2>/dev/null; then
-                log_error "  [3/6] PyTorch not installed - cannot prune weights"
-                log_error "  [3/6] Install with: pip install torch"
-                log_error "  [3/6] Or copy weights.pth from another machine"
-            else
-                log_info "  [3/6] Pruning weights..."
-                # Import directly to avoid package __init__ issues
-                if (cd "$exif_dir" && python -c "
+                log_info "  [3/6] PyTorch not found, installing..."
+                if pip install torch --index-url https://download.pytorch.org/whl/cpu >/dev/null 2>&1; then
+                    log_info "  [3/6] PyTorch installed successfully"
+                elif pip install torch >/dev/null 2>&1; then
+                    log_info "  [3/6] PyTorch installed successfully"
+                else
+                    log_error "  [3/6] Failed to install PyTorch - cannot prune weights"
+                    log_error "  [3/6] Try: pip install torch"
+                    log_error "  [3/6] Or copy weights.pth from another machine"
+                    continue
+                fi
+            fi
+
+            log_info "  [3/6] Pruning weights..."
+            # Import directly to avoid package __init__ issues
+            if (cd "$exif_dir" && python -c "
 import sys
 import importlib.util
 spec = importlib.util.spec_from_file_location('prune_module', '$PROJECT_ROOT/app/photoholmes/methods/exif_as_language/prune_original_weights.py')
@@ -880,11 +890,10 @@ print('✓ Weights pruned successfully')
                 else
                     log_error "  [3/6] Pruning failed - weights.pth not created"
                 fi
-                else
-                    log_error "  [3/6] Pruning failed - Run manually"
-                fi
+            else
+                log_error "  [3/6] Pruning failed - Run manually"
             fi
-            fi
+        fi
     else
         log_info "  [3/6] Downloading EXIF as Language..."
         if command -v gdown >/dev/null 2>&1; then
@@ -895,15 +904,24 @@ print('✓ Weights pruned successfully')
                     mv "$tmp_file" "$exif_original"
                     log_success "  [3/6] Downloaded EXIF as Language ($(format_size "$downloaded_size"))"
                     # Prune the weights to create weights.pth
-                    log_info "  [3/6] Pruning weights..."
-                    # Check if torch is available
+                    # Ensure torch is available for pruning
                     if ! python -c "import torch" 2>/dev/null; then
-                        log_error "  [3/6] PyTorch not installed - cannot prune weights"
-                        log_error "  [3/6] Install with: pip install torch"
-                        log_error "  [3/6] Or copy weights.pth from another machine"
-                    else
-                        # Import directly to avoid package __init__ issues
-                        if (cd "$exif_dir" && python -c "
+                        log_info "  [3/6] PyTorch not found, installing..."
+                        if pip install torch --index-url https://download.pytorch.org/whl/cpu >/dev/null 2>&1; then
+                            log_info "  [3/6] PyTorch installed successfully"
+                        elif pip install torch >/dev/null 2>&1; then
+                            log_info "  [3/6] PyTorch installed successfully"
+                        else
+                            log_error "  [3/6] Failed to install PyTorch - cannot prune weights"
+                            log_error "  [3/6] Try: pip install torch"
+                            log_error "  [3/6] Or copy weights.pth from another machine"
+                            continue
+                        fi
+                    fi
+
+                    log_info "  [3/6] Pruning weights..."
+                    # Import directly to avoid package __init__ issues
+                    if (cd "$exif_dir" && python -c "
 import sys
 import importlib.util
 spec = importlib.util.spec_from_file_location('prune_module', '$PROJECT_ROOT/app/photoholmes/methods/exif_as_language/prune_original_weights.py')
@@ -913,15 +931,14 @@ spec.loader.exec_module(prune_module)
 prune_module.prune_original_weights('wrapper_75_new.pth', 'weights.pth')
 print('✓ Weights pruned successfully')
 " 2>&1); then
-                            if [ -f "$exif_pruned" ]; then
-                                log_success "  [3/6] Pruned EXIF as Language weights"
-                                success_count=$((success_count + 1))
-                            else
-                                log_error "  [3/6] Pruning failed - weights.pth not created"
-                            fi
+                        if [ -f "$exif_pruned" ]; then
+                            log_success "  [3/6] Pruned EXIF as Language weights"
+                            success_count=$((success_count + 1))
                         else
-                            log_error "  [3/6] Pruning failed - Run manually"
+                            log_error "  [3/6] Pruning failed - weights.pth not created"
                         fi
+                    else
+                        log_error "  [3/6] Pruning failed - Run manually"
                     fi
                 else
                     rm -f "$tmp_file"
