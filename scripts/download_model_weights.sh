@@ -867,7 +867,7 @@ sys.modules['prune_module'] = prune_module
 spec.loader.exec_module(prune_module)
 prune_module.prune_original_weights('wrapper_75_new.pth', 'weights.pth')
 print('✓ Weights pruned successfully')
-" >/dev/null 2>&1); then
+" 2>&1); then
                 if [ -f "$exif_pruned" ]; then
                     log_success "  [3/6] Pruned EXIF as Language weights"
                     success_count=$((success_count + 1))
@@ -889,14 +889,17 @@ print('✓ Weights pruned successfully')
                     log_success "  [3/6] Downloaded EXIF as Language ($(format_size "$downloaded_size"))"
                     # Prune the weights to create weights.pth
                     log_info "  [3/6] Pruning weights..."
-                    # Change to exif directory so prune function can find wrapper_75_new.pth
+                    # Import directly to avoid package __init__ issues
                     if (cd "$exif_dir" && python -c "
 import sys
-sys.path.insert(0, '$PROJECT_ROOT')
-from app.photoholmes.methods.exif_as_language.prune_original_weights import prune_original_weights
-prune_original_weights('wrapper_75_new.pth', 'weights.pth')
+import importlib.util
+spec = importlib.util.spec_from_file_location('prune_module', '$PROJECT_ROOT/app/photoholmes/methods/exif_as_language/prune_original_weights.py')
+prune_module = importlib.util.module_from_spec(spec)
+sys.modules['prune_module'] = prune_module
+spec.loader.exec_module(prune_module)
+prune_module.prune_original_weights('wrapper_75_new.pth', 'weights.pth')
 print('✓ Weights pruned successfully')
-" >/dev/null 2>&1); then
+" 2>&1); then
                         if [ -f "$exif_pruned" ]; then
                             log_success "  [3/6] Pruned EXIF as Language weights"
                             success_count=$((success_count + 1))
