@@ -10,7 +10,7 @@ import logging
 from typing import Any, Dict, List, Optional, Set, Tuple
 from app.core.gliner_ner_model import GLiNERNERModel
 from app.schemas.bank_statement_schema import BankStatementData
-from app.core.key_injection.bank_lookup import (
+from app.core.key_injection.bank_database_lookup import (
     get_swift_code_for_bank, get_country_for_bank, lookup_bank_by_domain, lookup_bank_by_name, lookup_bank_by_iban, detect_bank_in_text
 )
 from app.helper.validators.bank_statement_validator import get_bank_statement_validator, _load_country_locations
@@ -244,14 +244,17 @@ class GLiNERBankStatementExtractor:
         # Post-extraction validation: Always try domain lookup for corroboration
         domain_bank_info = lookup_bank_by_domain(ocr_text)
 
+        # Compute country hint BEFORE bank lookup (required for multi-country banks)
+        country_hint = result.account_holder_country or result.bank_country
+
         # Validate GLiNER's bank name against BankLookup
         if result.bank_name:
-            bank_info = lookup_bank_by_name(result.bank_name)
+            bank_info = lookup_bank_by_name(result.bank_name, country_hint)
             if bank_info:
                 # GLiNER extracted a recognized bank - use canonical name
                 result.bank_name = bank_info.full_name
                 result.bank_code = bank_info.swift_codes[0] if bank_info.swift_codes else None
-                logger.info(f"Validated bank name '{result.bank_name}' with SWIFT: {result.bank_code}")
+                logger.info(f"Validated bank name '{result.bank_name}' with SWIFT: {result.bank_code} (country: {country_hint})")
             elif domain_bank_info:
                 # GLiNER's extraction not recognized, use domain result
                 logger.info(f"GLiNER bank '{result.bank_name}' not recognized, using domain: {domain_bank_info.full_name}")
@@ -260,7 +263,6 @@ class GLiNERBankStatementExtractor:
             else:
                 # GLiNER's extraction not recognized and no domain found
                 # Try to detect bank in the full OCR text
-                country_hint = result.account_holder_country or result.bank_country
                 detected_bank = detect_bank_in_text(ocr_text, country_hint)
                 if detected_bank:
                     logger.info(f"GLiNER bank '{result.bank_name}' not recognized, detected from text: {detected_bank.full_name}")
@@ -1908,6 +1910,10 @@ class GLiNERBankStatementExtractor:
         Returns:
             Account holder name if found, None otherwise
         """
+        if not text_blocks:
+            logger.warning("No text blocks provided for spatial extraction")
+            return None
+
         logger.info(f"=== Starting spatial account holder name extraction with {len(text_blocks)} text blocks ===")
 
         # Log first 10 text blocks for debugging
@@ -1916,10 +1922,6 @@ class GLiNERBankStatementExtractor:
             y1 = block.get('y1', 0)
             x1 = block.get('x1', 0)
             logger.info(f"  Block {i}: y={y1:.3f}, x={x1:.3f}, text='{text[:50]}...'")
-
-        if not text_blocks:
-            logger.warning("No text blocks provided for spatial extraction")
-            return None
 
         # ========================================================================
         # PRIORITY 0: Label-based extraction (highest priority)

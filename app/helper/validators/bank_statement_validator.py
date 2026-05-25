@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from app.config.address_keywords_loader import get_address_keywords_loader
 from app.config.bank_statement_country_loader import get_country_config_loader
+from app.config.bank_statement_config_db_service import get_bank_statement_config_db_service
 
 logger = logging.getLogger(__name__)
 
@@ -204,73 +205,40 @@ class BankStatementValidator:
     - Credit card detection (Luhn algorithm)
     - Address component parsing and validation
     - Country inference from state
+
+    Uses database-backed configuration service instead of JSON files.
     """
 
     _instance = None
-    _config = None
+    _config_service = None
 
     def __new__(cls):
         """Singleton pattern to load config only once."""
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-            cls._instance._load_config()
+            cls._instance._load_config_service()
         return cls._instance
 
-    def _load_config(self) -> None:
-        """Load configuration from JSON file."""
-        config_path = Path(__file__).parent.parent.parent / "reference_templates" / "bank_statements" / "config.json"
-
-        try:
-            with open(config_path, 'r') as f:
-                self._config = json.load(f)
-            logger.info(f"Loaded bank statement config from {config_path}")
-        except FileNotFoundError:
-            logger.warning(f"Bank statement config not found at {config_path}, using defaults")
-            self._config = self._get_default_config()
-        except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON in bank statement config: {e}")
-            self._config = self._get_default_config()
-
-    def _get_default_config(self) -> Dict[str, Any]:
-        """Return default configuration if file not found."""
-        return {
-            "currencies": {
-                "SGD": {"name": "Singapore Dollar", "country": "SG", "account_number_length": {"min": 8, "max": 20}},
-                "INR": {"name": "Indian Rupee", "country": "IN", "account_number_length": {"min": 8, "max": 20}},
-                "MYR": {"name": "Malaysian Ringgit", "country": "MY", "account_number_length": {"min": 8, "max": 20}},
-                "THB": {"name": "Thai Baht", "country": "TH", "account_number_length": {"min": 8, "max": 20}},
-                "IDR": {"name": "Indonesian Rupiah", "country": "ID", "account_number_length": {"min": 8, "max": 20}},
-                "USD": {"name": "US Dollar", "country": "US", "account_number_length": {"min": 8, "max": 20}},
-                "GBP": {"name": "British Pound", "country": "GB", "account_number_length": {"min": 8, "max": 20}},
-                "HKD": {"name": "Hong Kong Dollar", "country": "HK", "account_number_length": {"min": 8, "max": 20}},
-                "AED": {"name": "UAE Dirham", "country": "AE", "account_number_length": {"min": 8, "max": 20}},
-            },
-            "state_to_country_map": {},
-            "account_number_labels": [
-                "ACCOUNT NUMBER", "ACCOUNT NO", "ACCOUNT NO.", "A/C NO", "A/C NO.", "AC NO",
-                "SAVINGS A/C", "CURRENT A/C", "SAVINGS ACCOUNT", "CURRENT ACCOUNT"
-            ],
-            "address_labels": [
-                "ADDRESS", "RESIDENTIAL ADDRESS", "CUSTOMER ADDRESS", "MAILING ADDRESS",
-                "PERMANENT ADDRESS", "COMMUNICATION ADDRESS"
-            ]
-        }
+    def _load_config_service(self) -> None:
+        """Load configuration service (database-backed)."""
+        self._config_service = get_bank_statement_config_db_service()
+        logger.info("Using database-backed bank statement configuration")
 
     # ============================================================
     # LABEL ACCESSORS
     # ============================================================
 
     def get_account_number_labels(self) -> List[str]:
-        """Return account number labels from config."""
-        return self._config.get("account_number_labels", [])
+        """Return account number labels from database."""
+        return self._config_service.get_account_number_labels()
 
     def get_address_labels(self) -> List[str]:
-        """Return address labels from config."""
-        return self._config.get("address_labels", [])
+        """Return address labels from database."""
+        return self._config_service.get_address_labels()
 
     def get_address_extraction_exceptions(self) -> Dict[str, List[str]]:
-        """Return address extraction exceptions from config."""
-        return self._config.get("address_extraction_exceptions", {})
+        """Return address extraction exceptions from database."""
+        return self._config_service.get_address_extraction_exceptions()
 
     # ============================================================
     # CURRENCY VALIDATION
@@ -286,11 +254,7 @@ class BankStatementValidator:
         Returns:
             Currency info dict or None if not found
         """
-        if not currency:
-            return None
-
-        currencies = self._config.get("currencies", {})
-        return currencies.get(currency.upper())
+        return self._config_service.get_currency_info(currency)
 
     def get_currency_name_map(self) -> Dict[str, str]:
         """
@@ -299,7 +263,7 @@ class BankStatementValidator:
         Returns:
             Dict mapping names like "UAE DIRHAM" to codes like "AED"
         """
-        return self._config.get("currency_name_map", {})
+        return self._config_service.get_currency_name_map()
 
     def get_account_number_length_range(self, currency: str) -> Tuple[int, int]:
         """
@@ -311,17 +275,13 @@ class BankStatementValidator:
         Returns:
             Tuple of (min_length, max_length), defaults to (8, 20)
         """
-        currency_info = self.get_currency_info(currency)
-        if currency_info:
-            length_spec = currency_info.get("account_number_length", {})
-            return (length_spec.get("min", 8), length_spec.get("max", 20))
-        return (8, 20)
+        return self._config_service.get_account_number_length_range(currency)
 
     def get_currency_for_country(self, country: str) -> Optional[str]:
         """
         Get the default currency code for a given country.
 
-        Uses the currencies mapping in config.json to find which currency
+        Uses the database-backed config service to find which currency
         is associated with the given country code.
 
         Args:
@@ -330,17 +290,7 @@ class BankStatementValidator:
         Returns:
             Currency code (e.g., "INR", "SGD") or None if not found
         """
-        if not country:
-            return None
-
-        currencies = self._config.get("currencies", {})
-        country_upper = country.upper()
-
-        for currency_code, currency_info in currencies.items():
-            if currency_info.get("country") == country_upper:
-                return currency_code
-
-        return None
+        return self._config_service.get_currency_for_country(country)
 
     # ============================================================
     # COUNTRY INFERENCE
@@ -351,7 +301,7 @@ class BankStatementValidator:
         Infer country code from state name.
 
         Uses dynamic lookup from countrystatecity library first,
-        falls back to static state_to_country_map from config.
+        falls back to database-backed state_to_country_map.
 
         Args:
             state: State name (e.g., "Maharashtra", "Selangor")
@@ -367,10 +317,8 @@ class BankStatementValidator:
         if result:
             return result
 
-        # Fallback to static map for edge cases (alternate spellings, etc.)
-        state_clean = state.strip().title()
-        state_map = self._config.get("state_to_country_map", {})
-        return state_map.get(state_clean)
+        # Fallback to database-backed map for edge cases (alternate spellings, etc.)
+        return self._config_service.infer_country_from_state(state)
 
     # ============================================================
     # ADDRESS PARSING
@@ -510,6 +458,7 @@ class BankStatementValidator:
 
                         # Check if this looks like a phone number (5-8 digits often appear near phone labels)
                         # Phone numbers shouldn't be extracted as postal codes
+                        phone_context = None
                         if not skip_this_code:
                             phone_context = re.search(
                                 r'(?:TEL|TELEPHONE|PHONE|MOBILE|FAX|CONTACT|\+971|\+65|\+91)\s*:?\s*(\d{' + str(len(potential_postal_code)) + r'})',
@@ -566,7 +515,7 @@ class BankStatementValidator:
 
         # Fallback to static map for edge cases (alternate spellings, etc.)
         if not components["country"]:
-            state_map = self._config.get("state_to_country_map", {})
+            state_map = self._config_service.get_state_to_country_map()
             for state_name, country_code in state_map.items():
                 state_upper = state_name.upper()
                 # Try exact match first
@@ -979,7 +928,7 @@ class BankStatementValidator:
                     return True, state
 
         # Fallback to static map for edge cases
-        state_map = self._config.get("state_to_country_map", {})
+        state_map = self._config_service.get_state_to_country_map()
         for state_name in state_map.keys():
             state_upper = state_name.upper()
             if re.search(r'\b' + re.escape(state_upper) + r'\b', text_upper):
@@ -1093,7 +1042,7 @@ class BankStatementValidator:
             return False, "Bank name is empty"
 
         try:
-            from app.core.key_injection.bank_lookup import lookup_bank_by_name
+            from app.core.key_injection.bank_database_lookup import lookup_bank_by_name
 
             # Look up bank using new BankLookup (handles alternate names, abbreviations)
             bank_info = lookup_bank_by_name(bank_name, country)

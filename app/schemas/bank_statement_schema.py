@@ -17,6 +17,9 @@ class BankStatementData(BaseModel):
     bank_name: Optional[str] = None
     bank_branch: Optional[str] = None
     bank_code: Optional[str] = None
+    swift_code: Optional[str] = None
+    iban: Optional[str] = None
+    ifsc_code: Optional[str] = None  # Indian Financial System Code
 
     # Country fields
     bank_country: Optional[str] = None

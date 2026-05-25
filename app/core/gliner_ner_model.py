@@ -373,65 +373,201 @@ class GLiNERNERModel:
             self.logger.info("Falling back to labels-based extraction")
             return await self.extract_bank_statement_entities_async(text)
 
+    async def extract_with_custom_schema_async(
+        self,
+        text: str,
+        bank_specific_prompts: Dict[str, Any],
+        default_threshold: Optional[float] = None
+    ) -> Dict[str, Any]:
+        """
+        Extract entities using bank-specific GLiNER2 prompts.
+
+        This method allows for custom extraction schemas optimized for specific
+        banks' statement formats, improving accuracy beyond the generic schema.
+
+        Args:
+            text: OCR text from bank statement
+            bank_specific_prompts: Dictionary of entity_type -> prompt configuration
+                Format: {
+                    "entity_type": {
+                        "description": str,
+                        "entity": str (PERSON, ORGANIZATION, etc.),
+                        "threshold": float (optional),
+                        "examples": list (optional)
+                    }
+                }
+            default_threshold: Default confidence threshold (0.3 if not specified)
+
+        Returns:
+            Dictionary mapping entity types to extracted values with confidence:
+            {
+                "entity_type": {
+                    "value": str,
+                    "confidence": float
+                }
+            }
+        """
+        try:
+            model = await self.get_model_with_gpu()
+            GLiNERClass, gliner_version = get_gliner_classes()
+
+            # Only GLiNER2 supports schema-based extraction
+            if gliner_version != "gliner2":
+                self.logger.warning("Custom schema extraction requires GLiNER2, falling back to generic")
+                return await self.extract_bank_statement_with_schema_async(text)
+
+            if not bank_specific_prompts:
+                self.logger.warning("No bank-specific prompts provided, falling back to generic")
+                return await self.extract_bank_statement_with_schema_async(text)
+
+            # Build entity types from bank-specific prompts
+            # Convert format: {"entity_type": {"description": "...", "entity": "..."}}
+            # To GLiNER2 format: [{"entity_type": "description"}]
+            entity_types = []
+            for entity_type, config in bank_specific_prompts.items():
+                if isinstance(config, dict):
+                    description = config.get('description', '')
+                    # GLiNER2 can use the entity category hint for better extraction
+                    entity_types.append({
+                        entity_type: description
+                    })
+
+            if not entity_types:
+                self.logger.warning("No valid entity types in bank-specific prompts, falling back to generic")
+                return await self.extract_bank_statement_with_schema_async(text)
+
+            self.logger.info(f"Extracting with {len(entity_types)} bank-specific entity types")
+
+            # Create schema using GLiNER2's API
+            schema = model.create_schema().entities(entity_types)
+
+            # Use default threshold from prompts or config
+            threshold = default_threshold or 0.3
+
+            # Run extraction with bank-specific schema
+            entities_dict = model.extract(
+                text,
+                schema=schema,
+                threshold=threshold,
+                include_confidence=True,
+                include_spans=True
+            )
+
+            # Process GLiNER2 schema output format
+            results = {}
+
+            # Extract entities from the nested "entities" key
+            entities_data = entities_dict.get("entities", entities_dict)
+
+            for field_name, values in entities_data.items():
+                if values is None:
+                    results[field_name] = None
+                    continue
+
+                if isinstance(values, list) and len(values) > 0:
+                    # Take the highest confidence value
+                    best = max(values, key=lambda v: v.get('confidence', v.get('score', 0)))
+                    results[field_name] = {
+                        'value': best.get('text', ''),
+                        'confidence': best.get('confidence', best.get('score', 0.0))
+                    }
+                elif isinstance(values, dict):
+                    # Single value as dict
+                    results[field_name] = {
+                        'value': values.get('text', ''),
+                        'confidence': values.get('confidence', values.get('score', 0.0))
+                    }
+                elif isinstance(values, str):
+                    # Simple string value
+                    results[field_name] = {
+                        'value': values,
+                        'confidence': 0.5
+                    }
+
+            self.logger.info(f"Bank-specific extraction found {len([r for r in results.values() if r])} fields")
+
+            return results
+
+        except Exception as e:
+            self.logger.error(f"Bank-specific schema extraction failed: {e}")
+            # Fallback to generic schema extraction
+            self.logger.info("Falling back to generic schema extraction")
+            return await self.extract_bank_statement_with_schema_async(text)
+
     def _get_known_bank_names(self) -> str:
         """
-        Load known bank names from config.json for GLiNER schema.
+        Load known bank names from database for GLiNER schema.
 
-        Uses the comprehensive bank configuration with 229+ alternate names
-        from reference_templates/bank_statements/config.json.
+        Uses the comprehensive bank configuration from the database.
+        Fetches all bank identifiers (names, alternate names, abbreviations).
 
         Returns a comma-separated string of bank names for the schema description.
         """
         try:
-            from app.core.key_injection.bank_lookup import BankLookup
+            from app.core.db.database import get_db_connection
 
-            bl = BankLookup.get_instance()
+            conn = get_db_connection()
+            try:
+                cursor = conn.cursor(dictionary=True)
 
-            # Get all bank names from unified_bank_map (contains all identifiers)
-            all_names = list(bl._unified_bank_map.keys())
+                # Fetch all bank identifiers including names, abbreviations, and alternate names
+                query = """
+                    SELECT DISTINCT bi.identifier, b.abbrev
+                    FROM bank_identifiers bi
+                    JOIN banks b ON bi.bank_id = b.id
+                    WHERE b.is_active = 1 AND bi.is_validated = 1
+                    ORDER BY LENGTH(bi.identifier) DESC
+                """
 
-            # Also add abbreviations
-            all_names.extend(bl._abbreviations)
+                cursor.execute(query)
+                all_names = set()
 
-            # Remove duplicates and sort
-            unique_names = sorted(set(all_names))
+                for row in cursor.fetchall():
+                    all_names.add(row['identifier'])
+                    all_names.add(row['abbrev'])
 
-            # Prioritize banks from commonly processed countries
-            # by including key banks first
-            priority_banks = [
-                'dbs', 'ocbc', 'uob', 'posb',  # Singapore
-                'emirates nbd', 'adcb', 'dib', 'mashreq', 'rakbank',  # UAE
-                'hdfc', 'icici', 'axis', 'sbi', 'kotak',  # India
-                'maybank', 'cimb', 'public bank',  # Malaysia
-                'bangkok bank', 'krung thai', 'kasikorn',  # Thailand
-                'hsbc', 'standard chartered', 'citibank',  # International
-            ]
+                # Remove duplicates and sort
+                unique_names = sorted(all_names)
 
-            prioritized = []
-            remaining = []
+                # Prioritize banks from commonly processed countries
+                # by including key banks first
+                priority_banks = [
+                    'dbs', 'ocbc', 'uob', 'posb',  # Singapore
+                    'emirates nbd', 'adcb', 'dib', 'mashreq', 'rakbank',  # UAE
+                    'hdfc', 'icici', 'axis', 'sbi', 'kotak',  # India
+                    'maybank', 'cimb', 'public bank',  # Malaysia
+                    'bangkok bank', 'krung thai', 'kasikorn',  # Thailand
+                    'hsbc', 'standard chartered', 'citibank',  # International
+                ]
 
-            for name in unique_names:
-                name_lower = name.lower()
-                # Check if any priority bank is a substring of this name
-                is_priority = any(pb in name_lower for pb in priority_banks)
-                if is_priority:
-                    prioritized.append(name)
-                else:
-                    remaining.append(name)
+                prioritized = []
+                remaining = []
 
-            # Combine prioritized with remaining, limit to 150 names
-            final_names = prioritized + remaining
-            final_names = final_names[:150]
+                for name in unique_names:
+                    name_lower = name.lower()
+                    # Check if any priority bank is a substring of this name
+                    is_priority = any(pb in name_lower for pb in priority_banks)
+                    if is_priority:
+                        prioritized.append(name)
+                    else:
+                        remaining.append(name)
 
-            if final_names:
-                self.logger.info(f"Loaded {len(final_names)} bank names from config.json")
-                return ', '.join(final_names)
+                # Combine prioritized with remaining, limit to 150 names
+                final_names = prioritized + remaining
+                final_names = final_names[:150]
 
-            # Fallback if no names found
-            return self._get_default_bank_names()
+                if final_names:
+                    self.logger.info(f"Loaded {len(final_names)} bank names from database")
+                    return ', '.join(final_names)
+
+                # Fallback if no names found
+                return self._get_default_bank_names()
+
+            finally:
+                conn.close()
 
         except Exception as e:
-            self.logger.warning(f"Failed to load bank names from config: {e}")
+            self.logger.warning(f"Failed to load bank names from database: {e}")
             return self._get_default_bank_names()
 
     def _get_default_bank_names(self) -> str:

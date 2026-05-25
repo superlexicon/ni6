@@ -1,8 +1,8 @@
 {
   "version": "1.0",
   "description": "Country-specific configuration for bank statement processing. Consolidates hardcoded country logic from Python code into a single config file.",
-  "supported_countries": ["IN", "US", "GB", "AE", "SG", "TH", "MY", "MM", "HK"],
-  "dynamic_location_countries": ["IN", "US", "GB", "AE", "SG", "TH", "MY", "MM", "HK"],
+  "supported_countries": ["IN", "US", "GB", "AE", "SG", "TH", "MY", "MM", "HK", "CA", "AU", "JP", "DE", "FR", "CH", "IT", "NL", "ES"],
+  "dynamic_location_countries": ["IN", "US", "GB", "AE", "SG", "TH", "MY", "MM", "HK", "CA", "AU", "JP", "DE", "FR", "CH", "IT", "NL", "ES"],
   "countries": {
     "AE": {
       "country_code": "AE",
@@ -249,6 +249,159 @@
       },
       "unit_patterns": ["^[\\d]+", "^(NO|NUM|NUMBER)\\s*\\d+"],
       "inference_patterns": ["myanmar", "rangoon", "mandalay"]
+    },
+    "CA": {
+      "country_code": "CA",
+      "country_name": "Canada",
+      "name_aliases": ["canada"],
+      "postal_code": {
+        "required": true,
+        "pattern": "\\b[A-Z]\\d[A-Z]\\s*\\d[A-Z]\\d\\b",
+        "length": 6
+      },
+      "subdivisions": {
+        "type": "provinces",
+        "list": [],
+        "use_dynamic": true
+      },
+      "unit_patterns": ["^(APT|SUITE|STE|UNIT)\\s*#?\\d+$"],
+      "inference_patterns": ["canada", "ontario", "quebec", "british columbia", "alberta"]
+    },
+    "AU": {
+      "country_code": "AU",
+      "country_name": "Australia",
+      "name_aliases": ["australia"],
+      "postal_code": {
+        "required": true,
+        "pattern": "\\b\\d{4}\\b",
+        "length": 4
+      },
+      "subdivisions": {
+        "type": "states",
+        "list": [],
+        "use_dynamic": true
+      },
+      "unit_patterns": ["^(UNIT|APT|SUITE|FLAT)\\s*#?\\d+$"],
+      "inference_patterns": ["australia", "nsw", "victoria", "queensland", "sydney", "melbourne"]
+    },
+    "JP": {
+      "country_code": "JP",
+      "country_name": "Japan",
+      "name_aliases": ["japan"],
+      "postal_code": {
+        "required": true,
+        "pattern": "\\b\\d{3}-\\d{4}\\b",
+        "length": 7
+      },
+      "subdivisions": {
+        "type": "prefectures",
+        "list": [],
+        "use_dynamic": true
+      },
+      "unit_patterns": [],
+      "inference_patterns": ["japan", "tokyo", "osaka", "kyoto"]
+    },
+    "DE": {
+      "country_code": "DE",
+      "country_name": "Germany",
+      "name_aliases": ["germany", "deutschland"],
+      "postal_code": {
+        "required": true,
+        "pattern": "\\b\\d{5}\\b",
+        "length": 5
+      },
+      "subdivisions": {
+        "type": "states",
+        "list": [],
+        "use_dynamic": true
+      },
+      "unit_patterns": [],
+      "inference_patterns": ["germany", "deutschland", "berlin", "munich", "hamburg", "frankfurt"]
+    },
+    "FR": {
+      "country_code": "FR",
+      "country_name": "France",
+      "name_aliases": ["france"],
+      "postal_code": {
+        "required": true,
+        "pattern": "\\b\\d{5}\\b",
+        "length": 5
+      },
+      "subdivisions": {
+        "type": "regions",
+        "list": [],
+        "use_dynamic": true
+      },
+      "unit_patterns": [],
+      "inference_patterns": ["france", "paris", "lyon", "marseille"]
+    },
+    "CH": {
+      "country_code": "CH",
+      "country_name": "Switzerland",
+      "name_aliases": ["switzerland", "schweiz", "suisse"],
+      "postal_code": {
+        "required": true,
+        "pattern": "\\b\\d{4}\\b",
+        "length": 4
+      },
+      "subdivisions": {
+        "type": "cantons",
+        "list": [],
+        "use_dynamic": true
+      },
+      "unit_patterns": [],
+      "inference_patterns": ["switzerland", "zurich", "geneva", "basel"]
+    },
+    "IT": {
+      "country_code": "IT",
+      "country_name": "Italy",
+      "name_aliases": ["italy", "italia"],
+      "postal_code": {
+        "required": true,
+        "pattern": "\\b\\d{5}\\b",
+        "length": 5
+      },
+      "subdivisions": {
+        "type": "regions",
+        "list": [],
+        "use_dynamic": true
+      },
+      "unit_patterns": [],
+      "inference_patterns": ["italy", "italia", "rome", "milan", "naples"]
+    },
+    "NL": {
+      "country_code": "NL",
+      "country_name": "Netherlands",
+      "name_aliases": ["netherlands", "holland"],
+      "postal_code": {
+        "required": true,
+        "pattern": "\\b\\d{4}\\s*[A-Z]{2}\\b",
+        "length": 6
+      },
+      "subdivisions": {
+        "type": "provinces",
+        "list": [],
+        "use_dynamic": true
+      },
+      "unit_patterns": [],
+      "inference_patterns": ["netherlands", "holland", "amsterdam", "rotterdam", "the hague"]
+    },
+    "ES": {
+      "country_code": "ES",
+      "country_name": "Spain",
+      "name_aliases": ["spain", "españa"],
+      "postal_code": {
+        "required": true,
+        "pattern": "\\b\\d{5}\\b",
+        "length": 5
+      },
+      "subdivisions": {
+        "type": "regions",
+        "list": [],
+        "use_dynamic": true
+      },
+      "unit_patterns": [],
+      "inference_patterns": ["spain", "españa", "madrid", "barcelona", "valencia"]
     }
   },
   "postal_code_optional_countries": ["AE", "KW", "QA", "BH", "OM", "SA", "HK"]

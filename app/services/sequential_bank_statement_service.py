@@ -26,6 +26,7 @@ State is tracked via verification_state column in user_identity_index.
 """
 
 import asyncio
+import json
 import re
 from typing import Dict, Any, Optional, Tuple, List
 from datetime import date
@@ -486,12 +487,53 @@ class SequentialBankStatementService(DocumentProcessorBase):
         """
         merged = gliner_data.model_copy()
 
+        # Priority 0: IBAN-based bank lookup (most authoritative for UAE, Europe)
+        # Check IBAN from both extractors (spatial is primary source for IBAN)
+        iban = getattr(spatial_data, 'iban', None) or getattr(gliner_data, 'iban', None)
+
+        if iban:
+            from app.core.key_injection.bank_database_lookup import lookup_bank_by_iban
+            bank_info = lookup_bank_by_iban(iban)
+            if bank_info:
+                # Use IBAN-based bank info (most authoritative)
+                self.logger.info(f"Using IBAN-based bank lookup: {bank_info.full_name}")
+                merged.bank_name = bank_info.full_name
+                merged.bank_code = bank_info.swift_codes[0] if bank_info.swift_codes else None
+                merged.swift_code = bank_info.swift_codes[0] if bank_info.swift_codes else None
+                merged.bank_country = bank_info.country
+                self._update_confidence_source(merged, 'bank_name', spatial_data, 'iban_lookup')
+                self._update_confidence_source(merged, 'bank_code', spatial_data, 'iban_lookup')
+                self._update_confidence_source(merged, 'swift_code', spatial_data, 'iban_lookup')
+                self._update_confidence_source(merged, 'bank_country', spatial_data, 'iban_lookup')
+
+        # Priority 0.5: IFSC-based bank lookup (authoritative for India)
+        # Check IFSC from both extractors (spatial is primary source for IFSC)
+        # Only runs if IBAN didn't set bank_country
+        ifsc_code = getattr(spatial_data, 'ifsc_code', None) or getattr(gliner_data, 'ifsc_code', None)
+
+        if ifsc_code and not merged.bank_country:
+            from app.core.key_injection.bank_database_lookup import lookup_bank_by_ifsc
+            bank_info = lookup_bank_by_ifsc(ifsc_code)
+            if bank_info:
+                # Use IFSC-based bank info (authoritative for India)
+                self.logger.info(f"Using IFSC-based bank lookup: {bank_info.full_name}")
+                merged.bank_name = bank_info.full_name
+                merged.bank_code = bank_info.swift_codes[0] if bank_info.swift_codes else None
+                merged.swift_code = bank_info.swift_codes[0] if bank_info.swift_codes else None
+                merged.bank_country = bank_info.country
+                merged.ifsc_code = ifsc_code
+                self._update_confidence_source(merged, 'bank_name', spatial_data, 'ifsc_lookup')
+                self._update_confidence_source(merged, 'bank_code', spatial_data, 'ifsc_lookup')
+                self._update_confidence_source(merged, 'swift_code', spatial_data, 'ifsc_lookup')
+                self._update_confidence_source(merged, 'bank_country', spatial_data, 'ifsc_lookup')
+                self._update_confidence_source(merged, 'ifsc_code', spatial_data, 'ifsc_lookup')
+
         # Fields to check (all extracted fields)
         fields_to_merge = [
             'account_holder_name', 'bank_name', 'address', 'currency',
             'account_number', 'statement_date', 'bank_branch', 'bank_code',
-            'bank_country', 'address_city', 'address_state', 'address_country',
-            'account_holder_country'
+            'swift_code', 'ifsc_code', 'bank_country', 'address_city', 'address_state', 'address_country',
+            'account_holder_country', 'iban'
         ]
 
         for field in fields_to_merge:
@@ -512,7 +554,100 @@ class SequentialBankStatementService(DocumentProcessorBase):
                 self._update_confidence_source(merged, field, spatial_data, 'spatial')
                 continue
 
+            # Special case: bank_code, swift_code, and bank_country
+            # Use GLiNER's bank_name (more accurate) with spatial's country (detected from currency/address)
+            # This gives us the best of both: accurate bank detection + country-aware SWIFT code
+            if field in ('bank_code', 'swift_code', 'bank_country', 'ifsc_code'):
+                # Skip bank fields if already set by IBAN/IFSC lookup (except bank_country, which should always use country-aware lookup)
+                if field != 'bank_country' and getattr(merged, field, None) is not None:
+                    continue  # Already set by IBAN or IFSC lookup
+                gliner_bank = gliner_data.bank_name if hasattr(gliner_data, 'bank_name') else None
+                spatial_bank = spatial_data.bank_name if hasattr(spatial_data, 'bank_name') else None
+                spatial_country = None
+
+                # Try to get country from various sources (prioritize: address_country > account_holder_country > bank_country)
+                # We prioritize address_country because it's detected from actual address content, not bank lookup
+                if hasattr(spatial_data, 'address_country') and spatial_data.address_country:
+                    spatial_country = spatial_data.address_country
+                elif hasattr(spatial_data, 'account_holder_country') and spatial_data.account_holder_country:
+                    spatial_country = spatial_data.account_holder_country
+                elif hasattr(spatial_data, 'bank_country') and spatial_data.bank_country:
+                    spatial_country = spatial_data.bank_country
+
+                # Get bank name from either source (prioritize GLiNER as it's more accurate)
+                bank_to_lookup = gliner_bank or spatial_bank
+
+                # Require country for bank lookup (multi-country banks need country hint)
+                if bank_to_lookup and spatial_country:
+                    from app.core.key_injection.bank_database_lookup import lookup_bank_by_name
+                    bank_info = lookup_bank_by_name(bank_to_lookup, spatial_country)
+                    if bank_info:
+                        if field == 'bank_code':
+                            setattr(merged, field, bank_info.swift_codes[0] if bank_info.swift_codes else None)
+                        elif field == 'swift_code':
+                            setattr(merged, field, bank_info.swift_codes[0] if bank_info.swift_codes else None)
+                        elif field == 'bank_country':
+                            setattr(merged, field, bank_info.country)
+                        elif field == 'ifsc_code':
+                            # For IFSC, we need to extract from bank info or use spatial's value
+                            setattr(merged, field, getattr(spatial_data, field, None))
+                        self._update_confidence_source(merged, field, spatial_data, 'country_aware_lookup')
+                        self.logger.info(
+                            f"Country-aware bank lookup: bank='{bank_to_lookup}', "
+                            f"country='{spatial_country}', field='{field}'"
+                        )
+                        continue
+                    else:
+                        # Bank not found for this country - log warning and fall back to spatial value
+                        self.logger.warning(
+                            f"Bank '{bank_to_lookup}' not found for country '{spatial_country}', "
+                            f"falling back to spatial value (may have wrong country code)"
+                        )
+                elif bank_to_lookup and not spatial_country:
+                    # Bank found but no country detected - log warning
+                    self.logger.warning(
+                        f"Bank '{bank_to_lookup}' lookup requires country hint for accurate SWIFT code, "
+                        f"falling back to spatial value (may have wrong country code)"
+                    )
+
+                # Fallback: use spatial's value if available
+                spatial_value = getattr(spatial_data, field, None)
+                if spatial_value:
+                    setattr(merged, field, spatial_value)
+                    self._update_confidence_source(merged, field, spatial_data, 'spatial')
+                    continue
+
             # For other fields: use GLiNER if confident, else spatial
+            # Skip bank_name if already set by IBAN/IFSC lookup
+            if field == 'bank_name' and getattr(merged, 'bank_name', None) is not None:
+                continue  # Already set by IBAN or IFSC lookup
+
+            # Special handling for bank_name: prefer GLiNER unless it completely failed
+            # GLiNER has better semantic understanding and is less likely to detect wrong bank
+            if field == 'bank_name':
+                # CRITICAL: If GLiNER detected a bank_code, do NOT fall back to spatial bank_name
+                # even if bank_name lookup failed (e.g., due to multiple countries without hint)
+                # Spatial detector often detects wrong bank due to bad country detection
+                gliner_bank_code = getattr(gliner_data, 'bank_code', None)
+                if gliner_bank_code:
+                    # GLiNER detected a bank (even if name lookup failed)
+                    # Skip spatial's bank_name to avoid wrong bank detection
+                    if not gliner_value:
+                        self.logger.warning(
+                            f"GLiNER detected bank_code '{gliner_bank_code}' but bank_name lookup failed. "
+                            f"Skipping spatial bank_name to avoid wrong bank detection."
+                        )
+                    # Continue to skip generic fallback below
+                    continue
+                # Only use spatial bank_name if GLiNER completely failed to detect any bank
+                # (no bank_code AND no bank_name)
+                if not gliner_value or (isinstance(gliner_value, str) and gliner_value.strip() == ''):
+                    spatial_value = getattr(spatial_data, field, None)
+                    if spatial_value:
+                        setattr(merged, field, spatial_value)
+                        self._update_confidence_source(merged, field, spatial_data, 'spatial')
+                continue  # Skip the generic fallback logic below
+
             if not gliner_value or gliner_conf < confidence_threshold:
                 spatial_value = getattr(spatial_data, field, None)
                 if spatial_value:
@@ -722,7 +857,7 @@ class SequentialBankStatementService(DocumentProcessorBase):
 
         # If bank_country not extracted from document, try JSON lookup
         if not bank_country and bank_name:
-            from app.core.key_injection.bank_lookup import get_country_for_bank
+            from app.core.key_injection.bank_database_lookup import get_country_for_bank
             bank_country = get_country_for_bank(bank_name)
 
         # Last resort: infer from currency (may be wrong for multi-currency accounts)
@@ -916,7 +1051,7 @@ class SequentialBankStatementService(DocumentProcessorBase):
         Returns:
             Dict with extracted fields
         """
-        from app.core.key_injection.bank_lookup import detect_bank_in_text, BankInfo
+        from app.core.key_injection.bank_database_lookup import detect_bank_in_text, BankInfo
         from app.core.key_injection.global_banks import (
             detect_currency_in_text, detect_country_in_text
         )
@@ -952,7 +1087,7 @@ class SequentialBankStatementService(DocumentProcessorBase):
 
             # Get BankInfo with specific country if we have it
             if bank_country:
-                from app.core.key_injection.bank_lookup import lookup_bank_by_name
+                from app.core.key_injection.bank_database_lookup import lookup_bank_by_name
                 bank_info_with_country = lookup_bank_by_name(bank_info.abbreviation, bank_country)
                 if bank_info_with_country:
                     bank_info = bank_info_with_country
@@ -1533,4 +1668,210 @@ class SequentialBankStatementService(DocumentProcessorBase):
             result['error_message'] = f"Processing error: {str(e)}"
             result['elapsed_seconds'] = time.time() - start_time
             return result
+
+    async def extract_with_bank_specific_prompts(
+        self,
+        ocr_text: str,
+        document_metadata: Dict[str, Any],
+        text_blocks: Optional[List[Dict[str, Any]]] = None,
+        image_bytes: Optional[bytes] = None,
+        is_pdf: bool = False
+    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """
+        Enhanced extraction flow with automatic bank-specific prompt generation.
+
+        This method implements the LLM-generated bank-specific prompts workflow:
+        1. Run generic GLiNER2 to extract bank name and country
+        2. Look up custom prompts in database
+        3. If found -> Use custom prompts for full extraction
+        4. If not found -> LLM generates prompts -> Save to DB -> Use them
+
+        Args:
+            ocr_text: OCR text from the statement
+            document_metadata: Document metadata (not used currently, for future)
+            text_blocks: Optional text blocks with geometry for spatial extraction
+            image_bytes: Optional file bytes for spatial extraction
+            is_pdf: True if input is a PDF file
+
+        Returns:
+            (extracted_data, confidence_data) tuple
+        """
+        from app.services.bank_prompt_generator import bank_prompt_generator
+        from app.services.bank_prompt_database_service import bank_prompt_database_service
+        from app.core.key_injection.bank_database_lookup import get_bank_database_lookup
+        from app.core.gliner_ner_model import GLiNERNERModel
+        from app.schemas.bank_statement_schema import BankStatementData
+
+        self.logger.info("=" * 80)
+        self.logger.info("BANK-SPECIFIC PROMPT EXTRACTION FLOW")
+        self.logger.info("=" * 80)
+
+        # Step 1: Generic extraction to get bank name and country
+        self.logger.info("Step 1: Running generic GLiNER2 extraction to identify bank/country")
+        gliner_model = GLiNERNERModel()
+        generic_result = await gliner_model.extract_bank_statement_with_schema_async(
+            text=ocr_text
+        )
+
+        # Extract bank name and country from generic result
+        bank_name = None
+        bank_country = None
+
+        # Try to get bank_name from generic result
+        if 'bank_name' in generic_result and generic_result['bank_name']:
+            bank_name = generic_result['bank_name'].get('value', '') if isinstance(generic_result['bank_name'], dict) else generic_result['bank_name']
+
+        # Try to get bank_country from generic result
+        if 'bank_country' in generic_result and generic_result['bank_country']:
+            bank_country = generic_result['bank_country'].get('value', '') if isinstance(generic_result['bank_country'], dict) else generic_result['bank_country']
+
+        if not bank_name:
+            self.logger.warning("Generic extraction failed to identify bank name, falling back to standard extraction")
+            return await self.extract_fields_from_ocr(text_blocks or [], ocr_text, image_bytes or b'', is_pdf)
+
+        self.logger.info(f"Generic extraction identified: bank={bank_name}")
+
+        # Step 2: Look up bank in database
+        bank_db = get_bank_database_lookup()
+        country_code = bank_country or 'IN'  # Default to IN if not detected
+
+        bank_info = bank_db.get_bank_by_name_and_country(bank_name, country_code)
+
+        if not bank_info:
+            self.logger.warning(f"Bank '{bank_name}' not found in database, falling back to standard extraction")
+            return await self.extract_fields_from_ocr(text_blocks or [], ocr_text, image_bytes or b'', is_pdf)
+
+        self.logger.info(f"Database lookup found: {bank_info['bank_abbrev']} (ID: {bank_info['bank_id']}, country: {country_code})")
+
+        # Step 3: Check if custom prompts exist
+        if bank_info.get('prompts'):
+            # Step 3a: Use existing custom prompts
+            self.logger.info(f"Step 3a: Using {len(bank_info['prompts'])} cached custom prompts for {bank_info['bank_abbrev']}/{country_code}")
+
+            # Extract with custom schema
+            custom_result = await gliner_model.extract_with_custom_schema_async(
+                text=ocr_text,
+                bank_specific_prompts=bank_info['prompts'],
+                default_threshold=bank_info['prompts'].get('default_threshold', 0.3)
+            )
+
+            # Update usage stats
+            bank_prompt_database_service.update_usage_stats(bank_info['bank_id'], country_code)
+
+            # Convert to BankStatementData
+            return self._convert_gliner_result_to_response(custom_result, is_pdf, 'bank_specific_prompts')
+
+        # Step 4: No custom prompts found - generate them
+        self.logger.info(f"Step 4: No custom prompts found for {bank_info['bank_abbrev']}/{country_code}, generating with LLM...")
+
+        generated = await bank_prompt_generator.generate_prompts_for_bank(
+            bank_id=bank_info['bank_id'],
+            bank_abbrev=bank_info['bank_abbrev'],
+            bank_name=bank_info['bank_name'],
+            country_code=country_code,
+            ocr_text=ocr_text,
+            generic_extraction_result=generic_result
+        )
+
+        # Check for generation errors
+        if generated.get('error') or not generated.get('prompts'):
+            self.logger.warning(f"Prompt generation failed: {generated.get('error')}, falling back to standard extraction")
+            return await self.extract_fields_from_ocr(text_blocks or [], ocr_text, image_bytes or b'', is_pdf)
+
+        # Save to database
+        save_success = bank_prompt_database_service.save_bank_prompts(
+            bank_id=bank_info['bank_id'],
+            country_code=country_code,
+            prompts=generated['prompts'],
+            extraction_config=generated['extraction_config'],
+            metadata=generated.get('metadata')
+        )
+
+        if not save_success:
+            self.logger.warning("Failed to save generated prompts to database")
+
+        self.logger.info(f"Generated and saved {len(generated['prompts'])} custom prompts for {bank_info['bank_abbrev']}")
+
+        # Step 5: Use newly generated prompts
+        # Convert prompts to GLiNER2 format
+        custom_prompts = {}
+        for prompt in generated['prompts']:
+            entity_type = prompt.get('entity_type')
+            if entity_type:
+                custom_prompts[entity_type] = {
+                    'description': prompt.get('prompt_description', ''),
+                    'entity': prompt.get('entity_category', 'custom'),
+                    'threshold': prompt.get('threshold', 0.3),
+                    'examples': json.loads(prompt['examples']) if prompt.get('examples') else [],
+                    'pattern': prompt.get('validation_pattern')
+                }
+
+        custom_result = await gliner_model.extract_with_custom_schema_async(
+            text=ocr_text,
+            bank_specific_prompts=custom_prompts,
+            default_threshold=generated['extraction_config'].get('default_threshold', 0.3)
+        )
+
+        # Convert to BankStatementData
+        return self._convert_gliner_result_to_response(custom_result, is_pdf, 'llm_generated_prompts')
+
+    def _convert_gliner_result_to_response(
+        self,
+        gliner_result: Dict[str, Any],
+        is_pdf: bool,
+        extraction_method: str
+    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """
+        Convert GLiNER extraction result to response format.
+
+        Args:
+            gliner_result: GLiNER extraction result
+            is_pdf: True if input is PDF
+            extraction_method: Extraction method identifier
+
+        Returns:
+            (extracted_data, confidence_data) tuple
+        """
+        extracted_data = {}
+        confidence_data = {}
+
+        # Field mappings from GLiNER schema to our schema
+        field_mappings = {
+            'bank_name': 'bank_name',
+            'account_holder_name': 'account_holder_name',
+            'account_number': 'account_number',
+            'cif_number': 'cif_number',
+            'customer_address': 'address',
+            'branch_address': 'branch_address',
+            'branch_name': 'bank_branch',
+            'currency': 'currency',
+            'statement_date': 'statement_date',
+        }
+
+        for gliner_field, our_field in field_mappings.items():
+            if gliner_field in gliner_result and gliner_result[gliner_field]:
+                result = gliner_result[gliner_field]
+                if isinstance(result, dict):
+                    extracted_data[our_field] = result.get('value', '')
+                    confidence = result.get('confidence', 0.0)
+                    confidence_data[our_field] = {
+                        'overall_confidence': float(confidence),
+                        'sources': [extraction_method]
+                    }
+                else:
+                    extracted_data[our_field] = str(result)
+
+        # Add metadata
+        extracted_data['extraction_method'] = extraction_method
+        extracted_data['account_number_extraction_method'] = 'gliner_ner'
+
+        # Overall confidence
+        if confidence_data:
+            avg_confidence = sum(c.get('overall_confidence', 0) for c in confidence_data.values()) / max(len(confidence_data), 1)
+            confidence_data['overall'] = {
+                'overall_confidence': avg_confidence,
+                'sources': [extraction_method]
+            }
+
+        return extracted_data, confidence_data
 

@@ -25,11 +25,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 from io import BytesIO
 
-from app.core.key_injection.bank_lookup import get_bank_lookup, BankInfo
+from app.core.key_injection.bank_database_lookup import get_bank_database_lookup, BankInfo
 from app.helper.validators.bank_statement_validator import (
     get_bank_statement_validator, get_country_config_loader
 )
 from app.config.bank_statement_country_loader import get_country_config_loader
+from app.config.bank_statement_config_db_service import get_bank_statement_config_db_service
 from app.schemas.bank_statement_schema import BankStatementData
 from app.helper.doctr.document_text_extractor import DocumentTextExtractor
 
@@ -137,20 +138,11 @@ def _get_all_known_countries() -> Set[str]:
     return all_countries
 
 
-def load_config() -> Dict:
-    """Load bank statement configuration."""
-    config_path = Path(__file__).parent.parent.parent / "reference_templates" / "bank_statements" / "config.json"
-    try:
-        with open(config_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except Exception as e:
-        logger.error(f"Failed to load config from {config_path}: {e}")
-        return {}
-
-
-def build_unified_map(config: Dict) -> Dict[str, str]:
+def build_unified_map() -> Dict[str, str]:
     """
     Build unified map containing all patterns for label/bank/address detection.
+
+    Uses database-backed configuration service.
 
     Returns:
         Dict mapping pattern text to category:
@@ -165,46 +157,76 @@ def build_unified_map(config: Dict) -> Dict[str, str]:
         - "address_block"
     """
     unified_map = {}
+    config_service = get_bank_statement_config_db_service()
 
     # 1. Account number labels
-    for label in config.get("account_number_labels", []):
+    for label in config_service.get_account_number_labels():
         unified_map[label.upper()] = "account_number_label"
 
-    # 2. Account holder name labels (NEW)
-    for label in config.get("account_holder_name_labels", []):
+    # 2. Account holder name labels
+    for label in config_service.get_account_holder_name_labels():
         unified_map[label.upper()] = "account_holder_name_label"
 
     # 3. Currency labels
-    for label in config.get("currency_labels", []):
+    for label in config_service.get_currency_labels():
         unified_map[label.upper()] = "currency_label"
 
     # Also add currency names (e.g., "UAE DIRHAM", "US DOLLAR") as currency labels
     # This ensures that currency text is extracted and removed from address consideration
-    currency_name_map = config.get("currency_name_map", {})
+    currency_name_map = config_service.get_currency_name_map()
     for currency_name in currency_name_map.keys():
         unified_map[currency_name.upper()] = "currency_label"
 
-    # 4. IBAN labels (NEW - Phase 2)
-    for label in config.get("iban_labels", []):
+    # 4. IBAN labels
+    for label in config_service.get_iban_labels():
         unified_map[label.upper()] = "iban_label"
 
-    # 5. Statement date labels (NEW - Phase 2)
-    for label in config.get("statement_date_labels", []):
+    # 5. Statement date labels
+    for label in config_service.get_statement_date_labels():
         unified_map[label.upper()] = "statement_date_label"
 
-    # 6. Opening balance labels (NEW - Phase 2)
-    for label in config.get("opening_balance_labels", []):
+    # 6. Opening balance labels
+    for label in config_service.get_opening_balance_labels():
         unified_map[label.upper()] = "opening_balance_label"
 
-    # 7. Closing balance labels (NEW - Phase 2)
-    for label in config.get("closing_balance_labels", []):
+    # 7. Closing balance labels
+    for label in config_service.get_closing_balance_labels():
         unified_map[label.upper()] = "closing_balance_label"
 
-    # 8. Bank identifiers (names OR URLs, never both - analyzed per bank)
-    # Filter out very short patterns (< 4 chars) to avoid false matches like "YES", "ING", "US"
-    for identifier, abbrev in config.get("bank_identifiers_map", {}).items():
-        if len(identifier) >= 4:
-            unified_map[identifier.upper()] = "bank_name"
+    # 8. Bank name patterns from database for Pass 1 validation
+    # This allows Pass 1 to match bank-related text like "MAHARASHTRA", "MAHABANK", etc.
+    try:
+        from app.core.key_injection.bank_database_lookup import get_bank_database_lookup
+        bank_db = get_bank_database_lookup()
+        bank_identifiers = bank_db.get_all_bank_identifiers()
+
+        # Common words to exclude from bank name patterns to avoid false matches
+        common_bank_words = {
+            'BANK', 'OF', 'THE', 'AND', 'OR', 'STATE', 'NATIONAL', 'INDIA',
+            'COOPERATIVE', 'CREDIT', 'UNION', 'LIMITED', 'LTD', 'CORPORATION',
+            'CORP', 'SOCIAL', 'FINANCE', 'FINANCIAL', 'SERVICES', 'SERVICE'
+        }
+
+        bank_pattern_count = 0
+        for bank_id in bank_identifiers:
+            identifier = bank_id['identifier']
+            identifier_upper = identifier.upper()
+
+            # Skip short identifiers (< 5 chars) to avoid false matches
+            if len(identifier) < 5:
+                continue
+
+            # Skip common bank words that appear in many contexts
+            if identifier_upper in common_bank_words:
+                continue
+
+            # Store in UPPERCASE for matching with span_text_upper
+            unified_map[identifier_upper] = "bank_name"
+            bank_pattern_count += 1
+
+        logger.info(f"Loaded {bank_pattern_count} bank patterns for unified map (filtered from {len(bank_identifiers)} total)")
+    except Exception as e:
+        logger.warning(f"Failed to load bank patterns from database: {e}")
 
     # 9. Country names from config (most reliable anchors for address detection)
     # Countries are distinctive and rarely appear in street names or other content
@@ -217,7 +239,7 @@ def build_unified_map(config: Dict) -> Dict[str, str]:
 
     # 10. State names from state_to_country_map (for addresses that don't contain country name)
     # This helps with PDFs where the address only shows state (e.g., "ANDHRA PRADESH") without "INDIA"
-    state_to_country = config.get("state_to_country_map", {})
+    state_to_country = config_service.get_state_to_country_map()
     for state_name in state_to_country.keys():
         unified_map[state_name.upper()] = "address_block"
 
@@ -226,17 +248,14 @@ def build_unified_map(config: Dict) -> Dict[str, str]:
 
 def get_account_number_regex(country: str) -> re.Pattern:
     """Get account number regex for a country."""
-    config = load_config()
-    currencies = config.get("currencies", {})
+    config_service = get_bank_statement_config_db_service()
 
-    # Find currency config for this country
-    for currency_info in currencies.values():
-        if currency_info.get("country") == country:
-            length_info = currency_info.get("account_number_length", {"min": 8, "max": 16})
-            min_len = length_info.get("min", 8)
-            max_len = length_info.get("max", 16)
-            # Allow spaces, dashes, but mostly digits
-            return re.compile(r'^[\d\s-]{' + str(min_len) + ',' + str(max_len) + '}$')
+    # Get currency for this country
+    currency_code = config_service.get_currency_for_country(country)
+    if currency_code:
+        min_len, max_len = config_service.get_account_number_length_range(currency_code)
+        # Allow spaces, dashes, but mostly digits
+        return re.compile(r'^[\d\s-]{' + str(min_len) + ',' + str(max_len) + '}$')
 
     # Default: 8-16 digits with optional spaces/dashes
     return re.compile(r'^[\d\s-]{8,16}$')
@@ -589,9 +608,9 @@ class SpatialBankStatementExtractor:
 
     def __init__(self):
         self.logger = logger
-        self.bank_lookup = get_bank_lookup()
-        self.config = load_config()
-        self.unified_map = build_unified_map(self.config)
+        self.bank_lookup = get_bank_database_lookup()
+        self.config_service = get_bank_statement_config_db_service()
+        self.unified_map = build_unified_map()
 
     def extract(self, pdf_path: str, max_pages: int = 1) -> ExtractionResult:
         """
@@ -1508,9 +1527,9 @@ class SpatialBankStatementExtractor:
         """
         span_text_upper = span.text.upper().strip()
 
-        # Load currency name map from config
-        config = load_config()
-        currency_name_map = config.get("currency_name_map", {})
+        # Load currency name map from database
+        config_service = get_bank_statement_config_db_service()
+        currency_name_map = config_service.get_currency_name_map()
 
         # Check if span text itself is a currency name
         if span_text_upper in currency_name_map:
@@ -2405,9 +2424,9 @@ class SpatialBankStatementExtractor:
         1. Right-side search (same line, to the right)
         2. Below-label search (next line below)
         """
-        # Load currency name map from config
-        config = load_config()
-        currency_name_map = config.get("currency_name_map", {})
+        # Load currency name map from database
+        config_service = get_bank_statement_config_db_service()
+        currency_name_map = config_service.get_currency_name_map()
 
         best_match = None
         best_distance = float('inf')
@@ -3819,24 +3838,20 @@ class SpatialBankStatementExtractor:
             Extracted state name or None
         """
         from app.config.bank_statement_country_loader import get_country_config_loader
-        import json
+        from app.config.bank_statement_config_db_service import get_bank_statement_config_db_service
 
         country_loader = get_country_config_loader()
         subdivisions = country_loader.get_subdivisions(country_code)
 
-        # If subdivisions list is empty, try to load from bank_statements config
+        # If subdivisions list is empty, try to load from database
         if not subdivisions:
             try:
-                # Load state_to_country_map from bank_statements config
-                config_path = Path(__file__).parent.parent.parent.parent / "app" / "reference_templates" / "bank_statements" / "config.json"
-                if config_path.exists():
-                    with open(config_path, 'r') as f:
-                        bank_config = json.load(f)
-                        state_to_country_map = bank_config.get("state_to_country_map", {})
-                        # Get states for this country
-                        subdivisions = [state for state, cc in state_to_country_map.items() if cc == country_code]
+                config_service = get_bank_statement_config_db_service()
+                state_to_country_map = config_service.get_state_to_country_map()
+                # Get states for this country
+                subdivisions = [state for state, cc in state_to_country_map.items() if cc == country_code]
             except Exception as e:
-                self.logger.debug(f"Failed to load states from bank config: {e}")
+                self.logger.debug(f"Failed to load states from database config: {e}")
 
         if not subdivisions:
             return None
@@ -3872,19 +3887,37 @@ class SpatialBankStatementExtractor:
         bank_country = None
 
         if bank_abbrev:
-            # Determine country hint from address or currency
-            country_hint = address_components.get("country")
+            # Multi-fallback country detection for multi-country banks
+            # Priority: Bank Address > Currency > Website TLD
+            country_hint = None
 
-            # If no address country, try to get from currency
-            if not country_hint:
-                currency_span = first_pass_results.get("currency_label")
-                if currency_span and currency_span.value:
-                    currency = currency_span.value
-                    # Get country from currency config
+            # Priority 1: Bank Address Detection (most reliable for multi-country banks)
+            if address_components.get("country"):
+                country_hint = address_components.get("country")
+                logger.debug(f"Using address_country for bank lookup: {country_hint}")
+
+            # Priority 2: Currency Detection
+            elif first_pass_results.get("currency_label"):
+                currency = first_pass_results.get("currency_label").value
+                if currency:
                     from app.config.bank_statement_country_loader import get_country_config_loader
                     country_loader = get_country_config_loader()
                     currency_country_map = country_loader.get_currency_country_map()
                     country_hint = currency_country_map.get(currency)
+                    if country_hint:
+                        logger.debug(f"Using currency {currency} for bank lookup: {country_hint}")
+                        # Store in address_components for later use
+                        address_components["country"] = country_hint
+
+            # Priority 3: Website Domain TLD Detection
+            if not country_hint:
+                # Look for website domains in OCR text (e.g., "hsbc.com.sg")
+                text_for_domains = raw_text or " ".join([span.value for span in first_pass_results.values() if span])
+                country_from_tld = self.bank_lookup.extract_country_from_tld(text_for_domains)
+                if country_from_tld:
+                    country_hint = country_from_tld
+                    logger.debug(f"Using website TLD for bank lookup: {country_hint}")
+                    address_components["country"] = country_hint
 
             # Look up bank with country hint
             bank_info = self.bank_lookup.lookup_by_name(bank_abbrev, country_hint)
@@ -3910,7 +3943,8 @@ class SpatialBankStatementExtractor:
             # Re-lookup bank with country to get country-specific SWIFT codes
             bank_info = self.bank_lookup.lookup_by_name(bank_abbrev, bank_country)
             if bank_info and bank_info.swift_codes:
-                swift_code = bank_info.swift_codes[0]
+                # Use primary_swift field which contains the first SWIFT code
+                swift_code = bank_info.primary_swift if bank_info.primary_swift else bank_info.swift_codes[0]
 
         # Get currency
         currency_span = first_pass_results.get("currency_label")
@@ -3988,6 +4022,8 @@ class SpatialBankStatementExtractor:
             bank_name=result.bank_name,
             bank_branch=None,  # Not extracted by spatial
             bank_code=result.bank_code or result.ifsc_code or result.swift_code,
+            swift_code=result.swift_code,
+            iban=result.iban,
 
             # Country fields
             bank_country=result.bank_country,
