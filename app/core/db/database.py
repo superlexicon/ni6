@@ -99,7 +99,7 @@ class Database:
                 # Session variables are set when needed via cursor.execute()
                 enhanced_config = {
                     **db_config,
-                    "autocommit": False,
+                    "autocommit": True,
                     "charset": "utf8mb4",
                     "use_unicode": True,
                     "get_warnings": True,  # Enable warnings for proper handling
@@ -247,7 +247,7 @@ def get_osspep_db_connection():
         # Note: init_command is NOT used with connection pools as it can cause connection failures
         enhanced_config = {
             **db_config,
-            "autocommit": False,
+            "autocommit": True,
             "charset": "utf8mb4",
             "use_unicode": True,
             "get_warnings": True,

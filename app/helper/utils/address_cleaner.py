@@ -7,6 +7,33 @@ import re
 from typing import Dict, Optional
 
 
+def _get_state_normalizations(country_code: str) -> Dict[str, str]:
+    """Get state name normalizations for a country.
+
+    Handles common variations like missing spaces (e.g., "ANDHRAPRADESH" -> "ANDHRA PRADESH").
+
+    Args:
+        country_code: ISO country code (e.g., "IN" for India)
+
+    Returns:
+        Dictionary mapping incorrect state names to correct state names
+    """
+    normalizations = {}
+
+    if country_code == "IN":
+        # Indian state name normalizations
+        normalizations = {
+            "ANDHRAPRADESH": "ANDHRA PRADESH",
+            "TAMILNADU": "TAMIL NADU",
+            "UTTARPRADESH": "UTTAR PRADESH",
+            "MADHYAPRADESH": "MADHYA PRADESH",
+            "HIMACHALPRADESH": "HIMACHAL PRADESH",
+            "ARUNACHALPRADESH": "ARUNACHAL PRADESH",
+        }
+
+    return normalizations
+
+
 def _get_state_abbreviations(country_code: str) -> Dict[str, str]:
     """Get state abbreviation to full name mapping for a country.
 
@@ -218,6 +245,29 @@ def _remove_duplicate_words(text: str, city: str = None) -> str:
     return result
 
 
+def _normalize_state_name(state: Optional[str], country_code: Optional[str] = None) -> Optional[str]:
+    """
+    Normalize state name by applying country-specific corrections.
+
+    Handles common issues like missing spaces (e.g., "ANDHRAPRADESH" -> "ANDHRA PRADESH").
+
+    Args:
+        state: Raw state name to normalize
+        country_code: ISO country code for country-specific normalizations
+
+    Returns:
+        Normalized state name or original if no normalization needed
+    """
+    if not state or not country_code:
+        return state
+
+    state_upper = state.upper().strip()
+    normalizations = _get_state_normalizations(country_code)
+
+    # Return normalized version if found, otherwise return original
+    return normalizations.get(state_upper, state)
+
+
 def clean_gliner_address(
     address: str,
     city: Optional[str] = None,
@@ -233,8 +283,9 @@ def clean_gliner_address(
 
     This is the main entry point for cleaning GLiNER-extracted addresses.
     It combines both cleaning steps:
-    1. Remove city/state/postal/country components
-    2. Remove duplicate words and location names
+    1. Normalize state name (fix missing spaces, etc.)
+    2. Remove city/state/postal/country components
+    3. Remove duplicate words and location names
 
     Args:
         address: Raw GLiNER-extracted address
@@ -259,16 +310,19 @@ def clean_gliner_address(
     if not address:
         return ""
 
-    # Step 1: Remove city, state, postal code, country name
+    # Step 1: Normalize state name (fix "ANDHRAPRADESH" -> "ANDHRA PRADESH", etc.)
+    normalized_state = _normalize_state_name(state, country_code)
+
+    # Step 2: Remove city, state, postal code, country name
     cleaned = _clean_street_address(
         address,
         city=city or "",
-        state=state,
+        state=normalized_state,
         postal_code=postal_code,
         country_code=country_code
     )
 
-    # Step 2: Remove duplicate words and location names
+    # Step 3: Remove duplicate words and location names
     cleaned = _remove_duplicate_words(cleaned, city=city)
 
     return cleaned.strip()

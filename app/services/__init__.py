@@ -36,7 +36,6 @@ from app.helper import (key_helper,
                         prepare_verification_data,
                         exif_validator,
                         document_type_detector,
-                        bank_statement_validator,
                         )
 
 # Initialize services
@@ -85,8 +84,7 @@ ela_service = ELAService()
 common_verification_service = CommonDocumentVerificationService(
     ela_service=ela_service,
     exif_validator=exif_validator,
-    document_type_detector=document_type_detector,
-    bank_statement_validator=bank_statement_validator
+    document_type_detector=document_type_detector
 )
 
 # Initialize BERT NER Resume Extractor

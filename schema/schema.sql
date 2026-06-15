@@ -1,7 +1,7 @@
 -- IM-OSINT Database Schema
--- Version: 1.11.0
+-- Version: 1.20.0
 -- Created: 2025-11-27
--- Updated: 2026-05-13
+-- Updated: 2026-06-15
 -- MySQL Requirements: MariaDB 11.7+ (for VECTOR type)
 -- Description: Complete schema for IM-OSINT KYC verification application
 -- Encryption: ECIES (ephemeral key) for user-only PII decryption
@@ -302,6 +302,121 @@ CREATE TABLE document_analysis_jobs (
 );
 
 -- ===============================================
+-- Table: banks
+-- Description: Simplified bank lookup table with unique SWIFT codes
+-- One row per SWIFT code per country
+-- Supports Qwen3-VL bank extraction with SWIFT code lookup
+-- ===============================================
+CREATE TABLE banks (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    swift_code VARCHAR(11) NOT NULL UNIQUE COMMENT 'SWIFT code (unique per bank/country)',
+    country_code VARCHAR(2) NOT NULL COMMENT 'ISO country code (e.g., SG, IN, AE, TH, MM)',
+    legal_name VARCHAR(255) NOT NULL COMMENT 'Full legal name of bank',
+    abbreviations TEXT COMMENT 'Comma-separated abbreviations (e.g., DBS,DBSS,POSB)',
+    common_names TEXT COMMENT 'Comma-separated common names for FULLTEXT search',
+    is_active TINYINT(1) DEFAULT 1 COMMENT 'Whether this bank entry is active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    UNIQUE KEY idx_swift_code (swift_code),
+    INDEX idx_country (country_code),
+    INDEX idx_active (is_active),
+    FULLTEXT INDEX idx_search_names (abbreviations, common_names)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='Simplified bank lookup table with unique SWIFT codes';
+
+-- ===============================================
+-- Table: bank_extraction_config
+-- Description: Configuration for bank-specific extraction settings
+-- Reserved for future use with bank-specific extraction configurations
+-- ===============================================
+CREATE TABLE IF NOT EXISTS bank_extraction_config (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    bank_id INT NOT NULL COMMENT 'Foreign key to banks table',
+    country_code VARCHAR(2) NOT NULL COMMENT 'ISO country code',
+    default_threshold FLOAT DEFAULT 0.3 COMMENT 'Default confidence threshold',
+    extraction_order JSON DEFAULT NULL COMMENT 'Field extraction order',
+    special_handling TEXT DEFAULT NULL COMMENT 'Special handling instructions',
+    is_active TINYINT(1) DEFAULT 1 COMMENT 'Whether this config is active',
+    prompt_generation_status VARCHAR(50) DEFAULT 'pending' COMMENT 'LLM prompt generation status',
+    last_generated_at TIMESTAMP NULL COMMENT 'Last prompt generation timestamp',
+    samples_processed INT DEFAULT 0 COMMENT 'Number of samples processed',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY idx_bank_country (bank_id, country_code),
+    INDEX idx_status (prompt_generation_status),
+    FOREIGN KEY (bank_id) REFERENCES banks(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='Bank-specific extraction configuration (reserved for future use)';
+
+-- ===============================================
+-- Table: bank_gliner_prompts
+-- Description: Bank-specific GLiNER2 prompts for entity extraction
+-- Reserved for future use with custom bank extraction prompts
+-- ===============================================
+CREATE TABLE IF NOT EXISTS bank_gliner_prompts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    bank_id INT NOT NULL COMMENT 'Foreign key to banks table',
+    country_code VARCHAR(2) NOT NULL COMMENT 'ISO country code',
+    entity_type VARCHAR(100) NOT NULL COMMENT 'Entity type (e.g., account_number, bank_name)',
+    prompt_description TEXT NOT NULL COMMENT 'Description for GLiNER2 extraction',
+    entity_category VARCHAR(100) NOT NULL COMMENT 'Entity category for classification',
+    threshold FLOAT DEFAULT 0.3 COMMENT 'Confidence threshold',
+    examples JSON DEFAULT NULL COMMENT 'Example values for few-shot learning',
+    validation_pattern VARCHAR(500) DEFAULT NULL COMMENT 'Regex validation pattern',
+    is_active TINYINT(1) DEFAULT 1 COMMENT 'Whether this prompt is active',
+    usage_count INT DEFAULT 0 COMMENT 'Number of times this prompt was used',
+    last_used_at TIMESTAMP NULL COMMENT 'Last usage timestamp',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    created_by VARCHAR(100) DEFAULT 'system' COMMENT 'Who created this prompt',
+    UNIQUE KEY idx_bank_entity (bank_id, country_code, entity_type),
+    INDEX idx_active (is_active),
+    FOREIGN KEY (bank_id) REFERENCES banks(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='Bank-specific GLiNER2 prompts (reserved for future use)';
+
+-- ===============================================
+-- Table: prompt_generation_history
+-- Description: History of LLM prompt generation attempts
+-- Reserved for future use with prompt generation tracking
+-- ===============================================
+CREATE TABLE IF NOT EXISTS prompt_generation_history (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    bank_id INT NOT NULL COMMENT 'Foreign key to banks table',
+    country_code VARCHAR(2) NOT NULL COMMENT 'ISO country code',
+    generation_status VARCHAR(50) NOT NULL COMMENT 'Generation status (success/failed/pending)',
+    llm_provider VARCHAR(50) DEFAULT NULL COMMENT 'LLM provider (openai, ollama, etc.)',
+    llm_model VARCHAR(100) DEFAULT NULL COMMENT 'LLM model used',
+    prompt_tokens INT DEFAULT 0 COMMENT 'Number of prompt tokens used',
+    completion_tokens INT DEFAULT 0 COMMENT 'Number of completion tokens generated',
+    total_tokens INT DEFAULT 0 COMMENT 'Total tokens used',
+    generation_time_ms INT DEFAULT 0 COMMENT 'Generation time in milliseconds',
+    error_message TEXT DEFAULT NULL COMMENT 'Error message if failed',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_bank_country (bank_id, country_code),
+    INDEX idx_status (generation_status),
+    FOREIGN KEY (bank_id) REFERENCES banks(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='LLM prompt generation history (reserved for future use)';
+
+-- ===============================================
+-- Sample Bank Data (for new installations)
+-- ===============================================
+-- For production deployment, run schema/migrations/009_consolidated_migrations.sql
+-- which contains comprehensive bank data for all supported countries.
+
+-- The following is a minimal sample for testing:
+INSERT INTO banks (swift_code, country_code, legal_name, abbreviations, common_names, is_active) VALUES
+('DBSSSGSG', 'SG', 'DBS Bank Ltd', 'DBS,DBSS', 'DBS Bank', 1),
+('HDFCINBB', 'IN', 'HDFC Bank Ltd', 'HDFC', 'HDFC Bank', 1),
+('NBDQAQNA', 'AE', 'Emirates NBD', 'ENBD,NBD', 'Emirates NBD', 1)
+ON DUPLICATE KEY UPDATE
+    legal_name = VALUES(legal_name),
+    abbreviations = VALUES(abbreviations),
+    common_names = VALUES(common_names);
+
+-- ===============================================
 -- Schema Verification Queries
 -- ===============================================
 
@@ -320,6 +435,10 @@ DESCRIBE document_submissions;
 DESCRIBE document_analysis_jobs;
 DESCRIBE sanctions_lists;
 DESCRIBE sanctions_entries;
+DESCRIBE banks;
+DESCRIBE bank_extraction_config;
+DESCRIBE bank_gliner_prompts;
+DESCRIBE prompt_generation_history;
 
 -- Check indexes
 SHOW INDEX FROM user_keys;
@@ -330,6 +449,10 @@ SHOW INDEX FROM document_submissions;
 SHOW INDEX FROM document_analysis_jobs;
 SHOW INDEX FROM sanctions_lists;
 SHOW INDEX FROM sanctions_entries;
+SHOW INDEX FROM banks;
+SHOW INDEX FROM bank_extraction_config;
+SHOW INDEX FROM bank_gliner_prompts;
+SHOW INDEX FROM prompt_generation_history;
 
 
 -- ===============================================
@@ -453,6 +576,12 @@ SHOW INDEX FROM sanctions_entries;
 --   - user_keys_pending table added for staging key data before verification
 --   - country_code made nullable in user_keys and user_keys_pending tables
 --
+-- v1.20.0 - Bank Schema Simplification:
+--   - Simplified banks table (one SWIFT code per row)
+--   - Comprehensive bank data for multiple countries
+--   - Removed obsolete validator tables
+--   - Removed bank_layout_cache table (Qwen3-VL extraction)
+--
 -- For new installations, simply run this schema.sql file.
 -- For existing databases, see individual migration files in schema/migrations/
 
@@ -528,3 +657,32 @@ SHOW INDEX FROM sanctions_entries;
 -- 3. To rollback (remove the column):
 --    DROP INDEX idx_client_public_key ON document_submissions;
 --    ALTER TABLE document_submissions DROP COLUMN client_public_key;
+
+-- ===============================================
+-- Bank Schema Migration (v1.20.0)
+-- ===============================================
+-- For existing databases upgrading to simplified bank schema:
+
+-- 1. Run consolidated migration file:
+--    See schema/migrations/009_consolidated_migrations.sql
+--
+--    This consolidates migrations 009-022 and includes:
+--    - Simplified banks table (one SWIFT code per row)
+--    - Comprehensive bank data for SG, IN, AE, TH, MM, MY, AU, GB, US
+--    - Removed obsolete validator tables
+--    - Removed bank_layout_cache table (replaced by Qwen3-VL extraction)
+--
+-- 2. Key changes:
+--    - Old 3-table bank schema (banks, bank_country_operations, bank_identifiers) replaced with single banks table
+--    - Each SWIFT code is now a unique row
+--    - FULLTEXT index on abbreviations and common_names for fast search
+--    - Validator-related tables dropped (no longer needed with LLM extraction)
+--
+-- 3. For new installations:
+--    - Simply run this schema.sql file
+--    - Bank tables are created with empty schema
+--    - Run 009_consolidated_migrations.sql to populate with bank data
+--
+-- 4. To rollback:
+--    - Restore from backup before migration 009
+--    - Note: This is a destructive migration that drops old tables

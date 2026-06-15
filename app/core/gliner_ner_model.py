@@ -373,6 +373,92 @@ class GLiNERNERModel:
             self.logger.info("Falling back to labels-based extraction")
             return await self.extract_bank_statement_entities_async(text)
 
+    async def extract_bank_identification_async(
+        self,
+        text: str,
+    ) -> Dict[str, Any]:
+        """
+        Extract only bank_name and bank_country for Stage 1 bank identification.
+
+        This is the minimal extraction method used in the two-stage extraction approach:
+        - Stage 1: Extract only bank_name and bank_country to identify the bank
+        - Stage 2: Use bank-specific prompts for full field extraction
+
+        Args:
+            text: Bank statement OCR text
+
+        Returns:
+            Dictionary with only bank_name and bank_country keys
+        """
+        try:
+            model = await self.get_model_with_gpu()
+            GLiNERClass, gliner_version = get_gliner_classes()
+
+            # Only GLiNER2 supports schema-based extraction
+            if gliner_version != "gliner2":
+                self.logger.warning("Schema extraction requires GLiNER2, falling back to labels")
+                # For fallback, extract from full schema but only return bank fields
+                full_result = await self.extract_bank_statement_entities_async(text)
+                return {
+                    'bank_name': full_result.get('bank_name'),
+                    'bank_country': full_result.get('bank_country')
+                }
+
+            # Build minimal schema with only bank_name and bank_country
+            entity_types = self._get_bank_identification_schema()
+
+            # Create schema using GLiNER2's API
+            schema = model.create_schema().entities(entity_types)
+
+            # Run schema-based extraction using extract() method
+            entities_dict = model.extract(
+                text,
+                schema=schema,
+                threshold=0.35,  # Slightly higher threshold for critical bank identification
+                include_confidence=True,
+                include_spans=True
+            )
+
+            # Process GLiNER2 schema output format
+            results = {}
+
+            # Extract entities from the nested "entities" key
+            entities_data = entities_dict.get("entities", entities_dict)
+
+            for field_name, values in entities_data.items():
+                if values is None:
+                    results[field_name] = None
+                    continue
+
+                if isinstance(values, list) and len(values) > 0:
+                    # Take the highest confidence value
+                    best = max(values, key=lambda v: v.get('confidence', v.get('score', 0)))
+                    results[field_name] = {
+                        'value': best.get('text', ''),
+                        'confidence': best.get('confidence', best.get('score', 0.0))
+                    }
+                elif isinstance(values, dict):
+                    # Single value as dict
+                    results[field_name] = {
+                        'value': values.get('text', ''),
+                        'confidence': values.get('confidence', values.get('score', 0.0))
+                    }
+                elif isinstance(values, str):
+                    # Simple string value
+                    results[field_name] = {
+                        'value': values,
+                        'confidence': 0.5
+                    }
+
+            self.logger.info(f"Bank identification extracted {len(results)} fields: {list(results.keys())}")
+
+            return results
+
+        except Exception as e:
+            self.logger.error(f"Bank identification extraction failed: {e}")
+            # Return empty results to allow fallback in caller
+            return {'bank_name': None, 'bank_country': None}
+
     async def extract_with_custom_schema_async(
         self,
         text: str,
@@ -420,17 +506,27 @@ class GLiNERNERModel:
                 self.logger.warning("No bank-specific prompts provided, falling back to generic")
                 return await self.extract_bank_statement_with_schema_async(text)
 
-            # Build entity types from bank-specific prompts
-            # Convert format: {"entity_type": {"description": "...", "entity": "..."}}
-            # To GLiNER2 format: [{"entity_type": "description"}]
-            entity_types = []
-            for entity_type, config in bank_specific_prompts.items():
-                if isinstance(config, dict):
-                    description = config.get('description', '')
-                    # GLiNER2 can use the entity category hint for better extraction
-                    entity_types.append({
-                        entity_type: description
-                    })
+            # Build schema descriptions from bank-specific prompts
+            # Use LLM-generated prompt descriptions from database/prompt generator
+            # Base schema serves as fallback for entity types without LLM-generated descriptions
+            base_schema = self._get_bank_statement_schema()
+            entity_types = {}
+
+            for entity_type in bank_specific_prompts.keys():
+                # Use LLM-generated prompt description if available
+                prompt_config = bank_specific_prompts[entity_type]
+                description = prompt_config.get("description", "")
+
+                if description:
+                    # Use the LLM-generated description from database/prompt generator
+                    entity_types[entity_type] = description
+                    self.logger.debug(f"Using LLM-generated prompt description for {entity_type}")
+                elif entity_type in base_schema:
+                    # Fallback to base schema if no description in prompt config
+                    entity_types[entity_type] = base_schema[entity_type]
+                else:
+                    # Fallback for any custom entity types not in base schema
+                    entity_types[entity_type] = f"Extract {entity_type} from bank statement"
 
             if not entity_types:
                 self.logger.warning("No valid entity types in bank-specific prompts, falling back to generic")
@@ -439,6 +535,7 @@ class GLiNERNERModel:
             self.logger.info(f"Extracting with {len(entity_types)} bank-specific entity types")
 
             # Create schema using GLiNER2's API
+            # GLiNER2 receives full descriptions with negative constraints, not just entity names
             schema = model.create_schema().entities(entity_types)
 
             # Use default threshold from prompts or config
@@ -489,92 +586,11 @@ class GLiNERNERModel:
             return results
 
         except Exception as e:
-            self.logger.error(f"Bank-specific schema extraction failed: {e}")
+            import traceback
+            self.logger.error(f"Bank-specific schema extraction failed: {e}\n{traceback.format_exc()}")
             # Fallback to generic schema extraction
             self.logger.info("Falling back to generic schema extraction")
             return await self.extract_bank_statement_with_schema_async(text)
-
-    def _get_known_bank_names(self) -> str:
-        """
-        Load known bank names from database for GLiNER schema.
-
-        Uses the comprehensive bank configuration from the database.
-        Fetches all bank identifiers (names, alternate names, abbreviations).
-
-        Returns a comma-separated string of bank names for the schema description.
-        """
-        try:
-            from app.core.db.database import get_db_connection
-
-            conn = get_db_connection()
-            try:
-                cursor = conn.cursor(dictionary=True)
-
-                # Fetch all bank identifiers including names, abbreviations, and alternate names
-                query = """
-                    SELECT DISTINCT bi.identifier, b.abbrev
-                    FROM bank_identifiers bi
-                    JOIN banks b ON bi.bank_id = b.id
-                    WHERE b.is_active = 1 AND bi.is_validated = 1
-                    ORDER BY LENGTH(bi.identifier) DESC
-                """
-
-                cursor.execute(query)
-                all_names = set()
-
-                for row in cursor.fetchall():
-                    all_names.add(row['identifier'])
-                    all_names.add(row['abbrev'])
-
-                # Remove duplicates and sort
-                unique_names = sorted(all_names)
-
-                # Prioritize banks from commonly processed countries
-                # by including key banks first
-                priority_banks = [
-                    'dbs', 'ocbc', 'uob', 'posb',  # Singapore
-                    'emirates nbd', 'adcb', 'dib', 'mashreq', 'rakbank',  # UAE
-                    'hdfc', 'icici', 'axis', 'sbi', 'kotak',  # India
-                    'maybank', 'cimb', 'public bank',  # Malaysia
-                    'bangkok bank', 'krung thai', 'kasikorn',  # Thailand
-                    'hsbc', 'standard chartered', 'citibank',  # International
-                ]
-
-                prioritized = []
-                remaining = []
-
-                for name in unique_names:
-                    name_lower = name.lower()
-                    # Check if any priority bank is a substring of this name
-                    is_priority = any(pb in name_lower for pb in priority_banks)
-                    if is_priority:
-                        prioritized.append(name)
-                    else:
-                        remaining.append(name)
-
-                # Combine prioritized with remaining, limit to 150 names
-                final_names = prioritized + remaining
-                final_names = final_names[:150]
-
-                if final_names:
-                    self.logger.info(f"Loaded {len(final_names)} bank names from database")
-                    return ', '.join(final_names)
-
-                # Fallback if no names found
-                return self._get_default_bank_names()
-
-            finally:
-                conn.close()
-
-        except Exception as e:
-            self.logger.warning(f"Failed to load bank names from database: {e}")
-            return self._get_default_bank_names()
-
-    def _get_default_bank_names(self) -> str:
-        """Fallback bank names if JSON load fails."""
-        return "Emirates NBD, HSBC, HDFC Bank, ICICI Bank, Axis Bank, DBS Bank, " \
-               "State Bank of India, Abu Dhabi Commercial Bank, Dubai Islamic Bank, " \
-               "Mashreq Bank, RAK Bank, OCBC Bank, UOB, ANZ, Standard Chartered"
 
     def _get_bank_statement_schema(self) -> Dict[str, str]:
         """
@@ -588,24 +604,40 @@ class GLiNERNERModel:
         """
         return {
             # Primary identification fields
-            "bank_name": f"The official name of the bank or financial institution, NOT the branch location. This is the institution name like 'Emirates NBD' 'HSBC' 'HDFC Bank' 'DBS Bank'. Common bank names: {self._get_known_bank_names()}. Do NOT include branch location names like 'Ibn Battuta Mall' or 'Connaught Place' in the bank name - those go in branch_name. The bank name appears as a header logo at the top, or in website URLs like www.emiratesnbd.com.",
+            "bank_name": "The official name of the bank or financial institution that ISSUED this bank statement. This is the bank whose LOGO and HEADER appear at the top of the page. The bank_name appears as: (1) LOGO TEXT at the top of the statement (e.g., 'HDFC Bank' 'Emirates NBD' 'DBS' 'POSB' in large bold text at the very top), (2) WEBSITE DOMAIN URLS in headers (e.g., 'www.hdfcbank.com' 'www.emiratesnbd.com' 'dbs.com.sg'), (3) LEGAL ENTITY NAMES in statement headers or footers (e.g., 'DBS Bank Ltd' 'The Hongkong and Shanghai Banking Corporation' 'Emirates NBD Bank PJSC'). NEGATIVE EXAMPLES - DO NOT EXTRACT: Banks mentioned in transaction line items (e.g., 'Transfer to Citibank' 'Payment from HSBC' - these are counterparty banks NOT the issuing bank), Generic financial terms (e.g., 'Bank' 'Banking' 'Statement' 'Consolidated Statement' 'Deposits' 'Credit' 'Debit' 'Balance' 'limit' - these are NOT bank names), Branch location names (e.g., 'Ibn Battuta Mall' 'Connaught Place' 'Marina Bay' - those go in branch_name). Do NOT include the word 'Bank' by itself - must be part of a full bank name. Multi-country banks need country hint from other fields - prefer bank names from logos and URLs over transaction mentions.",
 
             # Account holder name - all person names should map here
-            "account_holder_name": "The person's full legal name. This appears immediately after labels like 'Name' 'Customer Name' 'Account Holder Name' 'A/C Holder Name' 'Primary Account Holder Name' 'Account Holder' 'Customer' or may appear with a colon prefix like ': JOHN SMITH'. The name may appear with titles like Mr Mrs Ms Dr Shri Smt before the name or without titles. Names are 2-4 words in ALL CAPS or Title Case (e.g., 'JOHN SMITH' 'JANE DOE' 'ROBERT JOHN DOE'). Names with single-letter initials are also valid (e.g., 'A B SMITH' 'J P DOE'). The name may include patronymic markers like S/O D/O A/L meaning Son Of Daughter Of (e.g., 'JOHN SMITH S/O ROBERT DOE'). A valid name contains ONLY letters and spaces - NEVER numbers or prefixes like PAN CIF ACC NO A/C NO. DO NOT extract city names, area names, or location names like 'Bangalore' 'Mumbai' 'Delhi' - these are NOT person names.",
+            "account_holder_name": "Customer's full name appearing after labels like 'Name:', 'Customer Name:', 'Account Holder:'. Format: 2-6 words in ALL CAPS (e.g., 'JOHN SMITH', 'JANE DOE', 'MANOGARAN S/O THANABALAN'). May include special characters like '/' for relationships (S/O = son of, D/O = daughter of). Extract the COMPLETE name including all parts connected by special characters. EXCLUDES: bank names, locations, city names, branch names. Never extract numbers or prefixes like CIF/ACC.",
 
 
-            "account_number": "The unique numeric identifier for the bank account. This appears immediately to the right of or on the next line after labels like Account Number Account No A/C No Savings A/C Current A/C. This is the customer's bank account number NOT the CIF number or Customer ID.",
+            "account_number": "The unique numeric identifier for the bank account. CRITICAL: Only extract numbers that appear IMMEDIATELY after or next to account number labels such as: 'Account Number', 'Account No', 'A/C No', 'A/C#', 'Savings A/C', 'Current A/C', 'AC No', 'Acc No'. The number must be spatially close to one of these labels in the document. Do NOT extract: transaction amounts, random serial numbers, credit card numbers, CIF numbers, or other numeric identifiers. This is the customer's bank account number only.",
             "cif_number": "The Customer Identification File number used internally by the bank. This appears after labels like CIF Number or CIF or Cust ID. This is a numeric identifier that is NOT the account number.",
 
             # Address fields - explicitly distinguish customer vs branch
-            "customer_address": "The customer's permanent residential postal mailing address consisting of multiple lines. Contains house number with h no hno or plot number, or block number followed by street name, then city/town, then state/province, then postal/zip/pin code. The address NEVER includes the person's name or title. The address NEVER includes the bank's branch address. Do NOT extract OCR noise patterns like random special characters repeated dots dashes.",
+            "customer_address": "Customer's residential address with block/plot number, street, city, postal code. May span multiple lines in the document. Extract the COMPLETE multi-line address including block number, street name, area, city, and postal code. Format examples: 'BLK 29 MARINE CRESCENT #09-112 SINGAPORE 370029', '123 MAIN STREET APT 4B NEW YORK NY 10001'. Combine all lines of the address into a single text value. Contains customer's location details, NOT bank's address.",
 
-            "branch_address": "The bank branch's physical location address including building name complex name floor number street near landmark area city state pin code. This is the bank's address NOT the customer's address. This appears near labels like Base Branch Branch Address Registered Office Corporate Office Head Office Your Base Branch.",
+            "branch_address": "Bank branch's physical address. Appears near 'Branch Address:', 'Base Branch:', 'Your Base Branch'. This is the BANK'S address, not the customer's home address.",
 
             # Additional fields
-            "branch_name": "The specific branch location or area name ONLY, not the bank name. This appears after the bank name or near labels like 'Branch' 'Location'. Do NOT include the bank institution name in branch_name.",
+            "branch_name": "Bank branch location/area name ONLY (e.g., 'Marine Parade', 'Tampines'). Appears after 'Branch:' or 'Location:'. EXCLUDES: person's names, customer names, account holder names.",
             "currency": "The 3-letter ISO 4217 currency code. For DBS: SGD. For Indian banks: INR. For international: USD EUR GBP etc. This is ONLY a 3-letter code like SGD INR USD EUR. Do NOT extract serial numbers like S/N: EN05301101135929 or similar identification numbers. Do NOT extract the word Currency itself.",
             "statement_date": "The statement date appearing as a date in formats like DD MMM YYYY or DD/MM/YYYY or MM/DD/YYYY. When a date RANGE appears, extract the LATEST/END date. This appears near labels like 'Statement Date' 'as at' 'Statement for the period'.",
+            "bank_country": "The 2-letter ISO 3166-1 alpha-2 country code ONLY (e.g., IN, SG, AE, GB, US, MY, TH, AU, JP, HK). EXTRACT ONLY THE 2-LETTER CODE. Never extract full country names like 'Singapore' or 'India'. The code must be exactly 2 uppercase letters. PRIORITY 1: Look at the BANK'S address block in the document HEADER or FOOTER (this is the BANK'S address, NOT the customer's address). The bank address appears near labels like 'Registered Office:', 'Head Office:', 'Corporate Office:', 'Registered Address:', or legal entity text like 'incorporated in [country]', 'registered office [city]', 'with limited liability'. Extract the country from this BANK address (e.g., 'Mumbai, India' → IN, 'Singapore' → SG, 'Dubai, UAE' → AE, 'London, United Kingdom' → GB). PRIORITY 2: Bank's website domain TLD in header/footer (.in=IN, .sg=SG, .ae=AE, .co.uk=GB, .com.au=AU). PRIORITY 3: Bank's legal entity registration text (e.g., 'incorporated in Singapore', 'registered in Dubai', 'limited liability company Mumbai'). DO NOT use currency - currency can be misleading for multi-currency accounts. DO NOT default to 'US' unless the bank's registered address is explicitly in the United States. Return ONLY the 2-letter ISO code.",
+        }
+
+    def _get_bank_identification_schema(self) -> Dict[str, str]:
+        """
+        Get minimal GLiNER2 schema for bank identification (Stage 1 of two-stage extraction).
+
+        This schema ONLY extracts bank_name and bank_country to identify the bank.
+        Used in Stage 1 before using bank-specific prompts for full extraction.
+
+        Returns:
+            Dictionary mapping field names to description strings (only bank_name and bank_country)
+        """
+        return {
+            "bank_name": "The official name of the bank or financial institution that ISSUED this bank statement. This is the bank whose LOGO and HEADER appear at the top of the page. The bank_name appears as: (1) LOGO TEXT at the top of the statement (e.g., 'HDFC Bank' 'Emirates NBD' 'DBS' 'POSB' in large bold text at the very top), (2) WEBSITE DOMAIN URLS in headers (e.g., 'www.hdfcbank.com' 'www.emiratesnbd.com' 'dbs.com.sg'), (3) LEGAL ENTITY NAMES in statement headers or footers (e.g., 'DBS Bank Ltd' 'The Hongkong and Shanghai Banking Corporation' 'Emirates NBD Bank PJSC'). NEGATIVE EXAMPLES - DO NOT EXTRACT: Banks mentioned in transaction line items (e.g., 'Transfer to Citibank' 'Payment from HSBC' - these are counterparty banks NOT the issuing bank), Generic financial terms (e.g., 'Bank' 'Banking' 'Statement' 'Consolidated Statement' 'Deposits' 'Credit' 'Debit' 'Balance' 'limit' - these are NOT bank names), Branch location names (e.g., 'Ibn Battuta Mall' 'Connaught Place' 'Marina Bay' - those go in branch_name). Do NOT include the word 'Bank' by itself - must be part of a full bank name. Multi-country banks need country hint from other fields - prefer bank names from logos and URLs over transaction mentions.",
+            "bank_country": "The 2-letter ISO 3166-1 alpha-2 country code ONLY (e.g., IN, SG, AE, GB, US, MY, TH, AU, JP, HK). EXTRACT ONLY THE 2-LETTER CODE. Never extract full country names like 'Singapore' or 'India'. The code must be exactly 2 uppercase letters. PRIORITY 1: Look at the BANK'S address block in the document HEADER or FOOTER (this is the BANK'S address, NOT the customer's address). The bank address appears near labels like 'Registered Office:', 'Head Office:', 'Corporate Office:', 'Registered Address:', or legal entity text like 'incorporated in [country]', 'registered office [city]', 'with limited liability'. Extract the country from this BANK address (e.g., 'Mumbai, India' → IN, 'Singapore' → SG, 'Dubai, UAE' → AE, 'London, United Kingdom' → GB). PRIORITY 2: Bank's website domain TLD in header/footer (.in=IN, .sg=SG, .ae=AE, .co.uk=GB, .com.au=AU). PRIORITY 3: Bank's legal entity registration text (e.g., 'incorporated in Singapore', 'registered in Dubai', 'limited liability company Mumbai'). DO NOT use currency - currency can be misleading for multi-currency accounts. DO NOT default to 'US' unless the bank's registered address is explicitly in the United States. Return ONLY the 2-letter ISO code.",
         }
 
     def _get_passport_schema(self) -> Dict[str, str]:

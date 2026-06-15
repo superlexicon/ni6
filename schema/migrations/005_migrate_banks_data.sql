@@ -133574,9 +133574,10 @@ FROM banks WHERE abbrev = 'FDRE';
 
 
 -- Identifiers for FDRL
-INSERT INTO bank_identifiers (bank_id, identifier, identifier_type, is_validated)
-SELECT id, 'limit', 'alternate_name', 1
-FROM banks WHERE abbrev = 'FDRL';
+-- REMOVED: 'limit' identifier - too generic, causes false positives in transaction text
+-- INSERT INTO bank_identifiers (bank_id, identifier, identifier_type, is_validated)
+-- SELECT id, 'limit', 'alternate_name', 1
+-- FROM banks WHERE abbrev = 'FDRL';
 INSERT INTO bank_identifiers (bank_id, identifier, identifier_type, is_validated)
 SELECT id, 'federal bank limited, the', 'full_name', 1
 FROM banks WHERE abbrev = 'FDRL';

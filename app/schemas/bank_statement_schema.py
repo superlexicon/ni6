@@ -7,7 +7,8 @@ class BankStatementData(BaseModel):
 
     # Account Holder Information
     account_holder_name: Optional[str] = None
-    address: Optional[str] = None
+    address: Optional[str] = None  # Customer's residential address
+    branch_address: Optional[str] = None  # Bank's branch address
 
     # Account Details
     account_number: Optional[str] = None
@@ -15,7 +16,8 @@ class BankStatementData(BaseModel):
 
     # Bank Information
     bank_name: Optional[str] = None
-    bank_branch: Optional[str] = None
+    bank_branch: Optional[str] = None  # Legacy field name, use bank_address instead
+    bank_address: Optional[str] = None  # Bank branch address (full address)
     bank_code: Optional[str] = None
     swift_code: Optional[str] = None
     iban: Optional[str] = None
@@ -26,8 +28,6 @@ class BankStatementData(BaseModel):
     account_holder_country: Optional[str] = None
 
     # Address components (structured)
-    address_street_number: Optional[str] = None
-    address_street_name: Optional[str] = None
     address_city: Optional[str] = None
     address_postal: Optional[str] = None
     address_state: Optional[str] = None

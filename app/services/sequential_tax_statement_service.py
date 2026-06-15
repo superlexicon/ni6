@@ -298,14 +298,30 @@ class SequentialTaxStatementService:
         return await self.tax_statement_validator.validate(tax_data)
 
     def _convert_pdf_to_image(self, pdf_bytes: bytes) -> bytes:
-        """Convert PDF first page to PNG image."""
+        """Convert PDF first page to JPEG image."""
         try:
             import fitz
+            from PIL import Image
+            from io import BytesIO
+
             pdf_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
             if len(pdf_doc) > 0:
                 page = pdf_doc[0]
                 pix = page.get_pixmap(dpi=150)
-                result = pix.tobytes("png")
+
+                # Convert to PNG first, then to JPEG via PIL for better quality
+                img_data = pix.tobytes("png")
+                img = Image.open(BytesIO(img_data))
+
+                # Convert to RGB for JPEG compatibility
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
+
+                # Save as JPEG
+                img_byte_arr = BytesIO()
+                img.save(img_byte_arr, format='JPEG', quality=95)
+                result = img_byte_arr.getvalue()
+
                 pdf_doc.close()
                 return result
             pdf_doc.close()

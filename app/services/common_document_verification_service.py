@@ -7,7 +7,6 @@ from app.dto.document_analysis import (
 from app.services.ela_service import ELAService
 from app.helper.exif_validator import ExifValidator
 from app.helper.document_type_detector import DocumentTypeDetector
-from app.helper.bank_statement_validator import BankStatementValidator
 from app.core import logger
 
 
@@ -44,13 +43,11 @@ class CommonDocumentVerificationService:
         self,
         ela_service: ELAService,
         exif_validator: ExifValidator,
-        document_type_detector: DocumentTypeDetector,
-        bank_statement_validator: BankStatementValidator
+        document_type_detector: DocumentTypeDetector
     ):
         self.ela_service = ela_service
         self.exif_validator = exif_validator
         self.document_type_detector = document_type_detector
-        self.bank_statement_validator = bank_statement_validator
         self.logger = logger
 
     async def verify_document(
@@ -166,23 +163,8 @@ class CommonDocumentVerificationService:
         Returns:
             BankStatementValidation if applicable, None otherwise
         """
-        bank_validation = None
-
-        # Bank statement validation (PDF only)
-        if document_type == "bank_statement":
-            if is_pdf:
-                self.logger.info("Running bank statement validation...")
-                bank_result = await self.bank_statement_validator.validate(content, is_pdf=True)
-                bank_validation = BankStatementValidation(
-                    transactions_extracted=bank_result.transactions_extracted,
-                    balance_validation_passed=bank_result.balance_validation_passed,
-                    date_sequence_valid=bank_result.date_sequence_valid,
-                    font_consistency_score=bank_result.font_consistency_score
-                )
-            else:
-                self.logger.info("Bank statement validation skipped (requires PDF format)")
-
-        return bank_validation
+        # No document-specific checks implemented
+        return None
 
     async def _extract_text_for_detection(self, content: bytes, is_pdf: bool) -> str:
         """

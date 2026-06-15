@@ -145,6 +145,11 @@ class BankPromptDatabaseService:
             conn.start_transaction()
 
             # Step 1: Save extraction config
+            # Handle empty strings for JSON columns (convert to NULL)
+            special_handling = extraction_config.get('special_handling')
+            if isinstance(special_handling, str) and not special_handling.strip():
+                special_handling = None
+
             config_query = """
                 INSERT INTO bank_extraction_config
                     (bank_id, country_code, default_threshold, extraction_order,
@@ -164,7 +169,7 @@ class BankPromptDatabaseService:
                 extraction_config['country_code'],
                 extraction_config['default_threshold'],
                 extraction_config.get('extraction_order'),
-                extraction_config.get('special_handling'),
+                special_handling,
                 extraction_config.get('is_active', 1),
                 extraction_config.get('prompt_generation_status', 'completed'),
                 extraction_config.get('samples_processed', 1)
@@ -289,6 +294,9 @@ class BankPromptDatabaseService:
         try:
             cursor = conn.cursor(dictionary=True)
 
+            # Start transaction for write operation
+            conn.start_transaction()
+
             query = """
                 UPDATE bank_gliner_prompts
                 SET usage_count = usage_count + 1,
@@ -301,6 +309,10 @@ class BankPromptDatabaseService:
             logger.debug(f"Updated usage stats for bank_id={bank_id}, country={country_code}")
 
         except Exception as e:
+            try:
+                conn.rollback()
+            except:
+                pass
             logger.error(f"Failed to update usage stats: {str(e)}")
 
         finally:
@@ -323,8 +335,14 @@ class BankPromptDatabaseService:
         try:
             cursor = conn.cursor(dictionary=True)
 
+            # Updated to use new schema column names:
+            # - abbrev → abbreviations (first entry)
+            # - full_name → legal_name
             query = """
-                SELECT b.id, b.abbrev, b.full_name, bgp.country_code,
+                SELECT b.id,
+                       SUBSTRING_INDEX(b.abbreviations, ',', 1) as abbrev,
+                       b.legal_name as full_name,
+                       bgp.country_code,
                        COUNT(bgp.id) as prompt_count,
                        MAX(bgp.last_used_at) as last_used,
                        SUM(bgp.usage_count) as total_usage
@@ -332,7 +350,7 @@ class BankPromptDatabaseService:
                 JOIN bank_gliner_prompts bgp ON b.id = bgp.bank_id
                 WHERE b.is_active = 1
                   AND (NOT %s OR bgp.is_active = 1)
-                GROUP BY b.id, b.abbrev, b.full_name, bgp.country_code
+                GROUP BY b.id, abbrev, full_name, bgp.country_code
                 ORDER BY total_usage DESC, last_used DESC
             """
             cursor.execute(query, (is_active,))

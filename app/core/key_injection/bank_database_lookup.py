@@ -16,6 +16,49 @@ from app.core.logger import get_logger
 
 logger = get_logger()
 
+# Country name to ISO code mapping for normalization
+_COUNTRY_NAME_TO_ISO = {
+    "Singapore": "SG",
+    "SINGAPORE": "SG",
+    "India": "IN",
+    "INDIA": "IN",
+    "United States": "US",
+    "USA": "US",
+    "U.S.A.": "US",
+    "United Kingdom": "GB",
+    "UK": "GB",
+    "GREAT BRITAIN": "GB",
+    "UAE": "AE",
+    "United Arab Emirates": "AE",
+    "Malaysia": "MY",
+    "Thailand": "TH",
+    "Australia": "AU",
+    "Hong Kong": "HK",
+    "China": "CN",
+    "Japan": "JP",
+    "South Korea": "KR",
+    "Korea": "KR",
+    "Taiwan": "TW",
+    "Vietnam": "VN",
+    "Macau": "MO",
+    "Macao": "MO",
+}
+
+
+def _normalize_country_code(country_hint: str) -> str:
+    """Normalize country name to ISO code, or return as-is if already 2-letter code."""
+    if not country_hint:
+        return None
+
+    country_upper = country_hint.upper().strip()
+
+    # If already 2-letter ISO code, return as-is
+    if len(country_upper) == 2:
+        return country_upper
+
+    # Look up in mapping
+    return _COUNTRY_NAME_TO_ISO.get(country_upper, country_upper)
+
 
 @dataclass
 class BankInfo:
@@ -23,8 +66,8 @@ class BankInfo:
     abbreviation: str
     full_name: str
     country: str
-    swift_codes: list
-    primary_swift: str = ""
+    swift_code: str  # Single SWIFT code per row
+    bank_id: int = 0  # Database ID for compatibility with related tables
 
 
 class BankDatabaseLookup:
@@ -52,7 +95,7 @@ class BankDatabaseLookup:
         """
         Look up bank by full name or abbreviation.
 
-        Uses a single UNION query for optimal performance.
+        Uses the new simplified banks table with FULLTEXT search.
 
         Args:
             bank_name: Bank name to look up (e.g., "DBS Bank", "HDFC", "Emirates NBD")
@@ -71,45 +114,74 @@ class BankDatabaseLookup:
         try:
             cursor = conn.cursor(dictionary=True)
 
-            # Single optimized UNION query - checks abbrev and identifiers together
-            query = """
-                SELECT b.id, b.abbrev, b.full_name, bco.country_code, bco.swift_codes
-                FROM banks b
-                JOIN bank_country_operations bco ON b.id = bco.bank_id
-                WHERE b.abbrev = %s AND b.is_active = 1 AND bco.is_active = 1
-
-                UNION
-
-                SELECT b.id, b.abbrev, b.full_name, bco.country_code, bco.swift_codes
-                FROM bank_identifiers bi
-                JOIN banks b ON bi.bank_id = b.id
-                JOIN bank_country_operations bco ON b.id = bco.bank_id
-                WHERE bi.identifier = %s AND b.is_active = 1 AND bi.is_validated = 1 AND bco.is_active = 1
+            # Try exact match in abbreviations first (fastest)
+            base_query = """
+                SELECT id, swift_code, country_code, legal_name, abbreviations, common_names
+                FROM banks
+                WHERE is_active = 1
+                  AND abbreviations LIKE %s
             """
+            params = [f"%{bank_name_upper}%"]
 
-            cursor.execute(query, (bank_name_upper, bank_name_lower))
-            results = cursor.fetchall()
+            # Add country filter if provided
+            country_upper = _normalize_country_code(country)
+            if country_upper:
+                base_query += " AND country_code = %s"
+                params.append(country_upper)
 
-            if results:
-                return self._build_bank_info_from_results(results, country)
+            base_query += " LIMIT 1"
 
-            # Try partial matching for multi-word bank names (secondary path)
-            words = bank_name_lower.split()
-            if len(words) > 1:
-                for word in words:
-                    if len(word) >= 4:
-                        cursor.execute(
-                            """SELECT b.id, b.abbrev, b.full_name, bco.country_code, bco.swift_codes
-                               FROM bank_identifiers bi
-                               JOIN banks b ON bi.bank_id = b.id
-                               JOIN bank_country_operations bco ON b.id = bco.bank_id
-                               WHERE bi.identifier = %s AND bi.is_validated = 1
-                                 AND b.is_active = 1 AND bco.is_active = 1""",
-                            (word,)
-                        )
-                        results = cursor.fetchall()
-                        if results:
-                            return self._build_bank_info_from_results(results, country)
+            cursor.execute(base_query, tuple(params))
+            result = cursor.fetchone()
+
+            if result:
+                return self._build_bank_info_from_row(result)
+
+            # Try FULLTEXT search for partial name match
+            try:
+                fulltext_query = """
+                    SELECT id, swift_code, country_code, legal_name, abbreviations, common_names
+                    FROM banks
+                    WHERE is_active = 1
+                      AND MATCH(abbreviations, common_names) AGAINST(%s IN NATURAL LANGUAGE MODE)
+                """
+                ft_params = [bank_name_lower]
+
+                if country_upper:
+                    fulltext_query += " AND country_code = %s"
+                    ft_params.append(country_upper)
+
+                fulltext_query += " LIMIT 1"
+
+                cursor.execute(fulltext_query, tuple(ft_params))
+                result = cursor.fetchone()
+
+                if result:
+                    return self._build_bank_info_from_row(result)
+            except Exception as e:
+                # FULLTEXT might fail if index doesn't exist or word too short
+                logger.debug(f"FULLTEXT search failed: {e}, falling back to LIKE search")
+
+            # Fallback to LIKE search for partial matching
+            fallback_query = """
+                SELECT id, swift_code, country_code, legal_name, abbreviations, common_names
+                FROM banks
+                WHERE is_active = 1
+                  AND common_names LIKE %s
+            """
+            fallback_params = [f"%{bank_name_lower}%"]
+
+            if country_upper:
+                fallback_query += " AND country_code = %s"
+                fallback_params.append(country_upper)
+
+            fallback_query += " LIMIT 1"
+
+            cursor.execute(fallback_query, tuple(fallback_params))
+            result = cursor.fetchone()
+
+            if result:
+                return self._build_bank_info_from_row(result)
 
         finally:
             conn.close()
@@ -121,7 +193,8 @@ class BankDatabaseLookup:
         """
         Look up bank by domain patterns found in text.
 
-        Uses database-side LIKE filtering for optimal performance.
+        With the new schema, domains are stored in common_names TEXT field.
+        Uses database-side LIKE filtering.
 
         Args:
             text: Text that may contain URLs or email domains
@@ -138,24 +211,33 @@ class BankDatabaseLookup:
         try:
             cursor = conn.cursor(dictionary=True)
 
-            # Database-side LIKE filtering - single query
-            query = """
-                SELECT b.id, b.abbrev, b.full_name, bco.country_code, bco.swift_codes
-                FROM bank_identifiers bi
-                JOIN banks b ON bi.bank_id = b.id
-                JOIN bank_country_operations bco ON b.id = bco.bank_id
-                WHERE bi.identifier_type IN ('domain', 'email_domain')
-                  AND %s LIKE CONCAT('%%', bi.identifier, '%%')
-                  AND b.is_active = 1 AND bco.is_active = 1
-                ORDER BY LENGTH(bi.identifier) DESC
-                LIMIT 1
-            """
+            # Try to extract domain from text
+            # Look for patterns like "dbs.com", "dbs.com.sg", etc.
+            import re
+            domain_pattern = r'\b([a-z0-9-]+(\.[a-z]{2,})+)\b'
+            domains = re.findall(domain_pattern, text_lower)
 
-            cursor.execute(query, (text_lower,))
-            results = cursor.fetchall()
+            if not domains:
+                return None
 
-            if results:
-                return self._build_bank_info_from_results(results, None)
+            # Try each domain found (longest first for more specific matches)
+            for domain_match in sorted(domains, key=lambda x: len(x[0]), reverse=True):
+                domain = domain_match[0]
+
+                # Search in common_names for domain match
+                query = """
+                    SELECT id, swift_code, country_code, legal_name, abbreviations, common_names
+                    FROM banks
+                    WHERE is_active = 1
+                      AND common_names LIKE %s
+                    LIMIT 1
+                """
+
+                cursor.execute(query, (f"%{domain}%",))
+                result = cursor.fetchone()
+
+                if result:
+                    return self._build_bank_info_from_row(result)
 
         finally:
             conn.close()
@@ -168,11 +250,10 @@ class BankDatabaseLookup:
         country_hint: str = None,
     ) -> Optional[BankInfo]:
         """
-        Detect bank in text using database-side word filtering.
+        Detect bank in text using the new simplified schema.
 
-        Instead of fetching ALL 63K identifiers and filtering in Python,
-        this method extracts words from the text and only fetches matching
-        identifiers from the database.
+        Searches for bank names and abbreviations in the text using
+        the abbreviations and common_names fields.
 
         Args:
             text: Text to search for bank references
@@ -185,36 +266,43 @@ class BankDatabaseLookup:
             return None
 
         text_lower = text.lower()
-        # Extract meaningful words (4+ characters)
-        words = set(w for w in text_lower.split() if len(w) >= 4)
-
-        if not words:
-            # Try domain search as fallback
-            return self.lookup_by_domain(text)
 
         conn = get_db_connection()
         try:
             cursor = conn.cursor(dictionary=True)
 
-            # Only fetch identifiers that match words in the text - database-side filtering
-            placeholders = ', '.join(['%s'] * len(words))
-            query = f"""
-                SELECT b.id, b.abbrev, b.full_name, bco.country_code, bco.swift_codes
-                FROM bank_identifiers bi
-                JOIN banks b ON bi.bank_id = b.id
-                JOIN bank_country_operations bco ON b.id = bco.bank_id
-                WHERE bi.identifier IN ({placeholders})
-                  AND bi.identifier_type NOT IN ('domain', 'email_domain')
-                  AND b.is_active = 1 AND bi.is_validated = 1 AND bco.is_active = 1
-                ORDER BY LENGTH(bi.identifier) DESC
-                LIMIT 1
-            """
+            # Extract meaningful words (4+ characters) for search
+            words = set(w for w in text_lower.split() if len(w) >= 4)
 
-            cursor.execute(query, list(words))
-            results = cursor.fetchall()
+            if words:
+                # Build LIKE query for each word
+                # Search in both abbreviations and common_names
+                placeholders = ' OR '.join(['(abbreviations LIKE %s OR common_names LIKE %s)'] * len(words))
+                params = []
+                for word in words:
+                    params.extend([f"%{word}%", f"%{word}%"])
 
-            if results:
-                return self._build_bank_info_from_results(results, country_hint)
+                base_query = f"""
+                    SELECT id, swift_code, country_code, legal_name, abbreviations, common_names
+                    FROM banks
+                    WHERE is_active = 1
+                      AND ({placeholders})
+                """
+                query_params = params.copy()
+
+                # Add country filter if provided
+                country_upper = _normalize_country_code(country_hint)
+                if country_upper:
+                    base_query += " AND country_code = %s"
+                    query_params.append(country_upper)
+
+                base_query += " LIMIT 1"
+
+                cursor.execute(base_query, tuple(query_params))
+                result = cursor.fetchone()
+
+                if result:
+                    return self._build_bank_info_from_row(result)
 
         finally:
             conn.close()
@@ -267,6 +355,27 @@ class BankDatabaseLookup:
 
         return None
 
+    def _build_bank_info_from_row(self, row: dict) -> BankInfo:
+        """
+        Build BankInfo from a single database row.
+
+        Args:
+            row: Database row with bank info
+
+        Returns:
+            BankInfo
+        """
+        # Extract primary abbreviation from abbreviations CSV
+        abbrev = row['abbreviations'].split(',')[0].strip() if row['abbreviations'] else row['swift_code'][:4]
+
+        return BankInfo(
+            abbreviation=abbrev,
+            full_name=row['legal_name'],
+            country=row['country_code'],
+            swift_code=row['swift_code'],
+            bank_id=row['id']
+        )
+
     def _build_bank_info_from_results(
         self,
         results: list,
@@ -275,8 +384,11 @@ class BankDatabaseLookup:
         """
         Build BankInfo from query results with country disambiguation.
 
+        With the new schema, each result is a different SWIFT code (country).
+        This method handles country disambiguation.
+
         Args:
-            results: List of result rows with bank info and country operations
+            results: List of result rows with bank info
             country_hint: Optional country code for disambiguation
 
         Returns:
@@ -286,44 +398,30 @@ class BankDatabaseLookup:
             return None
 
         # Select country operation based on hint or use first result
-        country_upper = country_hint.upper() if country_hint and country_hint.strip() else None
+        country_upper = _normalize_country_code(country_hint)
 
         if country_upper:
             # Find matching country
             for row in results:
                 if row['country_code'] == country_upper:
-                    swift_codes = json.loads(row['swift_codes']) if isinstance(row['swift_codes'], str) else row['swift_codes']
-                    return BankInfo(
-                        abbreviation=row['abbrev'],
-                        full_name=row['full_name'],
-                        country=row['country_code'],
-                        swift_codes=swift_codes,
-                        primary_swift=swift_codes[0] if swift_codes else ""
-                    )
+                    return self._build_bank_info_from_row(row)
             # No matching country found
             logger.warning(
-                f"Bank '{results[0]['abbrev']}' not found in country {country_upper}. "
+                f"Bank not found in country {country_upper}. "
                 f"Available countries: {[r['country_code'] for r in results]}"
             )
             return None
         elif len(results) == 1:
             # Single country - return it
-            row = results[0]
-            swift_codes = json.loads(row['swift_codes']) if isinstance(row['swift_codes'], str) else row['swift_codes']
-            return BankInfo(
-                abbreviation=row['abbrev'],
-                full_name=row['full_name'],
-                country=row['country_code'],
-                swift_codes=swift_codes,
-                primary_swift=swift_codes[0] if swift_codes else ""
-            )
+            return self._build_bank_info_from_row(results[0])
 
-        # Multi-country bank without country hint
-        logger.warning(
-            f"Bank '{results[0]['abbrev']}' has multiple countries "
-            f"{[r['country_code'] for r in results]} and no country hint provided"
+        # Multi-country bank without country hint - return first result
+        # With new schema, there's no is_primary_country, so just pick the first
+        logger.debug(
+            f"Bank has multiple countries {[r['country_code'] for r in results]} "
+            f"and no country hint provided. Using first result."
         )
-        return None
+        return self._build_bank_info_from_row(results[0])
 
     def get_swift_code(
         self,
@@ -341,8 +439,8 @@ class BankDatabaseLookup:
             SWIFT code if found, None otherwise
         """
         info = self.lookup_by_name(bank_name, country)
-        if info and info.swift_codes:
-            return info.swift_codes[0]
+        if info and info.swift_code:
+            return info.swift_code
         return None
 
     def get_country(
@@ -487,21 +585,24 @@ class BankDatabaseLookup:
         try:
             cursor = conn.cursor(dictionary=True)
 
-            # First find the bank
+            # First find the bank using the new simplified schema
             bank_query = """
-                SELECT id, abbrev, full_name
+                SELECT id, swift_code, country_code, legal_name, abbreviations, common_names
                 FROM banks
-                WHERE (full_name = %s OR abbrev = %s)
-                  AND is_active = 1
+                WHERE is_active = 1
+                  AND country_code = %s
+                  AND (abbreviations LIKE %s OR common_names LIKE %s)
                 LIMIT 1
             """
-            cursor.execute(bank_query, (bank_name, bank_name.upper()))
+            bank_name_pattern = f"%{bank_name}%"
+            cursor.execute(bank_query, (country_code.upper(), bank_name_pattern, bank_name_pattern))
             bank_result = cursor.fetchone()
 
             if not bank_result:
                 return None
 
             bank_id = bank_result['id']
+            abbrev = bank_result['abbreviations'].split(',')[0].strip() if bank_result['abbreviations'] else bank_result['swift_code'][:4]
 
             # Check for prompts
             prompt_query = """
@@ -527,13 +628,13 @@ class BankDatabaseLookup:
                     }
                 logger.info(
                     f"Found {len(prompts)} custom prompts for "
-                    f"{bank_result['abbrev']}/{country_code}"
+                    f"{abbrev}/{country_code}"
                 )
 
             return {
                 'bank_id': bank_id,
-                'bank_abbrev': bank_result['abbrev'],
-                'bank_name': bank_result['full_name'],
+                'bank_abbrev': abbrev,
+                'bank_name': bank_result['legal_name'],
                 'country_code': country_code,
                 'prompts': prompts
             }
@@ -545,8 +646,11 @@ class BankDatabaseLookup:
         """
         Get all bank identifiers for unified map pattern matching.
 
-        Returns all validated bank identifiers including abbreviations, full names,
-        and alternate names. Used by build_unified_map() for Pass 1 validation.
+        Returns all bank identifiers including abbreviations and common names.
+        Used by build_unified_map() for Pass 1 validation.
+
+        With the new schema, identifiers are stored in abbreviations and common_names
+        TEXT fields. This method parses them and returns a unified list.
 
         Args:
             None
@@ -559,26 +663,38 @@ class BankDatabaseLookup:
         try:
             cursor = conn.cursor(dictionary=True)
 
-            # Get all validated bank identifiers
+            # Get all active banks and parse their identifiers
             query = """
-                SELECT bi.identifier, bi.identifier_type
-                FROM bank_identifiers bi
-                JOIN banks b ON bi.bank_id = b.id
-                WHERE b.is_active = 1
-                  AND bi.is_validated = 1
-                  AND bi.identifier_type IN ('abbreviation', 'full_name', 'alternate_name')
+                SELECT abbreviations, common_names
+                FROM banks
+                WHERE is_active = 1
             """
 
             cursor.execute(query)
             results = cursor.fetchall()
 
-            # Return lowercase identifiers for case-insensitive matching
+            # Parse CSV fields and return lowercase identifiers
             identifiers = []
             for row in results:
-                identifiers.append({
-                    'identifier': row['identifier'].lower(),
-                    'identifier_type': row['identifier_type']
-                })
+                # Add abbreviations
+                if row['abbreviations']:
+                    for abbrev in row['abbreviations'].split(','):
+                        abbrev = abbrev.strip()
+                        if abbrev:
+                            identifiers.append({
+                                'identifier': abbrev.lower(),
+                                'identifier_type': 'abbreviation'
+                            })
+
+                # Add common names
+                if row['common_names']:
+                    for name in row['common_names'].split(','):
+                        name = name.strip()
+                        if name and len(name) >= 4:  # Filter out very short names
+                            identifiers.append({
+                                'identifier': name.lower(),
+                                'identifier_type': 'full_name'
+                            })
 
             logger.info(f"Loaded {len(identifiers)} bank identifiers for unified map")
             return identifiers

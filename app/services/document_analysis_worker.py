@@ -14,7 +14,6 @@ from app.services.pdf_analysis_service import PDFAnalysisService
 from app.services.image_validation_service import ImageValidationService
 from app.services.ela_service import ELAService
 from app.helper.exif_validator import ExifValidator
-from app.helper.bank_statement_validator import BankStatementValidator
 from app.repositories.otp_repository import OTPRepository
 from app.repositories.user_identity_repository import UserIdentityRepository
 from app.repositories.document_submission_repository import DocumentSubmissionRepository
@@ -88,7 +87,6 @@ class DocumentAnalysisWorker:
 
             # Initialize validators
             self.exif_validator = ExifValidator()
-            self.bank_statement_validator = BankStatementValidator()
 
             # Initialize services
             self.pdf_analysis_service = PDFAnalysisService()

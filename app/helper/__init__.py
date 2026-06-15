@@ -9,13 +9,11 @@ from .verification.verification_thresholds import VerificationThresholds
 from .verification.prepare_verification_data import PrepareVerificationData
 from .exif_validator import ExifValidator
 from .document_type_detector import DocumentTypeDetector
-from .bank_statement_validator import BankStatementValidator
 from .tax_statement_validator import TaxStatementValidator
 
 document_text_extractor = DocumentTextExtractor()
 exif_validator = ExifValidator()
 document_type_detector = DocumentTypeDetector()
-bank_statement_validator = BankStatementValidator()
 # Use factory to get the appropriate backend (DeepFace or InsightFace)
 deepface_helper = get_face_recognition_backend()
 
@@ -47,6 +45,5 @@ __all__ = [
     "prepare_verification_data",
     "exif_validator",
     "document_type_detector",
-    "bank_statement_validator",
     "TaxStatementValidator"
 ]

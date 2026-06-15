@@ -697,7 +697,15 @@ class DocumentProcessorBase(ABC):
         # Use overall confidence for validation (matches working version caa04d4)
         # The overall_confidence is calculated as the average of all matched entities
         # and better represents extraction quality than individual field confidences
-        overall_confidence = confidence_data.get('overall', {}).get('overall_confidence', 0.0)
+        # Handle both formats: nested {'overall': {'overall_confidence': X}} and simple
+        overall_entry = confidence_data.get('overall', 0.0)
+        if isinstance(overall_entry, dict):
+            overall_confidence = overall_entry.get('overall_confidence', 0.0)
+        elif isinstance(overall_entry, (int, float)):
+            overall_confidence = float(overall_entry)
+        else:
+            overall_confidence = 0.0
+
         use_overall_for_validation = overall_confidence > 0
 
         for field in required_fields:
@@ -708,8 +716,16 @@ class DocumentProcessorBase(ABC):
             if use_overall_for_validation:
                 confidence = overall_confidence
             else:
-                confidence_info = confidence_data.get(field, {})
-                confidence = confidence_info.get('overall_confidence', 0.0) if confidence_info else 0.0
+                # Get confidence for this field - handle both formats:
+                # - Simple: field_name -> float (e.g., 0.95)
+                # - Nested: field_name -> {'overall_confidence': 0.95, 'sources': [...]}
+                field_conf = confidence_data.get(field, 0.0)
+                if isinstance(field_conf, dict):
+                    confidence = field_conf.get('overall_confidence', 0.0)
+                elif isinstance(field_conf, (int, float)):
+                    confidence = float(field_conf)
+                else:
+                    confidence = 0.0
 
             # Always check field presence
             is_present = value is not None and str(value).strip() != ''
@@ -784,14 +800,30 @@ class DocumentProcessorBase(ABC):
         return response
 
     def _convert_pdf_to_image(self, pdf_bytes: bytes) -> bytes:
-        """Convert PDF first page to PNG image."""
+        """Convert PDF first page to JPEG image."""
         try:
             import fitz
+            from PIL import Image
+            from io import BytesIO
+
             pdf_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
             if len(pdf_doc) > 0:
                 page = pdf_doc[0]
                 pix = page.get_pixmap(dpi=150)
-                result = pix.tobytes("png")
+
+                # Convert to PNG first, then to JPEG via PIL for better quality
+                img_data = pix.tobytes("png")
+                img = Image.open(BytesIO(img_data))
+
+                # Convert to RGB for JPEG compatibility
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
+
+                # Save as JPEG
+                img_byte_arr = BytesIO()
+                img.save(img_byte_arr, format='JPEG', quality=95)
+                result = img_byte_arr.getvalue()
+
                 pdf_doc.close()
                 return result
             pdf_doc.close()
