@@ -595,7 +595,7 @@ class OSINTScreeningService:
         country: Optional[str]
     ) -> Dict[str, Any]:
         """
-        Analyze text with NLP (VADER + FinBERT).
+        Analyze text with NLP (LLM sentiment + FinBERT).
         """
         combined_text = f"{title} {body}"
         result = {
@@ -610,8 +610,8 @@ class OSINTScreeningService:
         if not self.nlp_service or not self.nlp_service._initialized:
             return result
 
-        # VADER sentiment analysis
-        sentiment = self.nlp_service.analyze_sentiment_vader(combined_text)
+        # LLM sentiment analysis (replaces VADER)
+        sentiment = await self.nlp_service.analyze_sentiment_vader(combined_text)
 
         if sentiment['compound'] < self.settings.nlp_sentiment_threshold:  # Default -0.3
             result['risk_level'] = 'negative'

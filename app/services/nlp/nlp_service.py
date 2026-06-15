@@ -2,19 +2,10 @@
 NLP Service for enhanced text analysis.
 
 Provides:
-- VADER sentiment analysis (fast, rule-based)
+- Qwen/LLM sentiment analysis (replaces VADER)
 - spaCy named entity extraction
 - FinBERT financial crime classification (lazy-loaded)
 """
-
-# Set NLTK data path BEFORE importing nltk modules
-import nltk
-import os
-
-# Use relative path from working directory (/app)
-# Dockerfile copies to /app/app/models/nltk/, working dir is /app
-nltk_data_dir = os.path.abspath('app/models/nltk')
-nltk.data.path.insert(0, nltk_data_dir)  # Insert at beginning to search first
 
 from typing import Dict, Any, List, Optional
 from app.core.logger import get_logger
@@ -25,7 +16,7 @@ class NLPService:
 
     def __init__(self):
         self.logger = get_logger()
-        self.vader_analyzer = None
+        self.llm_service = None
         self.finbert_pipeline = None
         self.finbert_tokenizer = None
         self.nlp = None
@@ -37,10 +28,10 @@ class NLPService:
             return
 
         try:
-            # VADER (instant, rule-based)
-            from nltk.sentiment.vader import SentimentIntensityAnalyzer
-            self.vader_analyzer = SentimentIntensityAnalyzer()
-            self.logger.info("VADER sentiment analyzer initialized")
+            # Qwen/LLM for sentiment analysis
+            from app.services.llm_service import LLMService
+            self.llm_service = LLMService()
+            self.logger.info("LLM service initialized for sentiment analysis")
 
             # spaCy (fast NER) - load bundled model from repository
             import spacy
@@ -61,8 +52,8 @@ class NLPService:
             self.logger.error(f"NLP service initialization failed: {e}")
             raise
 
-    def analyze_sentiment_vader(self, text: str) -> Dict[str, float]:
-        """Fast sentiment analysis using VADER.
+    async def analyze_sentiment_llm(self, text: str) -> Dict[str, float]:
+        """Sentiment analysis using Qwen/LLM (replaces VADER).
 
         Args:
             text: Text to analyze
@@ -71,15 +62,101 @@ class NLPService:
             {'neg': 0.0-1.0, 'neu': 0.0-1.0, 'pos': 0.0-1.0, 'compound': -1.0 to 1.0}
 
         Interpretation:
-        - compound >= 0.05: Positive
-        - compound between -0.05 and 0.05: Neutral
-        - compound <= -0.05: Negative
+            - compound >= 0.05: Positive
+            - compound between -0.05 and 0.05: Neutral
+            - compound <= -0.05: Negative
         """
-        if not self.vader_analyzer:
+        if not self.llm_service:
             return {'neg': 0.0, 'neu': 1.0, 'pos': 0.0, 'compound': 0.0}
 
-        scores = self.vader_analyzer.polarity_scores(text)
-        return scores
+        try:
+            import json
+            import httpx
+
+            # Use text_model for faster sentiment analysis
+            from app.config.llm_config import llm_settings
+
+            url = f"{llm_settings.api_url}/chat/completions"
+
+            headers = {"Content-Type": "application/json"}
+            if llm_settings.api_key:
+                headers["Authorization"] = f"Bearer {llm_settings.api_key}"
+
+            system_prompt = """You are a sentiment analysis expert. Analyze the sentiment of the given text and respond with a JSON object containing:
+- "sentiment": "positive", "neutral", or "negative"
+- "compound": a float score from -1.0 (very negative) to 1.0 (very positive)
+- "confidence": confidence score from 0.0 to 1.0
+
+For compound score:
+- -0.8 to -1.0: Extremely negative
+- -0.5 to -0.8: Very negative
+- -0.2 to -0.5: Somewhat negative
+- -0.05 to -0.2: Slightly negative
+- -0.05 to 0.05: Neutral
+- 0.05 to 0.2: Slightly positive
+- 0.2 to 0.5: Somewhat positive
+- 0.5 to 0.8: Very positive
+- 0.8 to 1.0: Extremely positive
+
+Respond ONLY with valid JSON, no other text."""
+
+            user_prompt = f"Analyze the sentiment of this text:\n\n{text}"
+
+            payload = {
+                "model": llm_settings.text_model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "temperature": 0.3,
+                "max_tokens": 100,
+                "format": "json"  # For Ollama JSON mode
+            }
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(url, headers=headers, json=payload)
+                response.raise_for_status()
+                result = response.json()
+
+                # Parse the LLM response
+                content = result['choices'][0]['message']['content']
+                sentiment_data = json.loads(content)
+
+                # Convert to VADER-compatible format
+                sentiment = sentiment_data.get('sentiment', 'neutral')
+                compound = sentiment_data.get('compound', 0.0)
+
+                # Map sentiment to neg/neu/pos format
+                if sentiment == 'positive':
+                    pos = min(0.5 + abs(compound) / 2, 1.0)
+                    neg = 0.0
+                    neu = 1.0 - pos
+                elif sentiment == 'negative':
+                    neg = min(0.5 + abs(compound) / 2, 1.0)
+                    pos = 0.0
+                    neu = 1.0 - neg
+                else:
+                    neu = 1.0
+                    pos = 0.0
+                    neg = 0.0
+
+                return {
+                    'neg': neg,
+                    'neu': neu,
+                    'pos': pos,
+                    'compound': compound
+                }
+
+        except Exception as e:
+            self.logger.warning(f"LLM sentiment analysis failed: {e}. Returning neutral sentiment.")
+            return {'neg': 0.0, 'neu': 1.0, 'pos': 0.0, 'compound': 0.0}
+
+    async def analyze_sentiment_vader(self, text: str) -> Dict[str, float]:
+        """VADER compatibility method - redirects to LLM analysis.
+
+        This method is kept for backward compatibility. Use analyze_sentiment_llm() directly.
+        """
+        return await self.analyze_sentiment_llm(text)
 
     def extract_entities_spacy(self, text: str) -> Dict[str, List]:
         """Extract named entities using spaCy.

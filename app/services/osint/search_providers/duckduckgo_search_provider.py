@@ -280,20 +280,20 @@ class DuckDuckGoSearchProvider:
             url = result.get('href', '')
             combined_text = f"{title} {body}"
 
-            # PHASE 1: Fast NLP analysis (if enabled)
+            # PHASE 1: LLM-based NLP analysis (if enabled)
             sentiment = None
             entities = None
             is_negative = False
 
             if nlp_enabled and nlp_service._initialized:
-                # VADER sentiment analysis
-                sentiment = nlp_service.analyze_sentiment_vader(combined_text)
+                # LLM sentiment analysis (replaces VADER)
+                sentiment = await nlp_service.analyze_sentiment_vader(combined_text)
 
                 # Extract entities with spaCy
                 entities = nlp_service.extract_entities_spacy(combined_text)
 
                 # Check if negative sentiment AND relevant to person
-                is_negative = sentiment['compound'] < -0.3  # VADER negative threshold
+                is_negative = sentiment['compound'] < -0.3  # LLM negative threshold
 
             # Fallback to keyword-based detection
             if not is_negative:

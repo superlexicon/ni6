@@ -1,7 +1,7 @@
 """
 Sequential ID Card Service - Handles ID card processing in sequential mode.
 
-ID cards (PAN, national ID, driver's license) use GLiNER-based extraction
+ID cards (PAN, national ID, driver's license) use Qwen3-VL-based extraction
 and are independent documents - they don't increment verification_state.
 
 State is tracked via verification_state column in user_identity_index.
@@ -9,19 +9,21 @@ State is tracked via verification_state column in user_identity_index.
 
 from typing import Dict, Any, Optional, Tuple, List
 from app.services.sequential_document_processor_base import DocumentProcessorBase
-from app.helper.extractors.gliner_id_card_extractor import GLiNERIDCardExtractor
 from app.core.key_injection import DocumentType
 from app.services.extractors.qwen_uae_trc_extractor import QwenUAETrcExtractor
 from app.services.extractors.qwen_pan_extractor import QwenPANExtractor
 from app.services.extractors.qwen_singapore_nric_extractor import QwenSingaporeNricExtractor
+import re
 
 
 class SequentialIDCardService(DocumentProcessorBase):
     """
-    Service for handling ID card processing using GLiNER-based extraction.
+    Service for handling ID card processing using Qwen3-VL extractors.
 
     ID cards are independent documents that don't increment verification_state.
-    They use GLiNER zero-shot NER for flexible field extraction.
+    Supported types: UAE TRC, PAN, Singapore NRIC.
+
+    Unsupported generic ID cards return minimal data.
     """
 
     # ============================================================
@@ -61,25 +63,50 @@ class SequentialIDCardService(DocumentProcessorBase):
         """ID cards use 'id_card' for PhotoHolmes detection."""
         return "id_card"
 
+    # ============================================================
+    # ID CARD SPECIFIC METHODS
+    # ============================================================
+
+    def _detect_document_type_from_text(self, raw_text: str) -> str:
+        """
+        Detect ID card type from OCR text using pattern matching.
+
+        Returns:
+            'UAE_TRC', 'PAN', 'SINGAPORE_NRIC', or 'GENERIC_ID_CARD'
+        """
+        text_lower = raw_text.lower()
+
+        # PAN card pattern (5 letters + 4 digits + 1 letter)
+        if re.search(r'[a-z]{5}\d{4}[a-z]', text_lower):
+            return 'PAN'
+
+        # UAE TRC patterns
+        if any(kw in text_lower for kw in ['tax residency', 'uae', 'residency certificate', 'tax residence']):
+            return 'UAE_TRC'
+
+        # Singapore NRIC/FIN pattern (S/T/F/G + 7 digits + 1 letter)
+        if re.search(r'[stfg]\d{7}[a-z]', text_lower):
+            return 'SINGAPORE_NRIC'
+
+        return 'GENERIC_ID_CARD'
+
     async def extract_fields_from_ocr(
         self, text_blocks: list, raw_text: str, image_bytes: bytes, is_pdf: bool
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """
-        Extract ID card fields using Qwen3-VL extractors (preferred) or fallback to GLiNER/Spatial extractors.
+        Extract ID card fields using Qwen3-VL extractors (preferred) or fallback to Spatial extractors.
 
         Priority:
         1. UAE TRC -> QwenUAETrcExtractor (with fallback to SpatialUAETRCExtractor)
         2. PAN -> QwenPANExtractor (with fallback to SpatialPANExtractor)
         3. Singapore NRIC -> QwenSingaporeNricExtractor (no fallback)
-        4. Other -> GLiNERIDCardExtractor (existing)
+        4. Other -> Returns minimal data (unsupported generic ID cards)
 
         Returns:
             (extracted_data, confidence_data)
         """
-        # Detect document type from raw_text
-        from app.helper.extractors.gliner_id_card_extractor import GLiNERIDCardExtractor
-        temp_extractor = GLiNERIDCardExtractor()
-        document_type = temp_extractor._detect_document_type(raw_text, text_blocks)
+        # Detect document type from raw_text using pattern matching
+        document_type = self._detect_document_type_from_text(raw_text)
 
         # Use Qwen UAE TRC extractor for UAE TRC
         if document_type == 'UAE_TRC':
@@ -275,83 +302,20 @@ class SequentialIDCardService(DocumentProcessorBase):
                 return extracted_data, confidence_data
 
             except Exception as e:
-                self.logger.warning(f"Qwen3-VL Singapore NRIC extraction failed: {e}. Falling back to GLiNERIDCardExtractor")
-                # Fallback to GLiNER extractor for Singapore NRIC
-                self.logger.info("Using GLiNER extractor for Singapore NRIC (fallback)")
-                extractor = GLiNERIDCardExtractor()
-                result = await extractor.extract(image_bytes, is_pdf)
-
-                # Build extracted_data from IDCardData
-                extracted_data = {
+                self.logger.error(f"Qwen3-VL Singapore NRIC extraction failed: {e}. No fallback available.")
+                return {
                     "document_type": "SINGAPORE_NRIC",
                     "issuing_country": "SG",
-                    "full_name": result.full_name,
-                    "date_of_birth": result.date_of_birth,
-                    "gender": result.gender,
-                    "identification_number": result.identification_number,
-                    "raw_data": result.raw_data,
-                    **result.field_values,
-                }
+                    "raw_data": raw_text,
+                }, {}
 
-                confidence_data = {}
-                for field, confidence in result.confidence_scores.items():
-                    conf_value = confidence / 100 if confidence > 1 else confidence
-                    confidence_data[field] = {
-                        'overall_confidence': conf_value,
-                        'sources': ['gliner_ner']
-                    }
-
-                self.logger.info(
-                    f"Fallback GLiNER Singapore NRIC extraction: document_type={result.document_type}, "
-                    f"fields_extracted={len(result.field_values)}"
-                )
-
-                return extracted_data, confidence_data
-
-        # Use GLiNER for other ID card types (existing code)
-        self.logger.info("Using GLiNER extractor for non-Qwen-supported ID card")
-        extractor = GLiNERIDCardExtractor()
-        result = await extractor.extract(image_bytes, is_pdf)
-
-        # Build extracted_data from IDCardData
-        extracted_data = {
-            "document_type": result.document_type,
-            "issuing_country": result.issuing_country,
-            "full_name": result.full_name,
-            "date_of_birth": result.date_of_birth,
-            "gender": result.gender,
-            "identification_number": result.identification_number,
-            "raw_data": result.raw_data,  # Full OCR text for debugging/auditing
-            # All field_values as separate fields for flexibility
-            **result.field_values,
-        }
-
-        # Build confidence_data from confidence_scores
-        confidence_data = {}
-        for field, confidence in result.confidence_scores.items():
-            # Convert to 0-1 range if needed
-            conf_value = confidence / 100 if confidence > 1 else confidence
-            confidence_data[field] = {
-                'overall_confidence': conf_value,
-                'sources': ['gliner_ner']
-            }
-
-        # Also add core fields to confidence_data
-        core_fields = ['full_name', 'date_of_birth', 'gender', 'identification_number']
-        for field in core_fields:
-            if field in extracted_data and extracted_data[field] and field not in confidence_data:
-                confidence_data[field] = {
-                    'overall_confidence': 0.85,  # Default confidence for extracted fields
-                    'sources': ['gliner_ner']
-                }
-
-        self.logger.info(
-            f"GLiNER ID card extraction: document_type={result.document_type}, "
-            f"fields_extracted={len(result.field_values)}, "
-            f"overall_confidence={result.overall_confidence:.2f}%"
-        )
-
-        return extracted_data, confidence_data
+        # Unsupported ID card types
+        self.logger.warning(f"Unsupported ID card type detected: {document_type}. Returning minimal data.")
+        return {
+            "document_type": document_type or "UNKNOWN_ID_CARD",
+            "issuing_country": "UNKNOWN",
+            "raw_data": raw_text,
+        }, {}
 
     def perform_document_specific_validations(
         self, extracted_data: Dict[str, Any], user_identity: Dict[str, Any]
@@ -572,10 +536,6 @@ class SequentialIDCardService(DocumentProcessorBase):
             result['error_message'] = str(e)
             result['elapsed_seconds'] = time.time() - start_time
             return result
-
-    # ============================================================
-    # ID CARD SPECIFIC METHODS
-    # ============================================================
 
     # ============================================================
     # PUBLIC ENTRY POINT
