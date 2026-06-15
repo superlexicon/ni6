@@ -3,14 +3,13 @@ Sequential Passport Service - Handles passport processing in sequential mode.
 
 State is tracked via verification_state column in user_identity_index.
 
-PIPELINE (v2.0 - Dynamic Region Exclusion):
+PIPELINE (v3.0 - Qwen-based, no DocTR):
 1. PhotoHolmes authenticity checks
-2. DocTR OCR extraction
-3. Process OCR + Remove user text regions (values, MRZ)
-4. Face extraction + matching + face region removal
-5. Reference passport comparison (on cleaned image)
-6. PEP/Criminal database checks
-7. Web search + sentiment analysis
+2. Field extraction validation (using Qwen results)
+3. Face matching + Remove face region
+4. Reference passport comparison (on face-removed image)
+5. PEP/Criminal database checks
+6. Web search + sentiment analysis
 """
 
 from typing import Dict, Any, Optional, List, Tuple
@@ -40,6 +39,37 @@ from app.services.osint_screening_service import osint_screening_service
 from app.services.worldcheck_service import worldcheck_service
 from app.config.osint_config import osint_settings
 from app.dto import DocumentErrorCode
+from app.services.extractors.qwen_passport_extractor import QwenPassportExtractor
+
+
+class QwenPassportExtractionResult:
+    """Wrapper for QwenPassportExtractor results to mimic DocumentExtractionResult interface."""
+
+    def __init__(
+        self,
+        document_type: str,
+        country_code: str,
+        extracted_data: Dict[str, Any],
+        confidence_data: Dict[str, float]
+    ):
+        self.document_type = document_type  # "passport" or "id_card"
+        self.country_code = country_code
+        self.confidence = sum(confidence_data.values()) / len(confidence_data) if confidence_data else 0.0
+        self.fields = {}
+        self.raw_data = None  # No raw OCR text available from vision LLM
+
+        # Extract field values from extracted_data (which has nested format)
+        for field_name, field_info in extracted_data.items():
+            if isinstance(field_info, dict):
+                self.fields[field_name] = field_info.get("value")
+
+    def get(self, field_name: str, default=None) -> Any:
+        """Get a field value."""
+        return self.fields.get(field_name, default)
+
+    def has(self, field_name: str) -> bool:
+        """Check if a field exists and has a value."""
+        return field_name in self.fields and self.fields[field_name] is not None
 
 
 class SequentialPassportService:
@@ -57,6 +87,7 @@ class SequentialPassportService:
         self.face_biometrics_repo = FaceBiometricsRepository()
         self.passport_extractor = PassportExtractor()
         self.unified_extractor = UnifiedIDExtractor()
+        self.qwen_passport_extractor = QwenPassportExtractor()
         self.detailed_analysis_service = DetailedAnalysisService()
 
     # =========================================================================
@@ -189,6 +220,63 @@ class SequentialPassportService:
 
         return mrz_rows
 
+    async def _extract_passport_with_qwen(
+        self,
+        image_bytes: bytes,
+        document_type: str = "passport"
+    ) -> Optional[QwenPassportExtractionResult]:
+        """
+        Extract passport fields using Qwen3.5 vision LLM.
+
+        Args:
+            image_bytes: JPEG image data (already preprocessed)
+            document_type: Type of document ("passport" or "id_card")
+
+        Returns:
+            QwenPassportExtractionResult if extraction succeeded, None otherwise
+        """
+        try:
+            # Use QwenPassportExtractor for direct extraction
+            extracted_data, confidence_data = await self.qwen_passport_extractor.extract_fields(
+                image_bytes=image_bytes,
+                country_hint=None  # No hint provided
+            )
+
+            # Check if extraction failed
+            if "error" in confidence_data:
+                self.logger.warning(f"QwenPassportExtractor failed: {confidence_data['error']}")
+                return None
+
+            # Extract country code from passport_country field
+            country_code = None
+            if "passport_country" in extracted_data:
+                country_code = extracted_data["passport_country"].get("value")
+
+            # If country_code is still None, try nationality field
+            if not country_code and "nationality" in extracted_data:
+                country_code = extracted_data["nationality"].get("value")
+
+            # If still None, use default
+            if not country_code:
+                country_code = "UNKNOWN"
+
+            # Debug logging: Show what Qwen extracted for all country-related fields
+            self.logger.info(f"QwenPassportExtractor extraction succeeded")
+            self.logger.info(f"  Raw extracted passport_country: {extracted_data.get('passport_country', {}).get('value')}")
+            self.logger.info(f"  Raw extracted nationality: {extracted_data.get('nationality', {}).get('value')}")
+            self.logger.info(f"  Final country_code to be used: {country_code}")
+
+            return QwenPassportExtractionResult(
+                document_type=document_type,
+                country_code=country_code,
+                extracted_data=extracted_data,
+                confidence_data=confidence_data
+            )
+
+        except Exception as e:
+            self.logger.warning(f"QwenPassportExtractor extraction failed: {str(e)}")
+            return None
+
     async def process_passport(self, client_public_key: str, file_data: str, filename: str,
                              callback_url: Optional[str] = None,
                              document_type: str = "passport") -> SequentialJobResponse:
@@ -254,10 +342,22 @@ class SequentialPassportService:
                     self.logger.warning(f"Face extraction failed: {e}")
                     return None
 
-            # Run all three tasks in parallel
-            photoholmes_results, document_data, face_biometric = await asyncio.gather(
+            # Try QwenPassportExtractor first, fall back to unified_extractor if it fails
+            self.logger.info("Attempting Qwen3.5 vision LLM extraction...")
+            qwen_result = await self._extract_passport_with_qwen(image_bytes, document_type)
+
+            if qwen_result:
+                # Qwen extraction succeeded
+                document_data = qwen_result
+                self.logger.info("Qwen3.5 extraction succeeded")
+            else:
+                # Fall back to unified_extractor
+                self.logger.warning("Qwen3.5 extraction failed, falling back to UnifiedIDExtractor...")
+                document_data = await self.unified_extractor.extract(image_bytes, is_pdf)
+
+            # Run PhotoHolmes and face extraction in parallel (document extraction is done)
+            photoholmes_results, face_biometric = await asyncio.gather(
                 comprehensive_photoholmes_service.run_all_methods(image_bytes, document_type=document_type),
-                self.unified_extractor.extract(image_bytes, is_pdf),
                 safe_face_extraction()
             )
 
@@ -806,30 +906,36 @@ class SequentialPassportService:
         # Import the name cleaning utility
         from app.utils.string_matching import clean_name_for_storage
 
-        # Check if this is a UnifiedIDExtractor result (DocumentExtractionResult)
+        # Check if this is a UnifiedIDExtractor result (DocumentExtractionResult) or QwenPassportExtractionResult
         if hasattr(document_data, 'document_type'):
-            # UnifiedIDExtractor result - use its fields directly
+            # UnifiedIDExtractor result or QwenPassportExtractionResult - use its fields directly
             raw_full_name = document_data.get('full_name')
             cleaned_full_name = clean_name_for_storage(raw_full_name)
 
             # Get date of birth for age calculation and normalize to ISO
-            dob_str = document_data.get('dob')
+            # Handle both 'dob' (UnifiedIDExtractor) and 'date_of_birth' (QwenPassportExtractor)
+            dob_str = document_data.get('dob') or document_data.get('date_of_birth')
             dob_date = self._parse_date(dob_str)
             age = self._calculate_age(dob_date)
             dob_normalized = self._normalize_date_to_iso(dob_str)
 
             # Normalize expiry date to ISO
-            expiry_str = document_data.get('expiry')
+            # Handle both 'expiry' (UnifiedIDExtractor) and 'date_of_expiry' (QwenPassportExtractor)
+            expiry_str = document_data.get('expiry') or document_data.get('date_of_expiry')
             expiry_normalized = self._normalize_date_to_iso(expiry_str)
 
             # Normalize issue date to ISO
-            issue_str = document_data.get('issue_date')
+            # Handle both 'issue_date' (UnifiedIDExtractor) and 'date_of_issue' (QwenPassportExtractor)
+            issue_str = document_data.get('issue_date') or document_data.get('date_of_issue')
             issue_normalized = self._normalize_date_to_iso(issue_str)
+
+            # Get passport number - handle both 'number' and 'passport_number'
+            passport_number = document_data.get('number') or document_data.get('passport_number')
 
             result = {
                 "document_type": document_data.document_type,
                 "country_code": document_data.country_code,
-                "number": document_data.get('number'),
+                "number": passport_number,
                 "full_name": cleaned_full_name,
                 "dob": dob_normalized,  # ISO format (YYYY-MM-DD)
                 "age": age,  # Calculated age in years
@@ -837,7 +943,7 @@ class SequentialPassportService:
                 "expiry": expiry_normalized,  # ISO format (YYYY-MM-DD)
                 "place_of_birth": document_data.get('place_of_birth'),
                 "issuing_authority": document_data.get('issuing_authority'),
-                "issuing_country": document_data.get('issuing_country'),
+                "issuing_country": document_data.get('issuing_country') or document_data.get('nationality'),
                 "address": document_data.get('address'),
                 "date_of_issue": issue_normalized,  # ISO format (YYYY-MM-DD)
                 "nrc_number": document_data.get('nrc_number'),
@@ -846,9 +952,17 @@ class SequentialPassportService:
 
             # Add backward-compatible field names for passport processing
             if document_type == "passport":
-                result["passport_number"] = document_data.get('number')
+                result["passport_number"] = passport_number
                 result["passport_country"] = document_data.country_code
-                result["nationality"] = document_data.get('issuing_country') or document_data.country_code
+                result["nationality"] = document_data.get('issuing_country') or document_data.get('nationality') or document_data.country_code
+                # Add QwenPassportExtractor field names for compatibility
+                result["date_of_birth"] = dob_normalized
+                result["date_of_expiry"] = expiry_normalized
+
+                # Debug logging: Show country code in extracted_data
+                self.logger.info(f"_build_extracted_data for passport: country_code from document_data.country_code = {document_data.country_code}")
+                self.logger.info(f"  Result passport_country: {result.get('passport_country')}")
+                self.logger.info(f"  Result country_code: {result.get('country_code')}")
 
             # Filter out None values
             return {k: v for k, v in result.items() if v is not None}
@@ -1103,19 +1217,18 @@ class SequentialPassportService:
         document_type: str = "passport"
     ) -> SequentialJobResponse:
         """
-        Strict linear passport processing pipeline (v2.0 - Dynamic Region Exclusion).
+        Strict linear passport processing pipeline (v3.0 - Qwen-based, no DocTR).
 
         Each step must pass before proceeding to the next.
         Any failure returns immediately with failure reason.
 
         Pipeline Steps:
         1. PhotoHolmes authenticity checks
-        2. DocTR OCR extraction
-        3. Process OCR + Remove user text regions (values, MRZ)
-        4. Face matching + Remove face region
-        5. Reference passport comparison (on cleaned image)
-        6. PEP/Criminal database checks
-        7. Web search + sentiment analysis
+        2. Field extraction validation (using Qwen results)
+        3. Face matching + Remove face region
+        4. Reference passport comparison (on face-removed image)
+        5. PEP/Criminal database checks
+        6. Web search + sentiment analysis
 
         Returns:
             SequentialJobResponse with result and failure step if applicable
@@ -1146,7 +1259,7 @@ class SequentialPassportService:
             # Get user_identity_id and decode image
             user_key = self.user_key_repo.get_key_by_public_key(client_public_key)
             user_identity_id = user_key['user_identity_id']
-            self.logger.info(f"[STRICT PIPELINE v2.0] Processing passport for user_identity: {user_identity_id}")
+            self.logger.info(f"[STRICT PIPELINE v3.0] Processing passport for user_identity: {user_identity_id}")
 
             # Decode image
             image_bytes = base64.b64decode(file_data)
@@ -1155,7 +1268,7 @@ class SequentialPassportService:
             # ═══════════════════════════════════════════════════════════════
             # STEP 1: PhotoHolmes Authenticity Checks
             # ═══════════════════════════════════════════════════════════════
-            self.logger.info("[STEP 1/7] Running PhotoHolmes authenticity checks...")
+            self.logger.info("[STEP 1/6] Running PhotoHolmes authenticity checks...")
             step1_result = await self._step1_photoholmes_check(image_bytes, document_type)
             if not step1_result['passed']:
                 return self._fail_strict_result(
@@ -1169,50 +1282,110 @@ class SequentialPassportService:
 
             forgery_checks = step1_result.get('forgery_checks')
 
-            # ═══════════════════════════════════════════════════════════════
-            # STEP 2: DocTR OCR Extraction
-            # ═══════════════════════════════════════════════════════════════
-            self.logger.info("[STEP 2/7] Running DocTR OCR extraction...")
-            step2_result = await self._step2_doctr_extraction(image_bytes, is_pdf)
-            ocr_result = step2_result  # Contains text_blocks, raw_text, text_regions
+            # Extract document data using Qwen
+            self.logger.info("Running Qwen3.5 vision LLM extraction...")
+            qwen_result = await self._extract_passport_with_qwen(image_bytes, document_type)
+
+            if qwen_result:
+                document_data = qwen_result
+                self.logger.info("Qwen3.5 extraction succeeded")
+            else:
+                # Fall back to unified_extractor
+                self.logger.warning("Qwen3.5 extraction failed, falling back to UnifiedIDExtractor...")
+                document_data = await self.unified_extractor.extract(image_bytes, is_pdf)
 
             # ═══════════════════════════════════════════════════════════════
-            # STEP 3: Process OCR + Remove User Text Regions (NEW v2.0)
+            # STEP 2: Field Extraction Validation (using Qwen results)
             # ═══════════════════════════════════════════════════════════════
-            self.logger.info("[STEP 3/7] Processing OCR and removing user text regions...")
-            step3_result = self._step3_process_ocr_and_remove_regions(
-                image_bytes=image_bytes,
-                ocr_result=ocr_result,
-                document_type=document_type
+            self.logger.info("[STEP 2/6] Validating Qwen extraction results...")
+            extracted_data = self._build_extracted_data(document_data, document_type)
+
+            # Determine required fields based on document type
+            country_field = 'document_country' if document_type == 'id_card' else 'passport_country'
+            number_field = 'number'
+
+            # Check required fields
+            country = extracted_data.get(country_field) or extracted_data.get('country_code')
+            number = extracted_data.get(number_field)
+            full_name = extracted_data.get('full_name')
+
+            if not country:
+                return self._fail_strict_result(
+                    step="field_extraction",
+                    reason=f"Could not extract country code from document",
+                    user_identity_id=user_identity_id,
+                    job_id=job_id,
+                    start_time=start_time,
+                    client_public_key=client_public_key,
+                    forgery_checks=forgery_checks,
+                    extracted_data=extracted_data
+                )
+
+            if not number:
+                return self._fail_strict_result(
+                    step="field_extraction",
+                    reason=f"Could not extract document number from document",
+                    user_identity_id=user_identity_id,
+                    job_id=job_id,
+                    start_time=start_time,
+                    client_public_key=client_public_key,
+                    forgery_checks=forgery_checks,
+                    extracted_data=extracted_data
+                )
+
+            if not full_name:
+                return self._fail_strict_result(
+                    step="field_extraction",
+                    reason=f"Could not extract name from document",
+                    user_identity_id=user_identity_id,
+                    job_id=job_id,
+                    start_time=start_time,
+                    client_public_key=client_public_key,
+                    forgery_checks=forgery_checks,
+                    extracted_data=extracted_data
+                )
+
+            self.logger.info(f"[STEP 2] Field validation passed: country={country}, number={number[:4]}****, name={full_name}")
+
+            # Convert image to numpy for processing
+            image_np = self._decode_image_to_numpy(image_bytes)
+
+            # ═══════════════════════════════════════════════════════════════
+            # STEP 3: Face Matching + Remove Face Region
+            # ═══════════════════════════════════════════════════════════════
+            self.logger.info("[STEP 3/6] Running face matching and removing face region...")
+            step3_result = await self._step4_face_match_and_remove(
+                cleaned_image_np=image_np,
+                user_identity_id=user_identity_id
             )
             if not step3_result['passed']:
                 return self._fail_strict_result(
-                    step="field_extraction",
+                    step="face_matching",
                     reason=step3_result['reason'],
                     user_identity_id=user_identity_id,
                     job_id=job_id,
                     start_time=start_time,
                     client_public_key=client_public_key,
                     forgery_checks=forgery_checks,
-                    extracted_data=step3_result.get('extracted_data')
+                    extracted_data=extracted_data
                 )
 
-            extracted_data = step3_result['data']
-            cleaned_image_np = step3_result['cleaned_image']  # Image with text/MRZ removed
-            removed_regions = step3_result.get('removed_regions', [])
-            self.logger.info(f"[STEP 3] Removed {len(removed_regions)} user text regions")
+            face_match_confidence = step3_result.get('face_match_confidence')
+            face_cleaned_image_np = step3_result.get('final_cleaned_image')  # Image with face removed
+            face_bbox = step3_result.get('face_bbox')
+            self.logger.info(f"[STEP 3] Face matched (confidence: {face_match_confidence}%), face region removed")
 
             # ═══════════════════════════════════════════════════════════════
-            # STEP 4: Face Matching + Remove Face Region (NEW v2.0)
+            # STEP 4: Reference Passport Comparison (on face-removed image)
             # ═══════════════════════════════════════════════════════════════
-            self.logger.info("[STEP 4/7] Running face matching and removing face region...")
-            step4_result = await self._step4_face_match_and_remove(
-                cleaned_image_np=cleaned_image_np,
-                user_identity_id=user_identity_id
+            self.logger.info("[STEP 4/6] Running reference passport comparison on face-removed image...")
+            step4_result = await self._step5_reference_comparison_cleaned(
+                cleaned_image_np=face_cleaned_image_np,
+                country_code=extracted_data.get('country_code') or extracted_data.get('passport_country')
             )
             if not step4_result['passed']:
                 return self._fail_strict_result(
-                    step="face_matching",
+                    step="reference_comparison",
                     reason=step4_result['reason'],
                     user_identity_id=user_identity_id,
                     job_id=job_id,
@@ -1220,25 +1393,30 @@ class SequentialPassportService:
                     client_public_key=client_public_key,
                     forgery_checks=forgery_checks,
                     extracted_data=extracted_data,
-                    removed_regions_count=len(removed_regions)
+                    face_match_confidence=face_match_confidence,
+                    similarity_score=step4_result.get('similarity_score'),
+                    reference_threshold=step4_result.get('threshold', 0.65)
                 )
 
-            face_match_confidence = step4_result.get('face_match_confidence')
-            final_cleaned_image_np = step4_result['final_cleaned_image']  # Image with face also removed
-            face_bbox = step4_result.get('face_bbox')
-            self.logger.info(f"[STEP 4] Face matched (confidence: {face_match_confidence}%), face region removed")
+            reference_scores = step4_result.get('region_scores', {})
+            similarity_score = step4_result.get('similarity_score', 0)
+            reference_threshold = step4_result.get('threshold', 0.65)
+            self.logger.info(f"[STEP 4] Reference comparison passed, similarity: {similarity_score:.4f}")
 
             # ═══════════════════════════════════════════════════════════════
-            # STEP 5: Reference Passport Comparison (on cleaned image)
+            # STEP 5: PEP/Criminal Database Checks
             # ═══════════════════════════════════════════════════════════════
-            self.logger.info("[STEP 5/7] Running reference passport comparison on cleaned image...")
-            step5_result = await self._step5_reference_comparison_cleaned(
-                cleaned_image_np=final_cleaned_image_np,
-                country_code=extracted_data.get('country_code') or extracted_data.get('passport_country')
+            self.logger.info("[STEP 5/6] Running PEP/Criminal database checks...")
+            step5_result = await self._step6_pep_criminal_check(
+                full_name=extracted_data.get('full_name'),
+                date_of_birth=extracted_data.get('dob') or extracted_data.get('date_of_birth'),
+                country=extracted_data.get('country_code') or extracted_data.get('passport_country'),
+                gender=extracted_data.get('sex'),
+                user_identity_id=user_identity_id
             )
             if not step5_result['passed']:
                 return self._fail_strict_result(
-                    step="reference_comparison",
+                    step="pep_criminal_check",
                     reason=step5_result['reason'],
                     user_identity_id=user_identity_id,
                     job_id=job_id,
@@ -1246,31 +1424,24 @@ class SequentialPassportService:
                     client_public_key=client_public_key,
                     forgery_checks=forgery_checks,
                     extracted_data=extracted_data,
-                    face_match_confidence=face_match_confidence,
-                    removed_regions_count=len(removed_regions),
-                    similarity_score=step5_result.get('similarity_score'),
-                    reference_threshold=step5_result.get('threshold', 0.65)
+                    face_match_confidence=face_match_confidence
                 )
 
-            reference_scores = step5_result.get('region_scores', {})
-            similarity_score = step5_result.get('similarity_score', 0)
-            reference_threshold = step5_result.get('threshold', 0.65)
-            self.logger.info(f"[STEP 5] Reference comparison passed, similarity: {similarity_score:.4f}")
+            osint_result = step5_result.get('osint_result')
+            worldcheck_result = step5_result.get('worldcheck_result')
 
             # ═══════════════════════════════════════════════════════════════
-            # STEP 6: PEP/Criminal Database Checks
+            # STEP 6: Web Search + Sentiment Analysis
             # ═══════════════════════════════════════════════════════════════
-            self.logger.info("[STEP 6/7] Running PEP/Criminal database checks...")
-            step6_result = await self._step6_pep_criminal_check(
+            self.logger.info("[STEP 6/6] Running web search + sentiment analysis...")
+            step6_result = await self._step7_web_search_sentiment(
                 full_name=extracted_data.get('full_name'),
-                date_of_birth=extracted_data.get('dob') or extracted_data.get('date_of_birth'),
                 country=extracted_data.get('country_code') or extracted_data.get('passport_country'),
-                gender=extracted_data.get('sex'),
                 user_identity_id=user_identity_id
             )
             if not step6_result['passed']:
                 return self._fail_strict_result(
-                    step="pep_criminal_check",
+                    step="sentiment_analysis",
                     reason=step6_result['reason'],
                     user_identity_id=user_identity_id,
                     job_id=job_id,
@@ -1278,40 +1449,13 @@ class SequentialPassportService:
                     client_public_key=client_public_key,
                     forgery_checks=forgery_checks,
                     extracted_data=extracted_data,
-                    face_match_confidence=face_match_confidence,
-                    removed_regions_count=len(removed_regions)
-                )
-
-            osint_result = step6_result.get('osint_result')
-            worldcheck_result = step6_result.get('worldcheck_result')
-
-            # ═══════════════════════════════════════════════════════════════
-            # STEP 7: Web Search + Sentiment Analysis
-            # ═══════════════════════════════════════════════════════════════
-            self.logger.info("[STEP 7/7] Running web search + sentiment analysis...")
-            step7_result = await self._step7_web_search_sentiment(
-                full_name=extracted_data.get('full_name'),
-                country=extracted_data.get('country_code') or extracted_data.get('passport_country'),
-                user_identity_id=user_identity_id
-            )
-            if not step7_result['passed']:
-                return self._fail_strict_result(
-                    step="sentiment_analysis",
-                    reason=step7_result['reason'],
-                    user_identity_id=user_identity_id,
-                    job_id=job_id,
-                    start_time=start_time,
-                    client_public_key=client_public_key,
-                    forgery_checks=forgery_checks,
-                    extracted_data=extracted_data,
-                    face_match_confidence=face_match_confidence,
-                    removed_regions_count=len(removed_regions)
+                    face_match_confidence=face_match_confidence
                 )
 
             # ═══════════════════════════════════════════════════════════════
             # ALL STEPS PASSED - Update verification state
             # ═══════════════════════════════════════════════════════════════
-            self.logger.info("[SUCCESS] All 7 steps passed! Updating verification state...")
+            self.logger.info("[SUCCESS] All 6 steps passed! Updating verification state...")
 
             # Check document expiry
             document_expiry_valid = None
@@ -1406,7 +1550,7 @@ class SequentialPassportService:
                 "reference_scores": reference_scores,
                 "similarity_score": similarity_score,
                 "reference_threshold": reference_threshold,
-                "removed_regions_count": len(removed_regions),
+                "removed_regions_count": 0,  # v3.0 - no longer doing user text masking
                 "osint_risk_score": osint_result.get('overall_risk_score', 0) if osint_result else 0,
                 "osint_risk_category": osint_result.get('risk_category', 'UNKNOWN') if osint_result else 'UNKNOWN',
                 "osint_result": osint_result.get('result', 'PASS') if osint_result else 'PASS',
@@ -1415,7 +1559,7 @@ class SequentialPassportService:
             }
 
             processing_time = round(time.time() - start_time, 2)
-            self.logger.info(f"[STRICT PIPELINE v2.0 COMPLETE] All steps passed in {processing_time}s")
+            self.logger.info(f"[STRICT PIPELINE v3.0 COMPLETE] All steps passed in {processing_time}s")
 
             return SequentialJobResponse(
                 result=True,

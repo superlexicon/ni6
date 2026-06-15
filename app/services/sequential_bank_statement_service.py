@@ -34,7 +34,8 @@ from datetime import date
 import numpy as np
 from PIL import Image
 from app.services.sequential_document_processor_base import DocumentProcessorBase
-from app.core.key_injection.simple_bank_analyzer import simple_bank_analyzer
+# Legacy: simple_bank_analyzer removed - GLiNER functionality replaced with Qwen3-VL
+# from app.core.key_injection.simple_bank_analyzer import simple_bank_analyzer
 from app.core.key_injection.key_injection_manager import key_injection_manager
 from app.core.key_injection import DocumentType
 from app.core.key_injection.global_banks import COUNTRY_NAMES, CURRENCY_COUNTRIES, detect_country_in_text
@@ -137,7 +138,7 @@ class SequentialBankStatementService(DocumentProcessorBase):
         """Enable PhotoHolmes for bank statements.
 
         PhotoHolmes forgery detection is important for bank statements to detect tampering.
-        This is used regardless of the extraction method (GLiNER2 or spatial fallback).
+        This is used regardless of the extraction method (Qwen3-VL).
         """
         return True
 
@@ -147,7 +148,7 @@ class SequentialBankStatementService(DocumentProcessorBase):
         """
         QWEN3-VL DIRECT EXTRACTION: Extract bank statement fields using Qwen3-VL vision model.
 
-        This method replaces the complex multi-stage pipeline (DocTR OCR + GLiNER2 + Layout Cache + Spatial Coordinate Extraction)
+        This method replaces the complex multi-stage pipeline (DocTR OCR + GLiNER2 + Layout Cache + Spatial Coordinate Extraction - all removed)
         with a single vision LLM call that extracts field values directly from the image.
 
         NEW ARCHITECTURE:
@@ -228,7 +229,7 @@ class SequentialBankStatementService(DocumentProcessorBase):
                 f"Fields extracted: {len([k for k in standardized_data.keys() if k not in ['extraction_method', 'is_pdf']])}"
             )
 
-            # Add bank code/SWIFT code lookup (same as GLiNER path)
+            # Add bank code/SWIFT code lookup (enrichment via database)
             if 'bank_name' in standardized_data and 'bank_country' in standardized_data:
                 from app.core.key_injection.bank_database_lookup import get_swift_code_for_bank
                 bank_name = standardized_data.get('bank_name')
@@ -350,149 +351,7 @@ class SequentialBankStatementService(DocumentProcessorBase):
         }
         return extracted_data, confidence_data
 
-    async def _reextract_with_refined_prompts(
-        self,
-        ocr_text: str,
-        text_blocks: List[Dict[str, Any]],
-        refined_prompts: Dict[str, Any],
-        is_pdf: bool,
-        bank_name: Optional[str] = None,
-        bank_country: Optional[str] = None
-    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        """
-        Re-extract fields using refined GLiNER prompts.
 
-        Args:
-            ocr_text: OCR text from the document
-            text_blocks: Text blocks with coordinates
-            refined_prompts: Refined prompts from LLM
-            is_pdf: Whether the input is a PDF
-            bank_name: Stage 1 bank name (authoritative, not re-extracted)
-            bank_country: Stage 1 bank country (authoritative, not re-extracted)
-
-        Returns:
-            (extracted_data, confidence_data) tuple
-        """
-        from app.core.gliner_ner_model import GLiNERNERModel
-
-        self.logger.info(
-            f"Re-extracting with {len(refined_prompts)} refined prompts"
-        )
-
-        # Convert refined prompts to GLiNER2 format
-        # Refined prompts from LLM are already in the right format
-        custom_prompts = {}
-        for entity_type, prompt_config in refined_prompts.items():
-            custom_prompts[entity_type] = {
-                'description': prompt_config.get('prompt_description', ''),
-                'entity': prompt_config.get('entity_category', 'custom'),
-                'threshold': prompt_config.get('threshold', 0.3),
-                'examples': prompt_config.get('examples', []),
-                'pattern': prompt_config.get('validation_pattern', '')
-            }
-
-        # Run GLiNER extraction with refined schema
-        gliner_model = GLiNERNERModel()
-
-        # Extract with refined schema
-        gliner_result = await gliner_model.extract_with_custom_schema_async(
-            text=ocr_text,
-            bank_specific_prompts=custom_prompts,
-            default_threshold=0.3  # Use default threshold
-        )
-
-        # Convert to response format
-        # Pass Stage 1 bank_name and bank_country as authoritative values
-        extracted_data, confidence_data = self._convert_gliner_result_to_response(
-            gliner_result=gliner_result,
-            is_pdf=is_pdf,
-            extraction_method='llm_generated_prompts',
-            bank_specific_prompts=refined_prompts,
-            bank_name=bank_name,
-            bank_country=bank_country
-        )
-
-        self.logger.info(
-            f"Re-extraction completed with refined prompts. "
-            f"Extracted {len([v for v in extracted_data.values() if v])} fields."
-        )
-
-        return extracted_data, confidence_data
-
-    def _save_refined_prompts_to_database(
-        self,
-        bank_name: str,
-        bank_country: str,
-        refined_prompts: Dict[str, Any]
-    ):
-        """
-        Save refined prompts to database for future use.
-
-        Args:
-            bank_name: Bank name from extraction
-            bank_country: Country code from extraction
-            refined_prompts: Refined prompts that succeeded
-        """
-        from app.core.key_injection.bank_database_lookup import get_bank_database_lookup
-        from app.services.bank_prompt_database_service import bank_prompt_database_service
-
-        try:
-            # Look up bank info
-            bank_lookup = get_bank_database_lookup()
-            country_code = self._convert_country_name_to_iso_code(bank_country)
-            bank_info = bank_lookup.get_bank_by_name_and_country(bank_name, country_code)
-
-            if not bank_info:
-                self.logger.warning(
-                    f"Could not find bank info for {bank_name}/{bank_country} "
-                    f"to save refined prompts"
-                )
-                return
-
-            # Convert refined prompts to database format
-            prompts_list = []
-            for entity_type, prompt_config in refined_prompts.items():
-                prompts_list.append({
-                    'bank_id': bank_info['bank_id'],
-                    'country_code': country_code,
-                    'entity_type': entity_type,
-                    'prompt_description': prompt_config.get('prompt_description', ''),
-                    'entity_category': prompt_config.get('entity_category', 'custom'),
-                    'threshold': prompt_config.get('threshold', 0.3),
-                    'examples': json.dumps(prompt_config.get('examples', [])),
-                    'validation_pattern': prompt_config.get('validation_pattern', ''),
-                    'is_active': 1,
-                    'created_by': 'llm_refinement'
-                })
-
-            extraction_config = {
-                'bank_id': bank_info['bank_id'],
-                'country_code': country_code,
-                'default_threshold': 0.3,
-                'is_active': 1,
-                'prompt_generation_status': 'completed',
-                'samples_processed': 1
-            }
-
-            # Save refined prompts to database
-            save_success = bank_prompt_database_service.save_bank_prompts(
-                bank_id=bank_info['bank_id'],
-                country_code=country_code,
-                prompts=prompts_list,
-                extraction_config=extraction_config,
-                metadata={'source': 'llm_refinement'}
-            )
-
-            if save_success:
-                self.logger.info(
-                    f"Saved {len(refined_prompts)} refined prompts for "
-                    f"{bank_info['bank_abbrev']}/{country_code} to database"
-                )
-            else:
-                self.logger.warning(f"Failed to save refined prompts for {bank_name}/{bank_country}")
-
-        except Exception as e:
-            self.logger.error(f"Error saving refined prompts to database: {e}")
 
     def _has_required_fields(self, bank_data) -> bool:
         """Check if bank data has all required fields"""
@@ -564,81 +423,16 @@ class SequentialBankStatementService(DocumentProcessorBase):
 
         return None
 
-    def _build_gliner_response(self, bank_data, is_pdf: bool) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        """Build response from GLiNER extractor result."""
-        # Determine extraction method based on source
-        if bank_data.extraction_source == 'bank_specific_prompts':
-            extraction_method = 'bank_specific_prompts'
-        elif bank_data.extraction_source == 'llm_generated_prompts':
-            extraction_method = 'llm_generated_prompts'
-        elif is_pdf:
-            extraction_method = 'gliner'
-        else:
-            extraction_method = 'gliner_ocr'
-
-        extracted_data = {
-            "account_holder_name": bank_data.account_holder_name,
-            "account_number": bank_data.account_number,
-            "bank_name": bank_data.bank_name,
-            "bank_code": bank_data.bank_code,
-            "swift_code": bank_data.swift_code or bank_data.bank_code,
-            "bank_branch": bank_data.bank_branch,
-            "bank_country": bank_data.bank_country,
-            "address": bank_data.address,
-            "address_city": bank_data.address_city,
-            "address_state": bank_data.address_state,
-            "address_postal": bank_data.address_postal,
-            "address_country": bank_data.address_country,
-            "currency": bank_data.currency,
-            "statement_date": self._normalize_date_to_iso(bank_data.statement_date) or "",
-            "account_number_extraction_method": bank_data.account_number_extraction_method or "gliner_ner",
-            "extraction_method": extraction_method,
-            "raw_data": bank_data.raw_data,
-        }
-
-        confidence_data = {}
-        for field, confidence_info in bank_data.confidence_scores.items():
-            # Handle both legacy (float) and new (dict) formats
-            if isinstance(confidence_info, dict):
-                # Already in new format - just copy
-                confidence_data[field] = confidence_info
-            elif isinstance(confidence_info, (int, float)):
-                # Legacy format - convert to new format
-                confidence_data[field] = {
-                    'overall_confidence': float(confidence_info) / 100 if confidence_info > 1 else float(confidence_info),
-                    'sources': ['gliner']
-                }
-            else:
-                # Unknown format - copy as-is
-                confidence_data[field] = confidence_info
-
-        if bank_data.overall_confidence:
-            # Determine sources based on extraction_source
-            if bank_data.extraction_source == 'bank_specific_prompts':
-                sources = ['gliner', 'bank_specific']
-            elif bank_data.extraction_source == 'llm_generated_prompts':
-                sources = ['gliner', 'llm_generated']
-            else:
-                sources = ['gliner']
-
-            confidence_data['overall'] = {
-                'overall_confidence': bank_data.overall_confidence / 100,
-                'sources': sources
-            }
-
-        return extracted_data, confidence_data
 
     def _normalize_field_name(self, field: str) -> Optional[str]:
         """Normalize extractor field names to service field names.
 
-        Handles both underscore-cased names (from confidence_scores) and
-        space-separated names (from GLiNER2 schema extraction).
+        Handles underscore-cased names from Qwen3-VL extraction results.
         """
         field_lower = field.lower()
 
-        # Direct mappings - support both formats
+        # Direct mappings from Qwen3-VL extraction format
         mappings = {
-            # Underscore format (from confidence_scores)
             'bank_name': 'bank_name',
             'account_holder_name': 'account_holder_name',
             'account_number': 'account_number',
@@ -650,16 +444,6 @@ class SequentialBankStatementService(DocumentProcessorBase):
             'bank_branch': 'bank_branch',
             'bank_address': 'bank_address',
             'branch': 'bank_branch',
-
-            # Space-separated format (from GLiNER2 schema extraction)
-            'bank name': 'bank_name',
-            'bank or financial institution name': 'bank_name',
-            'account holder name': 'account_holder_name',
-            'person name or customer name with title or honorific like mr mrs ms dr': 'account_holder_name',
-            'account number': 'account_number',
-            'customer address': 'address',
-            'ifsc code': 'bank_code',
-            'swift code': 'bank_code',
         }
 
         return mappings.get(field_lower)
@@ -765,9 +549,9 @@ class SequentialBankStatementService(DocumentProcessorBase):
         extraction_method = extracted_data.get('account_number_extraction_method', '')
 
         # Account number MUST be extracted via validated methods
-        # Accept: spatial_label (legacy), spatial_geometry (spatial extractor), gliner_ner (GLINER2), qwen3_vl_direct (vision LLM)
+        # Accept: qwen3_vl_direct (vision LLM)
         # This prevents random numbers from being accepted as account numbers
-        valid_methods = {'spatial_label', 'spatial_geometry', 'gliner_ner', 'qwen3_vl_direct'}
+        valid_methods = {'qwen3_vl_direct'}
         extraction_valid = extraction_method in valid_methods
         validation_results['account_extraction'] = {
             'method': extraction_method,
@@ -875,10 +659,10 @@ class SequentialBankStatementService(DocumentProcessorBase):
         self, line_result, raw_text: str = "", text_blocks: list = None
     ) -> Dict[str, Any]:
         """
-        Build extracted_data dict from LineExtractionResult (from simple_bank_analyzer).
+        Build extracted_data dict from LineExtractionResult (from key injection).
 
         Args:
-            line_result: LineExtractionResult from simple_bank_analyzer.analyze_bank_statement()
+            line_result: LineExtractionResult from key injection analysis
             raw_text: Raw OCR text for bank/currency detection
             text_blocks: OCR blocks with geometry for bank address detection
 
@@ -907,13 +691,15 @@ class SequentialBankStatementService(DocumentProcessorBase):
             self.logger.info(f"Bank detected via BankLookup: {bank_info.abbreviation} ({bank_info.full_name})")
 
             # Try to extract bank address from blocks below bank name for country detection
-            if text_blocks:
-                bank_address_text = simple_bank_analyzer.extract_bank_address(text_blocks, bank_info.abbreviation)
-                if bank_address_text:
-                    detected_country = detect_country_in_text(bank_address_text)
-                    if detected_country:
-                        bank_country = detected_country
-                        self.logger.info(f"Bank country detected from bank address: {bank_country}")
+            # Legacy: simple_bank_analyzer.extract_bank_address removed with GLiNER
+            # Bank address extraction for country detection disabled
+            # if text_blocks:
+            #     bank_address_text = simple_bank_analyzer.extract_bank_address(text_blocks, bank_info.abbreviation)
+            #     if bank_address_text:
+            #         detected_country = detect_country_in_text(bank_address_text)
+            #         if detected_country:
+            #             bank_country = detected_country
+            #             self.logger.info(f"Bank country detected from bank address: {bank_country}")
 
             # Use detected country or bank_info's default country
             if not bank_country:
@@ -957,8 +743,8 @@ class SequentialBankStatementService(DocumentProcessorBase):
             "bank_country": bank_country,
             "address": address,
             "statement_date": self._normalize_date_to_iso(statement_date) or '',  # ISO format (YYYY-MM-DD)
-            "opening_balance": None,  # Not extracted by simple_bank_analyzer
-            "closing_balance": None,  # Not extracted by simple_bank_analyzer
+            "opening_balance": None,  # Not extracted by current implementation
+            "closing_balance": None,  # Not extracted by current implementation
             "currency": currency,
             "country": client_country
         }
@@ -1347,9 +1133,7 @@ class SequentialBankStatementService(DocumentProcessorBase):
         consistent behavior.
 
         This method:
-        1. Extracts all fields using Two-Stage GLiNER2 approach
-           - Stage 1: Generic GLiNER2 to identify bank and country
-           - Stage 2: Bank-specific prompt extraction (cached or LLM-generated)
+        1. Extracts all fields using Qwen3-VL direct extraction
         2. Validates required fields
         3. Performs bank statement specific validations
 
@@ -1384,11 +1168,7 @@ class SequentialBankStatementService(DocumentProcessorBase):
 
         This method does everything from file bytes to full validation:
         1. Text extraction (direct PDF or OCR)
-        2. Field extraction using Two-Stage GLiNER2 approach
-           - Stage 1: Generic GLiNER2 to identify bank and country
-           - Stage 2: Bank-specific prompt extraction (cached or LLM-generated)
-           - GLINER2: Semantic understanding, 50%+ confidence threshold
-           - Spatial: PyMuPDF geometry-based, 60-85% accuracy for structured documents
+        2. Field extraction using Qwen3-VL direct extraction
         3. Required fields validation
         4. Document-specific validations
 
@@ -1565,214 +1345,6 @@ class SequentialBankStatementService(DocumentProcessorBase):
             result['elapsed_seconds'] = time.time() - start_time
             return result
 
-    async def extract_with_bank_specific_prompts(
-        self,
-        ocr_text: str,
-        document_metadata: Dict[str, Any],
-        text_blocks: Optional[List[Dict[str, Any]]] = None,
-        image_bytes: Optional[bytes] = None,
-        is_pdf: bool = False
-    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        """
-        Enhanced extraction flow with automatic bank-specific prompt generation.
-
-        This method implements the LLM-generated bank-specific prompts workflow:
-        1. Run generic GLiNER2 to extract bank name and country
-        2. Look up custom prompts in database
-        3. If found -> Use custom prompts for full extraction
-        4. If not found -> LLM generates prompts -> Save to DB -> Use them
-
-        Args:
-            ocr_text: OCR text from the statement
-            document_metadata: Document metadata (not used currently, for future)
-            text_blocks: Optional text blocks with geometry for spatial extraction
-            image_bytes: Optional file bytes for spatial extraction
-            is_pdf: True if input is a PDF file
-
-        Returns:
-            (extracted_data, confidence_data) tuple
-        """
-        from app.services.bank_prompt_generator import bank_prompt_generator
-        from app.services.bank_prompt_database_service import bank_prompt_database_service
-        from app.core.key_injection.bank_database_lookup import get_bank_database_lookup
-        from app.core.gliner_ner_model import GLiNERNERModel
-        from app.schemas.bank_statement_schema import BankStatementData
-
-        self.logger.info("=" * 80)
-        self.logger.info("BANK-SPECIFIC PROMPT EXTRACTION FLOW")
-        self.logger.info("=" * 80)
-
-        # Step 1: Minimal bank identification (Stage 1) - ONLY extract bank_name and bank_country
-        self.logger.info("Step 1: Running minimal bank identification (Stage 1) - extracting only bank_name and bank_country")
-        gliner_model = GLiNERNERModel()
-        identification_result = await gliner_model.extract_bank_identification_async(
-            text=ocr_text
-        )
-
-        # Extract bank name and country from identification result
-        bank_name = None
-        bank_country = None
-
-        # Try to get bank_name from identification result
-        if 'bank_name' in identification_result and identification_result['bank_name']:
-            bank_name = identification_result['bank_name'].get('value', '') if isinstance(identification_result['bank_name'], dict) else identification_result['bank_name']
-            # Clean up bank name - remove newlines and extra whitespace
-            if bank_name:
-                bank_name = ' '.join(bank_name.split())
-
-        # Try to get bank_country from identification result
-        if 'bank_country' in identification_result and identification_result['bank_country']:
-            bank_country = identification_result['bank_country'].get('value', '') if isinstance(identification_result['bank_country'], dict) else identification_result['bank_country']
-            # Clean up bank country - remove newlines and extra whitespace
-            if bank_country:
-                bank_country = ' '.join(bank_country.split())
-
-        if not bank_name:
-            self.logger.warning("Generic extraction failed to identify bank name, falling back to standard extraction")
-            return await self.extract_fields_from_ocr(text_blocks or [], ocr_text, image_bytes or b'', is_pdf)
-
-        self.logger.info(f"Generic extraction identified: bank={bank_name}")
-
-        # Step 2: Look up bank in database
-        bank_db = get_bank_database_lookup()
-        # Convert country name to ISO code (e.g., "SINGAPORE" -> "SG")
-        country_code = self._convert_country_name_to_iso_code(bank_country)
-
-        bank_info = bank_db.get_bank_by_name_and_country(bank_name, country_code)
-
-        # Bank not found in database - reject immediately
-        # Unknown banks are not supported - must be added to database first
-        if not bank_info:
-            self.logger.error(
-                f"Bank '{bank_name}' not found in database. "
-                f"Country: {country_code}. "
-                f"Rejecting document - unrecognized bank."
-            )
-            error_result = {
-                'error': f"Unrecognized bank: '{bank_name}' (country: {country_code}). "
-                         f"This bank is not in the database. "
-                         f"Please add the bank identifier to the database.",
-                'bank_name': bank_name,
-                'country_code': country_code,
-                'extraction_method': 'unrecognized_bank',
-                'is_pdf': is_pdf
-            }
-            return error_result, {}
-
-        # Bank found in database - use cached data or generate prompts
-        self.logger.info(f"Database lookup found: {bank_info['bank_abbrev']} (ID: {bank_info['bank_id']}, country: {country_code})")
-
-        # Step 2.5: Use spatial extraction if image bytes are available
-        if image_bytes and text_blocks:
-            self.logger.info("Image bytes and text blocks available - attempting spatial extraction")
-            try:
-                return await self.extract_with_spatial_coordinates(
-                    ocr_text=ocr_text,
-                    text_blocks=text_blocks,
-                    image_bytes=image_bytes,
-                    bank_id=bank_info['bank_id'],
-                    bank_name=bank_name,
-                    bank_abbrev=bank_info['bank_abbrev'],
-                    country_code=country_code,
-                    is_pdf=is_pdf
-                )
-            except Exception as e:
-                self.logger.warning(f"Spatial extraction failed: {str(e)}, falling back to GLiNER-based extraction")
-                # Fall through to GLiNER-based extraction
-
-        # Step 3: Check if custom prompts exist
-        if bank_info.get('prompts'):
-            # Step 3a: Use existing custom prompts
-            self.logger.info(f"Step 3a: Using {len(bank_info['prompts'])} cached custom prompts for {bank_info['bank_abbrev']}/{country_code}")
-
-            # Extract with custom schema (Stage 2: Bank-specific extraction for ALL required fields)
-            self.logger.info(f"Step 3b: Using bank-specific prompts to extract ALL required fields")
-            custom_result = await gliner_model.extract_with_custom_schema_async(
-                text=ocr_text,
-                bank_specific_prompts=bank_info['prompts'],
-                default_threshold=bank_info['prompts'].get('default_threshold', 0.3)
-            )
-
-            # Update usage stats
-            bank_prompt_database_service.update_usage_stats(bank_info['bank_id'], country_code)
-
-            # Convert to BankStatementData
-            # Stage 1 (bank_name, bank_country) are authoritative and always used
-            # Stage 2 custom prompts do NOT re-extract these fields
-            # Pass country_code (ISO) instead of raw bank_country name
-            return self._convert_gliner_result_to_response(
-                custom_result, is_pdf, 'bank_specific_prompts',
-                bank_specific_prompts=bank_info['prompts'],
-                bank_name=bank_name,
-                bank_country=country_code
-            )
-
-        # Step 4: No custom prompts found - generate them
-        self.logger.info(f"Step 4: No custom prompts found for {bank_info['bank_abbrev']}/{country_code}, generating with LLM...")
-
-        generated = await bank_prompt_generator.generate_prompts_for_bank(
-            bank_id=bank_info['bank_id'],
-            bank_abbrev=bank_info['bank_abbrev'],
-            bank_name=bank_info['bank_name'],
-            country_code=country_code,
-            ocr_text=ocr_text,
-            generic_extraction_result=identification_result
-        )
-
-        # Check for generation errors
-        if generated.get('error') or not generated.get('prompts'):
-            self.logger.warning(f"Prompt generation failed: {generated.get('error')}, falling back to standard extraction")
-            return await self.extract_fields_from_ocr(text_blocks or [], ocr_text, image_bytes or b'', is_pdf)
-
-        # Save to database
-        save_success = bank_prompt_database_service.save_bank_prompts(
-            bank_id=bank_info['bank_id'],
-            country_code=country_code,
-            prompts=generated['prompts'],
-            extraction_config=generated['extraction_config'],
-            metadata=generated.get('metadata')
-        )
-
-        if not save_success:
-            self.logger.warning("Failed to save generated prompts to database")
-
-        self.logger.info(f"Generated and saved {len(generated['prompts'])} custom prompts for {bank_info['bank_abbrev']}")
-
-        # Step 5: Use newly generated prompts (Stage 2: Bank-specific extraction for ALL required fields)
-        # Convert prompts to GLiNER2 format
-        custom_prompts = {}
-        for prompt in generated['prompts']:
-            entity_type = prompt.get('entity_type')
-            if entity_type:
-                custom_prompts[entity_type] = {
-                    'description': prompt.get('prompt_description', ''),
-                    'entity': prompt.get('entity_category', 'custom'),
-                    'threshold': prompt.get('threshold', 0.3),
-                    'examples': json.loads(prompt['examples']) if prompt.get('examples') else [],
-                    'pattern': prompt.get('validation_pattern')
-                }
-
-        # Log examples for debugging
-        if custom_prompts:
-            example_count = sum(len(p.get('examples', [])) for p in custom_prompts.values())
-            self.logger.debug(f"Built custom_prompts with {len(custom_prompts)} entity types, {example_count} total examples")
-
-        custom_result = await gliner_model.extract_with_custom_schema_async(
-            text=ocr_text,
-            bank_specific_prompts=custom_prompts,
-            default_threshold=generated['extraction_config'].get('default_threshold', 0.3)
-        )
-
-        # Convert to BankStatementData
-        # Stage 1 (bank_name, bank_country) are authoritative and always used
-        # Stage 2 LLM-generated prompts do NOT re-extract these fields
-        # Pass country_code (ISO) instead of raw bank_country name
-        return self._convert_gliner_result_to_response(
-            custom_result, is_pdf, 'llm_generated_prompts',
-            bank_specific_prompts=custom_prompts,
-            bank_name=bank_name,
-            bank_country=country_code
-        )
 
     async def extract_with_spatial_coordinates(
         self,
@@ -1797,7 +1369,7 @@ class SequentialBankStatementService(DocumentProcessorBase):
         6. Return extracted values
 
         Note: If spatial extraction fails for a field, the LLM already had full context
-        and could not identify it. No GLiNER fallback is performed.
+        and could not identify it. Qwen3-VL direct extraction is used as fallback.
 
         Args:
             ocr_text: OCR text from the statement
@@ -1921,7 +1493,7 @@ class SequentialBankStatementService(DocumentProcessorBase):
             else:
                 self.logger.info(
                     f"Both text and vision layout analysis disabled. "
-                    f"Skipping to GLiNER-only extraction for {bank_abbrev}/{country_code}."
+                    f"Skipping to Qwen3-VL direct extraction for {bank_abbrev}/{country_code}."
                 )
                 coordinates = {}
                 layout_analysis = None
@@ -1934,7 +1506,7 @@ class SequentialBankStatementService(DocumentProcessorBase):
                     layout_hash=layout_hash,
                     layout_signature=layout_analysis.get('layout_signature', layout_signature),
                     coordinates=layout_analysis.get('coordinates', {}),  # Cache coordinates directly for vision mode
-                    gliner_prompts={},  # Empty prompts - GLiNER fallback removed
+                    gliner_prompts={},  # Empty prompts - GLiNER removed, Qwen3-VL used instead
                     metadata=layout_analysis.get('metadata', {})
                 )
 
@@ -1946,12 +1518,11 @@ class SequentialBankStatementService(DocumentProcessorBase):
                 else:
                     self.logger.warning("Failed to save layout cache")
             else:
-                self.logger.warning("LLM layout analysis returned no coordinates, falling back to GLiNER")
-                # Fall back to standard extraction
-                return await self.extract_with_bank_specific_prompts(
-                    ocr_text=ocr_text,
-                    document_metadata={},
+                self.logger.warning("LLM layout analysis returned no coordinates, falling back to Qwen3-VL direct extraction")
+                # Fall back to Qwen3-VL direct extraction
+                return await self.extract_fields_from_ocr(
                     text_blocks=text_blocks,
+                    raw_text=ocr_text,
                     image_bytes=preprocessed_image_bytes,
                     is_pdf=is_pdf
                 )
@@ -1966,9 +1537,9 @@ class SequentialBankStatementService(DocumentProcessorBase):
         # Step 6: Validate spatial results
         validation_result = self._validate_spatial_results(spatial_results)
 
-        # Note: No GLiNER fallback performed
+        # Note: No GLiNER fallback - Qwen3-VL direct extraction is used instead
         # If spatial extraction failed for a field, the LLM (with full context)
-        # already could not identify it. Re-running GLiNER on the same text
+        # already could not identify it. Re-running extraction on the same text
         # would not succeed where the LLM failed.
 
         # Convert to response format
@@ -2419,7 +1990,7 @@ class SequentialBankStatementService(DocumentProcessorBase):
             return detected
 
         # Fallback: Try currency-to-country conversion (e.g., "THB" -> "TH")
-        # This handles cases where GLiNER extracts currency code instead of country code
+        # This handles cases where the extraction returns currency code instead of country code
         if len(country_name) == 3 and country_name.isalpha():
             currency_code = country_name.upper()
             if currency_code in CURRENCY_COUNTRIES:
@@ -2434,168 +2005,4 @@ class SequentialBankStatementService(DocumentProcessorBase):
     # This method was redundant - let main flow handle unknown banks
     # Removed validate_bank_recognition method to allow unknown banks to continue processing
 
-    def _convert_gliner_result_to_response(
-        self,
-        gliner_result: Dict[str, Any],
-        is_pdf: bool,
-        extraction_method: str,
-        bank_specific_prompts: Optional[Dict[str, Any]] = None,
-        bank_name: Optional[str] = None,
-        bank_country: Optional[str] = None
-    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        """
-        Convert GLiNER extraction result to response format.
-
-        Args:
-            gliner_result: GLiNER extraction result
-            is_pdf: True if input is PDF
-            extraction_method: Extraction method identifier
-            bank_specific_prompts: Optional prompts used for extraction (stored for refinement)
-            bank_name: Bank name from Stage 1 generic extraction (authoritative, Stage 2 does not re-extract)
-            bank_country: Bank country from Stage 1 generic extraction (authoritative, Stage 2 does not re-extract)
-
-        Returns:
-            (extracted_data, confidence_data) tuple
-        """
-        extracted_data = {}
-        confidence_data = {}
-
-        # Field mappings from GLiNER schema to our schema
-        field_mappings = {
-            'bank_name': 'bank_name',
-            'account_holder_name': 'account_holder_name',
-            'account_number': 'account_number',
-            'cif_number': 'cif_number',
-            'customer_address': 'address',
-            'branch_address': 'branch_address',
-            'branch_name': 'bank_branch',
-            'currency': 'currency',
-            'statement_date': 'statement_date',
-            'bank_country': 'bank_country',
-        }
-
-        for gliner_field, our_field in field_mappings.items():
-            if gliner_field in gliner_result and gliner_result[gliner_field]:
-                result = gliner_result[gliner_field]
-                if isinstance(result, dict):
-                    extracted_data[our_field] = result.get('value', '')
-                    confidence = result.get('confidence', 0.0)
-                    confidence_data[our_field] = {
-                        'overall_confidence': float(confidence),
-                        'sources': [extraction_method]
-                    }
-                else:
-                    extracted_data[our_field] = str(result)
-
-                # Log customer_address extraction for debugging
-                if gliner_field == 'customer_address':
-                    self.logger.info(f"GLiNER extracted customer_address: {extracted_data[our_field][:200] if extracted_data[our_field] else 'None'}...")
-
-        # IMPORTANT: Always use Stage 1 bank_name and bank_country as authoritative values
-        # Stage 1 generic prompt reliably extracts these from bank address blocks and headers
-        # Stage 2 custom prompts do NOT re-extract these fields - Stage 1 values are always used
-
-        # Handle bank_name (Stage 1 authoritative)
-        if 'bank_name' in extracted_data:
-            del extracted_data['bank_name']
-            del confidence_data['bank_name']
-
-        if bank_name:
-            extracted_data['bank_name'] = bank_name
-            confidence_data['bank_name'] = {
-                'overall_confidence': 0.9,  # High confidence for Stage 1 extraction
-                'sources': ['stage1_generic_extraction']
-            }
-            self.logger.info(f"Using Stage 1 bank_name '{bank_name}' (authoritative, not re-extracted in Stage 2)")
-
-        # Handle bank_country (Stage 1 authoritative)
-        if 'bank_country' in extracted_data:
-            del extracted_data['bank_country']
-            del confidence_data['bank_country']
-
-        if bank_country:
-            extracted_data['bank_country'] = bank_country
-            confidence_data['bank_country'] = {
-                'overall_confidence': 0.9,  # High confidence for Stage 1 extraction
-                'sources': ['stage1_generic_extraction']
-            }
-            self.logger.info(f"Using Stage 1 bank_country '{bank_country}' (authoritative, not re-extracted in Stage 2)")
-
-        # Add bank code/SWIFT code lookup
-        if 'bank_name' in extracted_data and 'bank_country' in extracted_data:
-            from app.core.key_injection.bank_database_lookup import get_swift_code_for_bank
-            bank_name = extracted_data.get('bank_name')
-            bank_country = extracted_data.get('bank_country')
-
-            # Look up SWIFT code
-            swift_code = get_swift_code_for_bank(bank_name, bank_country)
-            if swift_code:
-                extracted_data['bank_code'] = swift_code
-                extracted_data['swift_code'] = swift_code
-                confidence_data['bank_code'] = {
-                    'overall_confidence': 0.8,  # High confidence for database lookup
-                    'sources': [extraction_method]
-                }
-                confidence_data['swift_code'] = {
-                    'overall_confidence': 0.8,
-                    'sources': [extraction_method]
-                }
-
-        # Add metadata
-        extracted_data['extraction_method'] = extraction_method
-        extracted_data['account_number_extraction_method'] = 'gliner_ner'
-
-        # Store bank_abbrev if available from bank lookup
-        # This is used during prompt refinement to get proper bank identifier
-        if 'bank_name' in extracted_data:
-            from app.core.key_injection.bank_database_lookup import get_bank_database_lookup
-            bank_db = get_bank_database_lookup()
-            bank_name = extracted_data.get('bank_name')
-
-            # Try to find bank_abbrev by looking up bank with country hint for disambiguation
-            # Use Stage 1 bank_country (ISO code) as hint for multi-country banks
-            bank_info = bank_db.lookup_by_name(bank_name, bank_country)
-            if bank_info:
-                # BankInfo is a NamedTuple with 'abbreviation' attribute
-                extracted_data['bank_abbrev'] = bank_info.abbreviation
-
-        # Store prompts used for potential refinement
-        if bank_specific_prompts:
-            extracted_data['prompts_used'] = bank_specific_prompts
-
-        # Decompose address into structured components (regardless of extraction method)
-        address_to_decompose = extracted_data.get('customer_address') or extracted_data.get('address', '')
-        if address_to_decompose:
-            # Handle dict values (from spatial extraction)
-            if isinstance(address_to_decompose, dict):
-                address_to_decompose = address_to_decompose.get('value', '')
-
-            # Get country hint from bank_country if available
-            country_hint = extracted_data.get('bank_country')
-
-            # Decompose address using simple list matching
-            address_components = decompose_address_simple(address_to_decompose, country_hint)
-
-            # Map decomposed components to extracted_data (only if not already set)
-            if address_components.get('city') and not extracted_data.get('address_city'):
-                extracted_data['address_city'] = address_components['city']
-            if address_components.get('state') and not extracted_data.get('address_state'):
-                extracted_data['address_state'] = address_components['state']
-            if address_components.get('postal_code') and not extracted_data.get('address_postal'):
-                extracted_data['address_postal'] = address_components['postal_code']
-            if address_components.get('country') and not extracted_data.get('address_country'):
-                extracted_data['address_country'] = address_components['country']
-            # Skip street_address - Qwen's customer_address is more reliable
-            # Only use discrete components: city, state, postal_code, country
-            # Do NOT add street_address to extracted_data
-
-        # Overall confidence
-        if confidence_data:
-            avg_confidence = sum(c.get('overall_confidence', 0) for c in confidence_data.values()) / max(len(confidence_data), 1)
-            confidence_data['overall'] = {
-                'overall_confidence': avg_confidence,
-                'sources': [extraction_method]
-            }
-
-        return extracted_data, confidence_data
 

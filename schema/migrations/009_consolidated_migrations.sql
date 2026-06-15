@@ -162,70 +162,6 @@ INSERT INTO banks (swift_code, country_code, legal_name, abbreviations, common_n
 ('BOFAUS3N', 'US', 'Bank of America', 'BOA,BOFA', 'Bank of America', 1),
 ('WELFED6W', 'US', 'Wells Fargo Bank', 'WF,WELF', 'Wells Fargo', 1);
 
--- ============================================================
--- Step 4: Recreate dependent tables (for future use)
--- ============================================================
-
--- Note: These tables are recreated for potential future use
--- but are currently not used by the Qwen3-VL extraction pipeline
-
-CREATE TABLE IF NOT EXISTS bank_extraction_config (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    bank_id INT NOT NULL,
-    country_code VARCHAR(2) NOT NULL,
-    default_threshold FLOAT DEFAULT 0.3,
-    extraction_order JSON DEFAULT NULL,
-    special_handling TEXT DEFAULT NULL,
-    is_active TINYINT(1) DEFAULT 1,
-    prompt_generation_status VARCHAR(50) DEFAULT 'pending',
-    last_generated_at TIMESTAMP NULL,
-    samples_processed INT DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY idx_bank_country (bank_id, country_code),
-    INDEX idx_status (prompt_generation_status),
-    FOREIGN KEY (bank_id) REFERENCES banks(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE TABLE IF NOT EXISTS bank_gliner_prompts (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    bank_id INT NOT NULL,
-    country_code VARCHAR(2) NOT NULL,
-    entity_type VARCHAR(100) NOT NULL,
-    prompt_description TEXT NOT NULL,
-    entity_category VARCHAR(100) NOT NULL,
-    threshold FLOAT DEFAULT 0.3,
-    examples JSON DEFAULT NULL,
-    validation_pattern VARCHAR(500) DEFAULT NULL,
-    is_active TINYINT(1) DEFAULT 1,
-    usage_count INT DEFAULT 0,
-    last_used_at TIMESTAMP NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    created_by VARCHAR(100) DEFAULT 'system',
-    UNIQUE KEY idx_bank_entity (bank_id, country_code, entity_type),
-    INDEX idx_active (is_active),
-    FOREIGN KEY (bank_id) REFERENCES banks(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE TABLE IF NOT EXISTS prompt_generation_history (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    bank_id INT NOT NULL,
-    country_code VARCHAR(2) NOT NULL,
-    generation_status VARCHAR(50) NOT NULL,
-    llm_provider VARCHAR(50) DEFAULT NULL,
-    llm_model VARCHAR(100) DEFAULT NULL,
-    prompt_tokens INT DEFAULT 0,
-    completion_tokens INT DEFAULT 0,
-    total_tokens INT DEFAULT 0,
-    generation_time_ms INT DEFAULT 0,
-    error_message TEXT DEFAULT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_bank_country (bank_id, country_code),
-    INDEX idx_status (generation_status),
-    FOREIGN KEY (bank_id) REFERENCES banks(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
 COMMIT;
 SET FOREIGN_KEY_CHECKS = 1;
 
@@ -248,6 +184,6 @@ SHOW INDEX FROM banks WHERE Key_name = 'idx_search_names';
 -- This migration consolidates the following changes:
 -- 1. Simplified bank schema (3 tables → 1 banks table)
 -- 2. Added comprehensive bank data for multiple countries
--- 3. Removed obsolete validator tables
--- 4. Removed bank_layout_cache table (replaced by Qwen3-VL extraction)
--- 5. Recreated dependent tables for future use
+-- 3. Removed obsolete validator tables (address_extraction_exceptions, currency_name_map, field_labels, etc.)
+-- 4. Removed GLiNER2-related tables (bank_layout_cache, bank_extraction_config, bank_gliner_prompts, prompt_generation_history)
+-- 5. Removed bank_identifiers and bank_country_operations (merged into banks table)

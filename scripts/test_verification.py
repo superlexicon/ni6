@@ -121,12 +121,14 @@ class DocumentTypeDetector:
         """
         Auto-detect document type from filename patterns.
 
-        Priority order: selfie > passport > id_card > bank_statement > tax_statement > tax_residency_certificate > pan_card
+        Priority order: selfie > passport > id_card > bank_statement > tax_residency_certificate > tax_statement > pan_card
+        Note: tax_residency_certificate is checked before tax_statement to avoid false matches on "tax" in TRC filenames.
         """
         filename_lower = filename.lower()
 
         # Check each type in priority order
-        for doc_type in ['selfie', 'passport', 'id_card', 'bank_statement', 'tax_statement', 'tax_residency_certificate', 'pan_card']:
+        # Note: tax_residency_certificate must be before tax_statement to avoid "tax" in TRC files matching generic tax pattern
+        for doc_type in ['selfie', 'passport', 'id_card', 'bank_statement', 'tax_residency_certificate', 'tax_statement', 'pan_card']:
             patterns = cls.DOC_TYPE_PATTERNS.get(doc_type, [])
             if any(pattern in filename_lower for pattern in patterns):
                 return doc_type
@@ -163,6 +165,8 @@ class FilenameHintParser:
         'pan': 'pan_card',
         'dl': 'driving_license',
         'bank': 'bank_statement',
+        'misc': 'misc',  # Generic/unknown document type for testing generic extractor
+        'other': 'misc',  # Also map 'other' to 'misc'
     }
 
     @classmethod
@@ -334,7 +338,6 @@ class PassportTester:
                 client_public_key=user_data["client_public_key"],
                 file_data=file_data,
                 filename=passport_path.name,
-                iv="test_iv_placeholder",
                 callback_url=None,
                 document_type="passport"
             )
@@ -730,11 +733,22 @@ class AutoDocumentTester:
 
             service = GenericDocumentService(user_identity_repo=None)
 
+            # Extract document type, country, and entity from hints
+            document_type = hints.get('document_type') if hints and hints.get('document_type') != 'auto' else None
+            country_code = hints.get('country') if hints and hints.get('country') != 'auto' else None
+            entity = hints.get('entity') if hints and hints.get('entity') != 'auto' else None
+
+            # Require at least document_type
+            if not document_type:
+                raise ValueError("document_type hint is required")
+
             result = await service.process_auto_document(
                 file_data=file_data,
                 client_public_key="",
                 user_identity_id="test",
-                hints=hints if any(v != 'auto' for v in hints.values()) else None
+                document_type=document_type,
+                country_code=country_code,
+                entity=entity,
             )
 
             elapsed = time.time() - start_time
@@ -1112,6 +1126,23 @@ class VerificationOrchestrator:
                         'passed': dcc['passed']
                     }
 
+            # Process other/misc/generic documents using generic extractor
+            other_files = files_by_type.get('other', [])
+            for other_path in other_files:
+                result = await self._process_other_document(other_path, verbose, user_name, passport_name)
+                result.user = user_name
+                user_result.other_results.append(result)
+
+                # Add name cross-check if available
+                if '_name_match' in result.extracted_data:
+                    nm = result.extracted_data['_name_match']
+                    user_result.cross_checks[f'other_name_match_{other_path.name}'] = {
+                        'passport_name': nm.get('passport_name'),
+                        'other_name': nm.get('extracted_name'),
+                        'similarity': nm.get('score', 0),
+                        'passed': nm.get('is_valid', False)
+                    }
+
             results[user_name] = user_result
 
         return results
@@ -1257,7 +1288,10 @@ class VerificationOrchestrator:
                     # Only process if filename has BOTH meaningful document_type AND country
                     # This prevents processing files like "selfie.jpg" which would parse as
                     # document_type='selfie', country='auto'
-                    if hints['document_type'] != 'auto' and hints['country'] != 'auto':
+                    # Exception: misc/other documents can be processed without country hint
+                    doc_type = hints['document_type']
+                    is_generic_doc = doc_type in ['misc', 'other']
+                    if (hints['document_type'] != 'auto' and hints['country'] != 'auto') or is_generic_doc:
                         result = await auto_tester.test_auto_document(
                             file_path=file_path, hints=hints, verbose=verbose
                         )
@@ -1357,12 +1391,19 @@ class VerificationOrchestrator:
             if verbose:
                 print(f"Filename hints: {parsed_hints} -> Passing: {hints_to_pass}")
 
+            # Extract document type, country, and entity from hints
+            document_type = hints_to_pass.get('document_type') or 'id_card'
+            country_code = hints_to_pass.get('country')
+            entity = hints_to_pass.get('entity')
+
             # Process with auto-detection
             result = await service.process_auto_document(
                 file_data=file_data,
                 client_public_key="",  # Not needed for extraction
                 user_identity_id=user_id,  # Use actual user_id for passport name matching
-                hints=hints_to_pass,
+                document_type=document_type,
+                country_code=country_code,
+                entity=entity,
             )
 
             elapsed = (datetime.now() - start_time).total_seconds()
@@ -1548,12 +1589,19 @@ class VerificationOrchestrator:
             if verbose:
                 print(f"Filename hints: {parsed_hints} -> Passing: {hints_to_pass}")
 
+            # Extract document type, country, and entity from hints
+            document_type = hints_to_pass.get('document_type') or 'id_card'
+            country_code = hints_to_pass.get('country')
+            entity = hints_to_pass.get('entity')
+
             # Process with auto-detection
             result = await service.process_auto_document(
                 file_data=file_data,
                 client_public_key="",  # Not needed for extraction
                 user_identity_id=user_id,  # Use actual user_id for passport name matching
-                hints=hints_to_pass,
+                document_type=document_type,
+                country_code=country_code,
+                entity=entity,
             )
 
             elapsed = (datetime.now() - start_time).total_seconds()
@@ -1630,6 +1678,85 @@ class VerificationOrchestrator:
                 error_message=str(e)
             )
 
+    async def _process_other_document(
+        self,
+        other_path: Path,
+        verbose: bool,
+        user_id: str = "test_user",
+        passport_name: str = None
+    ) -> DocumentResult:
+        """Process other/misc/generic document using the Qwen generic extractor."""
+        from app.services.generic_document_service import GenericDocumentService
+
+        try:
+            start_time = time.time()
+
+            # Read and encode file
+            with open(other_path, 'rb') as f:
+                file_bytes = f.read()
+                file_data_b64 = base64.b64encode(file_bytes).decode('utf-8')
+
+            # Prepare file_data in the expected format
+            file_data = {
+                "file_data": file_data_b64,
+                "file_type": other_path.suffix[1:].lower(),  # e.g., "jpg", "png", "pdf"
+            }
+
+            service = GenericDocumentService(user_identity_repo=None)
+
+            # Use 'misc' as document_type for generic extraction
+            result = await service.process_auto_document(
+                file_data=file_data,
+                client_public_key="",
+                user_identity_id=user_id,
+                document_type="misc",
+                country_code=None,
+                entity=None,
+            )
+
+            elapsed = time.time() - start_time
+            extracted_data = result.extracted_data or {}
+
+            if verbose:
+                print(f"\n{'='*60}")
+                print(f"File: {other_path.name}")
+                print(f"Result: {'PASS' if result.result else 'FAIL'}")
+                if result.error:
+                    print(f"Error: {result.error}")
+                print(f"Time: {elapsed:.2f}s")
+
+                if extracted_data:
+                    print("Extracted Fields:")
+                    for key, value in extracted_data.items():
+                        if key != '_detection' and value is not None:
+                            print(f"  {key}: {value}")
+
+            # Get detection info from the _detection metadata
+            detection_info = extracted_data.get("_detection", {})
+            detected_type = detection_info.get("document_type", "other")
+
+            return DocumentResult(
+                user="",
+                filename=other_path.name,
+                document_type=detected_type,
+                success=result.result,
+                confidence=100.0 if result.result else 0.0,
+                extracted_data=extracted_data,
+                elapsed_seconds=elapsed,
+                error_message=result.error
+            )
+
+        except Exception as e:
+            self.logger.error(f"Other document processing failed: {e}")
+            return DocumentResult(
+                user="",
+                filename=other_path.name,
+                document_type='other',
+                success=False,
+                confidence=0.0,
+                error_message=str(e)
+            )
+
 
 # ============================================================
 # RESULT PRINTER
@@ -1699,6 +1826,10 @@ class ResultPrinter:
                         status = "✓ PASSED" if check_data.get('passed') else "✗ FAILED"
                         sim = check_data.get('similarity', 0) or 0
                         print(f"  PAN Name Match: {status} ({sim:.1f}%)")
+                    elif check_name.startswith('other_name_match_'):
+                        status = "✓ PASSED" if check_data.get('passed') else "✗ FAILED"
+                        sim = check_data.get('similarity', 0) or 0
+                        print(f"  Other Doc Name Match: {status} ({sim:.1f}%)")
                     elif check_name.startswith('pan_dob_match_'):
                         status = "✓ PASSED" if check_data.get('passed') else "✗ FAILED"
                         passport_dob = check_data.get('passport_dob', '')

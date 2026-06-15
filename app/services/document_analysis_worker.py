@@ -657,11 +657,15 @@ class DocumentAnalysisWorker:
                 )
 
                 # Process with auto-detection (runs async)
+                # Note: Auto-detection mode requires document_type to be provided
+                # For backward compatibility, we default to 'id_card' when None
                 coro = generic_service.process_auto_document(
                     file_data=file_data,
                     client_public_key=client_public_key,
                     user_identity_id=user_identity_id,
-                    hints=None
+                    document_type='id_card',  # Default for auto-detection
+                    country_code=None,
+                    entity=None
                 )
                 response = loop.run_until_complete(
                     asyncio.wait_for(coro, timeout=self.job_timeout)
@@ -686,18 +690,18 @@ class DocumentAnalysisWorker:
                         user_identity_repo=self.user_identity_repository
                     )
 
-                    # Pass the document type, country, and entity as hints for extraction
-                    hints = {
-                        "document_type": document_type,
-                        "country": file_data.get("country"),
-                        "entity": file_data.get("entity")
-                    }
+                    # Extract document type, country, and entity for direct passing
+                    doc_type = document_type  # Already have this
+                    country = file_data.get("country")
+                    entity = file_data.get("entity")
 
                     coro = generic_service.process_auto_document(
                         file_data=file_data,
                         client_public_key=client_public_key,
                         user_identity_id=user_identity_id,
-                        hints=hints
+                        document_type=doc_type,
+                        country_code=country,
+                        entity=entity
                     )
                     response = loop.run_until_complete(
                         asyncio.wait_for(coro, timeout=self.job_timeout)

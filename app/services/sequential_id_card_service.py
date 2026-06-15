@@ -11,6 +11,9 @@ from typing import Dict, Any, Optional, Tuple, List
 from app.services.sequential_document_processor_base import DocumentProcessorBase
 from app.helper.extractors.gliner_id_card_extractor import GLiNERIDCardExtractor
 from app.core.key_injection import DocumentType
+from app.services.extractors.qwen_uae_trc_extractor import QwenUAETrcExtractor
+from app.services.extractors.qwen_pan_extractor import QwenPANExtractor
+from app.services.extractors.qwen_singapore_nric_extractor import QwenSingaporeNricExtractor
 
 
 class SequentialIDCardService(DocumentProcessorBase):
@@ -62,7 +65,13 @@ class SequentialIDCardService(DocumentProcessorBase):
         self, text_blocks: list, raw_text: str, image_bytes: bytes, is_pdf: bool
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """
-        Extract ID card fields using spatial extractors (PAN) or GLiNER (other types).
+        Extract ID card fields using Qwen3-VL extractors (preferred) or fallback to GLiNER/Spatial extractors.
+
+        Priority:
+        1. UAE TRC -> QwenUAETrcExtractor (with fallback to SpatialUAETRCExtractor)
+        2. PAN -> QwenPANExtractor (with fallback to SpatialPANExtractor)
+        3. Singapore NRIC -> QwenSingaporeNricExtractor (no fallback)
+        4. Other -> GLiNERIDCardExtractor (existing)
 
         Returns:
             (extracted_data, confidence_data)
@@ -72,73 +81,235 @@ class SequentialIDCardService(DocumentProcessorBase):
         temp_extractor = GLiNERIDCardExtractor()
         document_type = temp_extractor._detect_document_type(raw_text, text_blocks)
 
-        # Use spatial PAN extractor for PAN cards
-        if document_type == 'PAN':
-            self.logger.info("Using Spatial PAN Extractor for PAN card")
-            from app.helper.extractors.spatial_pan_extractor import SpatialPANExtractor
-            extractor = SpatialPANExtractor()
-            result = await extractor.extract(image_bytes, is_pdf)
+        # Use Qwen UAE TRC extractor for UAE TRC
+        if document_type == 'UAE_TRC':
+            self.logger.info("Using Qwen3-VL UAE TRC Extractor for UAE Tax Residency Certificate")
+            try:
+                extractor = QwenUAETrcExtractor()
+                qwen_extracted_data, qwen_confidence_data = await extractor.extract_fields(image_bytes)
 
-            extracted_data = {
-                "document_type": "PAN",
-                "issuing_country": "IND",
-                "full_name": result.full_name,
-                "date_of_birth": result.date_of_birth,
-                "identification_number": result.identification_number,
-                "raw_data": result.raw_data,  # Full OCR text for debugging/auditing
-                **result.field_values,
-            }
+                # Convert Qwen format to service format
+                # Qwen returns: {"field": {"value": ..., "confidence": ..., "source": ...}}
+                # Service expects: flat dict + separate confidence dict
 
-            confidence_data = {}
-            for field, confidence in result.confidence_scores.items():
-                conf_value = confidence / 100 if confidence > 1 else confidence
-                confidence_data[field] = {
-                    'overall_confidence': conf_value,
-                    'sources': ['spatial_extraction']
+                extracted_data = {
+                    "document_type": "UAE_TRC",
+                    "issuing_country": "AE",
                 }
 
-            self.logger.info(
-                f"Spatial PAN extraction: document_type={result.document_type}, "
-                f"fields_extracted={len(result.field_values)}, "
-                f"overall_confidence={result.overall_confidence:.2f}%"
-            )
+                confidence_data = {}
 
-            return extracted_data, confidence_data
+                # Flatten the Qwen extracted data
+                for field_name, field_data in qwen_extracted_data.items():
+                    if isinstance(field_data, dict) and "value" in field_data:
+                        value = field_data["value"]
+                        confidence = field_data.get("confidence", 1.0)
+                        source = field_data.get("source", "vision_llm")
 
-        # Use spatial UAE TRC extractor for UAE TRC
-        elif document_type == 'UAE_TRC':
-            self.logger.info("Using Spatial UAE TRC Extractor for UAE Tax Residency Certificate")
-            from app.helper.extractors.spatial_uae_trc_extractor import SpatialUAETRCExtractor
-            extractor = SpatialUAETRCExtractor()
-            result = await extractor.extract(image_bytes, is_pdf)
+                        # Add to extracted_data
+                        if field_name == "certificate_number":
+                            extracted_data["identification_number"] = value
+                            confidence_data["identification_number"] = {
+                                'overall_confidence': confidence,
+                                'sources': [source]
+                            }
+                        else:
+                            extracted_data[field_name] = value
+                            confidence_data[field_name] = {
+                                'overall_confidence': confidence,
+                                'sources': [source]
+                            }
 
-            extracted_data = {
-                "document_type": "UAE_TRC",
-                "issuing_country": "AE",
-                "full_name": result.full_name,
-                "identification_number": result.identification_number,
-                "raw_data": result.raw_data,  # Full OCR text for debugging/auditing
-                **result.field_values,
-            }
+                self.logger.info(
+                    f"Qwen3-VL UAE TRC extraction completed: {len(extracted_data)} fields extracted"
+                )
 
-            confidence_data = {}
-            for field, confidence in result.confidence_scores.items():
-                conf_value = confidence / 100 if confidence > 1 else confidence
-                confidence_data[field] = {
-                    'overall_confidence': conf_value,
-                    'sources': ['spatial_extraction']
+                return extracted_data, confidence_data
+
+            except Exception as e:
+                self.logger.warning(f"Qwen3-VL UAE TRC extraction failed: {e}. Falling back to SpatialUAETRCExtractor")
+                # Fallback to original spatial extractor
+                from app.helper.extractors.spatial_uae_trc_extractor import SpatialUAETRCExtractor
+                extractor = SpatialUAETRCExtractor()
+                result = await extractor.extract(image_bytes, is_pdf)
+
+                extracted_data = {
+                    "document_type": "UAE_TRC",
+                    "issuing_country": "AE",
+                    "full_name": result.full_name,
+                    "identification_number": result.identification_number,
+                    "raw_data": result.raw_data,
+                    **result.field_values,
                 }
 
-            self.logger.info(
-                f"Spatial UAE TRC extraction: document_type={result.document_type}, "
-                f"fields_extracted={len(result.field_values)}, "
-                f"overall_confidence={result.overall_confidence:.2f}%"
-            )
+                confidence_data = {}
+                for field, confidence in result.confidence_scores.items():
+                    conf_value = confidence / 100 if confidence > 1 else confidence
+                    confidence_data[field] = {
+                        'overall_confidence': conf_value,
+                        'sources': ['spatial_extraction']
+                    }
 
-            return extracted_data, confidence_data
+                self.logger.info(
+                    f"Fallback Spatial UAE TRC extraction: document_type={result.document_type}, "
+                    f"fields_extracted={len(result.field_values)}"
+                )
+
+                return extracted_data, confidence_data
+
+        # Use Qwen PAN extractor for PAN cards
+        elif document_type == 'PAN':
+            self.logger.info("Using Qwen3-VL PAN Extractor for PAN card")
+            try:
+                extractor = QwenPANExtractor()
+                qwen_extracted_data, qwen_confidence_data = await extractor.extract_fields(image_bytes)
+
+                # Convert Qwen format to service format
+                extracted_data = {}
+
+                confidence_data = {}
+
+                # Flatten the Qwen extracted data
+                for field_name, field_data in qwen_extracted_data.items():
+                    if isinstance(field_data, dict) and "value" in field_data:
+                        value = field_data["value"]
+                        confidence = field_data.get("confidence", 1.0)
+                        source = field_data.get("source", "vision_llm")
+
+                        # Add to extracted_data
+                        if field_name == "pan_number":
+                            extracted_data["identification_number"] = value
+                            confidence_data["identification_number"] = {
+                                'overall_confidence': confidence,
+                                'sources': [source]
+                            }
+                        else:
+                            extracted_data[field_name] = value
+                            confidence_data[field_name] = {
+                                'overall_confidence': confidence,
+                                'sources': [source]
+                            }
+
+                self.logger.info(
+                    f"Qwen3-VL PAN extraction completed: {len(extracted_data)} fields extracted"
+                )
+
+                return extracted_data, confidence_data
+
+            except Exception as e:
+                self.logger.warning(f"Qwen3-VL PAN extraction failed: {e}. Falling back to SpatialPANExtractor")
+                # Fallback to original spatial extractor
+                from app.helper.extractors.spatial_pan_extractor import SpatialPANExtractor
+                extractor = SpatialPANExtractor()
+                result = await extractor.extract(image_bytes, is_pdf)
+
+                extracted_data = {
+                    "full_name": result.full_name,
+                    "date_of_birth": result.date_of_birth,
+                    "identification_number": result.identification_number,
+                    "raw_data": result.raw_data,
+                    **result.field_values,
+                }
+
+                confidence_data = {}
+                for field, confidence in result.confidence_scores.items():
+                    conf_value = confidence / 100 if confidence > 1 else confidence
+                    confidence_data[field] = {
+                        'overall_confidence': conf_value,
+                        'sources': ['spatial_extraction']
+                    }
+
+                self.logger.info(
+                    f"Fallback Spatial PAN extraction: document_type={result.document_type}, "
+                    f"fields_extracted={len(result.field_values)}"
+                )
+
+                return extracted_data, confidence_data
+
+        # Use Qwen Singapore NRIC extractor for Singapore NRIC/FIN
+        elif document_type == 'SINGAPORE_NRIC':
+            self.logger.info("Using Qwen3-VL Singapore NRIC Extractor for Singapore NRIC/FIN")
+            try:
+                extractor = QwenSingaporeNricExtractor()
+                qwen_extracted_data, qwen_confidence_data = await extractor.extract_fields(image_bytes)
+
+                # Convert Qwen format to service format
+                extracted_data = {
+                    "document_type": "SINGAPORE_NRIC",
+                    "issuing_country": "SG",
+                }
+
+                confidence_data = {}
+
+                # Flatten the Qwen extracted data
+                for field_name, field_data in qwen_extracted_data.items():
+                    if isinstance(field_data, dict) and "value" in field_data:
+                        value = field_data["value"]
+                        confidence = field_data.get("confidence", 1.0)
+                        source = field_data.get("source", "vision_llm")
+
+                        # Add to extracted_data
+                        if field_name == "nric_fin_number":
+                            extracted_data["identification_number"] = value
+                            confidence_data["identification_number"] = {
+                                'overall_confidence': confidence,
+                                'sources': [source]
+                            }
+                        elif field_name == "sex":
+                            extracted_data["gender"] = value
+                            confidence_data["gender"] = {
+                                'overall_confidence': confidence,
+                                'sources': [source]
+                            }
+                        else:
+                            extracted_data[field_name] = value
+                            confidence_data[field_name] = {
+                                'overall_confidence': confidence,
+                                'sources': [source]
+                            }
+
+                self.logger.info(
+                    f"Qwen3-VL Singapore NRIC extraction completed: {len(extracted_data)} fields extracted"
+                )
+
+                return extracted_data, confidence_data
+
+            except Exception as e:
+                self.logger.warning(f"Qwen3-VL Singapore NRIC extraction failed: {e}. Falling back to GLiNERIDCardExtractor")
+                # Fallback to GLiNER extractor for Singapore NRIC
+                self.logger.info("Using GLiNER extractor for Singapore NRIC (fallback)")
+                extractor = GLiNERIDCardExtractor()
+                result = await extractor.extract(image_bytes, is_pdf)
+
+                # Build extracted_data from IDCardData
+                extracted_data = {
+                    "document_type": "SINGAPORE_NRIC",
+                    "issuing_country": "SG",
+                    "full_name": result.full_name,
+                    "date_of_birth": result.date_of_birth,
+                    "gender": result.gender,
+                    "identification_number": result.identification_number,
+                    "raw_data": result.raw_data,
+                    **result.field_values,
+                }
+
+                confidence_data = {}
+                for field, confidence in result.confidence_scores.items():
+                    conf_value = confidence / 100 if confidence > 1 else confidence
+                    confidence_data[field] = {
+                        'overall_confidence': conf_value,
+                        'sources': ['gliner_ner']
+                    }
+
+                self.logger.info(
+                    f"Fallback GLiNER Singapore NRIC extraction: document_type={result.document_type}, "
+                    f"fields_extracted={len(result.field_values)}"
+                )
+
+                return extracted_data, confidence_data
 
         # Use GLiNER for other ID card types (existing code)
-        self.logger.info("Using GLiNER extractor for non-PAN/non-UAE_TRC ID card")
+        self.logger.info("Using GLiNER extractor for non-Qwen-supported ID card")
         extractor = GLiNERIDCardExtractor()
         result = await extractor.extract(image_bytes, is_pdf)
 
@@ -216,6 +387,26 @@ class SequentialIDCardService(DocumentProcessorBase):
                     additional_checks['pan_format_valid'] = False
                     return False, f"PAN number format invalid: {pan_number}", additional_checks
                 additional_checks['pan_format_valid'] = True
+
+        # UAE TRC-specific validation (if detected)
+        if document_type and document_type.upper() == 'UAE_TRC':
+            # No strict format validation for certificate numbers
+            # Accept any certificate number format
+            cert_number = extracted_data.get('certificate_number') or extracted_data.get('identification_number')
+            if cert_number:
+                additional_checks['certificate_format_valid'] = True
+                additional_checks['certificate_number'] = cert_number
+
+        # Singapore NRIC-specific validation (if detected)
+        if document_type and document_type.upper() == 'SINGAPORE_NRIC':
+            nric_number = extracted_data.get('nric_fin_number') or extracted_data.get('identification_number')
+            if nric_number:
+                import re
+                nric_pattern = re.compile(r'^[STFG]\d{7}[A-Z]$', re.IGNORECASE)
+                if not nric_pattern.match(nric_number):
+                    additional_checks['nric_format_valid'] = False
+                    return False, f"Singapore NRIC/FIN number format invalid: {nric_number}", additional_checks
+                additional_checks['nric_format_valid'] = True
 
         # ID cards are generally valid if we got this far
         return True, None, additional_checks

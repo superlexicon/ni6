@@ -40,7 +40,8 @@ class IDCardData(BaseModel):
 
     # Generic key-value pairs for ALL extracted fields
     # This allows storing any field regardless of ID card type
-    field_values: Dict[str, str] = {}
+    # Values are Optional[str] to handle missing/null fields from extraction
+    field_values: Dict[str, Optional[str]] = {}
 
     # Confidence scores per field - can be:
     # - Dict[str, float] (legacy format, 0-100)

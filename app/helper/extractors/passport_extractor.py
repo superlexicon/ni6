@@ -5,7 +5,6 @@ from typing import Optional, List, Dict, Any, Tuple
 
 from app.schemas.passport_schema import PassportData
 from app.helper.doctr.document_text_extractor import DocumentTextExtractor
-from app.helper.extractors.country_field_labels import get_country_field_labels, CountryFieldLabels
 from app.core import logger, doctr_model
 from app.utils.country_code_converter import validate_iso_country_code
 from app.utils.date_extractor import extract_and_remove_dates
@@ -35,7 +34,6 @@ class PassportExtractor:
     def __init__(self):
         self.logger = logger
         self.text_extractor = DocumentTextExtractor()
-        self.field_labels = get_country_field_labels()
 
     async def extract(self, content: bytes, is_pdf: bool = False) -> PassportData:
         """
@@ -334,11 +332,7 @@ class PassportExtractor:
         if 'nationality' in text_lower:
             return False
 
-        # Use country-specific labels if available
-        if country_code:
-            return self.field_labels.is_name_label(country_code, text)
-
-        # Fallback: check for "name" substring (original behavior)
+        # Check for "name" substring (fallback behavior)
         return 'name' in text_lower
 
     def _is_date_text(self, text: str) -> Optional[datetime]:
@@ -474,25 +468,7 @@ class PassportExtractor:
                 matched = True
                 self.logger.info(f"  ✓ Alternative ID: {text_upper}")
 
-            # 5. Name labels - collect for post-pass matching (using country-specific labels)
-            # For countries with separate surname and given names labels (e.g., India)
-            elif found.get('country_code') and self.field_labels.has_separate_surname_given_names(found.get('country_code')):
-                if self.field_labels.is_surname_label(found.get('country_code'), text):
-                    surname_labels.append((x, y, text))
-                    processed_texts.add(text)
-                    matched = True
-                    self.logger.info(f"  ✓ Surname label at (x1={x:.3f}, y1={y:.3f}): {text}")
-                elif self.field_labels.is_given_names_label(found.get('country_code'), text):
-                    given_names_labels.append((x, y, text))
-                    processed_texts.add(text)
-                    matched = True
-                    self.logger.info(f"  ✓ Given Names label at (x1={x:.3f}, y1={y:.3f}): {text}")
-                elif self._is_name_label(text, found.get('country_code')):
-                    # Other name labels (fallback)
-                    name_labels.append((x, y, text))
-                    processed_texts.add(text)
-                    matched = True
-                    self.logger.info(f"  ✓ Name label at (x1={x:.3f}, y1={y:.3f}): {text}")
+            # 5. Name labels - collect for post-pass matching (simplified, Qwen handles complex cases)
             elif self._is_name_label(text, found.get('country_code')):
                 y1 = y  # Use top of label box for comparison
                 name_labels.append((x, y1, text))
@@ -604,9 +580,9 @@ class PassportExtractor:
             found['date_of_expiry'] = self._format_date(dates[1][0])
             self.logger.info(f"  Expiry (latest): {found['date_of_expiry']}")
 
-        # POST-PASS: Name extraction for countries with separate surname and given names (e.g., India)
+        # POST-PASS: Name extraction (simplified, Qwen handles complex cases)
         country_code = found.get('country_code')
-        if country_code and self.field_labels.has_separate_surname_given_names(country_code) and (surname_labels or given_names_labels):
+        if country_code and (surname_labels or given_names_labels):
             self.logger.info("-" * 40)
             self.logger.info(f"{country_code} PASSPORT: Matching surname and given names separately...")
 
@@ -659,12 +635,6 @@ class PassportExtractor:
                         candidates.remove(closest)
                         self.logger.info(f"  Given Names '{label_text}' → '{given_names}'")
                         break
-
-            # Validate both surname and given_names are present if required
-            if self.field_labels.require_both_name_parts(country_code):
-                if not surname or not given_names:
-                    self.logger.warning(f"  {country_code} passport REJECTED: missing {'surname' if not surname else 'given names'}")
-                    return {}  # Reject - return empty extraction
 
             # Concatenate given_names + surname for full_name
             if given_names and surname:

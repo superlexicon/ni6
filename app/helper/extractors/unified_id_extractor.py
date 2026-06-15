@@ -22,7 +22,6 @@ from rapidfuzz import fuzz, process
 
 from app.core import logger
 from app.helper.doctr.document_text_extractor import DocumentTextExtractor
-from app.helper.extractors.country_field_labels import get_country_field_labels, CountryFieldLabels
 from app.helper.extractors.pattern_definitions import (
     COUNTRY_PATTERNS,
     FIELD_PATTERNS,
@@ -80,7 +79,6 @@ class UnifiedIDExtractor:
     def __init__(self):
         self.logger = logger
         self.text_extractor = DocumentTextExtractor()
-        self.field_labels = get_country_field_labels()
 
     # ========================================================================
     # VALIDATION FUNCTIONS (from PassportExtractor)
@@ -137,11 +135,7 @@ class UnifiedIDExtractor:
         if 'nationality' in text_lower:
             return False
 
-        # Use country-specific labels if available
-        if country_code:
-            return self.field_labels.is_name_label(country_code, text)
-
-        # Fallback: check for name-related keywords (original behavior)
+        # Check for name-related keywords
         # Direct matches for "name"
         if 'name' in text_lower:
             return True
@@ -262,39 +256,12 @@ class UnifiedIDExtractor:
             document_type = detect_document_type_from_patterns(all_text, country_code)
             self.logger.info(f"  Detected document type: {document_type}")
 
-            # Step 4: Skip GLiNER2 for passports - use reliable logic-based extraction
-            # GLiNER2 schema-based extraction is unreliable for structured passport documents.
-            # It returns garbage results (e.g., "KILARI CHANDRA ROHITH PreCTErTT") even when
-            # DocTR OCR correctly extracts clean data. Passports have highly structured
-            # formats with known field positions - spatial/logic-based extraction is far more reliable.
-            if False:  # GLiNER2 disabled for passports
-                self.logger.info("Step 4: Trying GLINER2 extraction for passport")
-                try:
-                    from app.helper.extractors import get_gliner_passport_extractor
+            # Step 4: GLiNER2 extraction removed - using reliable logic-based extraction only
+            # GLiNER2 schema-based extraction was unreliable for structured passport documents.
+            # Qwen3-VL direct extraction is now the preferred method for new implementations.
+            # This file uses logic-based extraction for legacy support.
 
-                    gliner_extractor = get_gliner_passport_extractor()
-                    result = await gliner_extractor.extract(content, is_pdf=is_pdf)
-
-                    # Log what GLINER2 extracted
-                    self.logger.info(
-                        f"GLINER2 extracted: confidence={result.overall_confidence:.1f}%, "
-                        f"source={result.extraction_source}"
-                    )
-
-                    # Check if GLINER2 result is good enough
-                    if result.overall_confidence and result.overall_confidence >= 50:
-                        if self._has_required_fields(result):
-                            self.logger.info("GLINER2 result accepted - using GLINER2 extraction")
-                            return result
-
-                    # Fallback to logic-based
-                    self.logger.info(
-                        f"GLINER2 fallback triggered: confidence={result.overall_confidence or 0:.1f}%"
-                    )
-                except Exception as e:
-                    self.logger.error(f"GLINER2 extraction error: {str(e)}, falling back to logic-based")
-
-            # Step 5: Logic-based extraction (now primary for passports)
+            # Step 5: Logic-based extraction (primary for passports)
             self.logger.info(f"Using logic-based extraction for {document_type}")
             return await self._extract_with_logic_based(content, is_pdf, text_blocks, all_text, country_code, document_type)
 
@@ -350,6 +317,16 @@ class UnifiedIDExtractor:
         self.logger.info(f"  Extracted {len(extracted_fields)} fields: {list(extracted_fields.keys())}")
         self.logger.info("=" * 80)
 
+        # CRITICAL FIX: Prioritize field-based extraction over global detection
+        # Field-based extraction (from MRZ) is more accurate than global text detection
+        # which can be influenced by visas, stamps, and other text on the passport
+        final_country_code = extracted_fields.get('country_code') or country_code
+        if extracted_fields.get('country_code') and extracted_fields['country_code'] != country_code:
+            self.logger.info(
+                f"  COUNTRY CODE OVERRIDE: Using field-based extraction "
+                f"'{extracted_fields['country_code']}' instead of global detection '{country_code}'"
+            )
+
         # Remove country_code from extracted_fields if it exists to avoid duplicate argument
         extracted_fields_copy = extracted_fields.copy()
         if 'country_code' in extracted_fields_copy:
@@ -357,7 +334,7 @@ class UnifiedIDExtractor:
 
         return DocumentExtractionResult(
             document_type=document_type,
-            country_code=country_code,
+            country_code=final_country_code,
             confidence=confidence,
             text_blocks=text_blocks,
             raw_data=all_text,

@@ -431,7 +431,7 @@ class ExtractionResult(BaseModel):
         detection_result: Document detection result (type, country, entity)
     """
 
-    schema_used: DocumentTypeSchema
+    schema_used: Optional[DocumentTypeSchema] = None
     extracted_data: Dict[str, Any] = Field(default_factory=dict)
     # Confidence scores - supports both float (0-1) and dict with 'overall_confidence' and 'sources'
     confidence_scores: Dict[str, Union[float, Dict[str, Any]]] = Field(default_factory=dict)

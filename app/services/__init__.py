@@ -11,7 +11,8 @@ from .key_service import KeyService
 from .otp_service import OTPService
 from .pdf_analysis_service import PDFAnalysisService
 from .ela_service import ELAService
-from .common_document_verification_service import CommonDocumentVerificationService
+# Legacy: CommonDocumentVerificationService requires document_type_detector which was removed
+# from .common_document_verification_service import CommonDocumentVerificationService
 from .verification_state_service import VerificationStateService
 from .database_encryption_service import get_encryption_service, DatabaseEncryptionService
 from .ecies_encryption_service import get_ecies_encryption_service, ECIESEncryptionService
@@ -35,7 +36,6 @@ from app.helper import (key_helper,
                         verification_helper,
                         prepare_verification_data,
                         exif_validator,
-                        document_type_detector,
                         )
 
 # Initialize services
@@ -81,11 +81,13 @@ forgery_service = ForgeryService(
 pdf_analysis_service = PDFAnalysisService()
 ela_service = ELAService()
 
-common_verification_service = CommonDocumentVerificationService(
-    ela_service=ela_service,
-    exif_validator=exif_validator,
-    document_type_detector=document_type_detector
-)
+# Note: CommonDocumentVerificationService requires document_type_detector which was removed
+# This service is legacy and should not be used
+# common_verification_service = CommonDocumentVerificationService(
+#     ela_service=ela_service,
+#     exif_validator=exif_validator,
+#     document_type_detector=document_type_detector
+# )
 
 # Initialize BERT NER Resume Extractor
 bert_ner_resume_extractor = BertNerResumeExtractor()

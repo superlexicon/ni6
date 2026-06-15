@@ -30,7 +30,7 @@ class CountryFieldLabels:
     DEFAULT_LABELS: Dict[str, List[str]] = {
         "passport_number": ["passport no", "passport number", "passport#", "no passport", "passport no."],
         "id_number": ["id number", "identity card", "national id", "id no", "nric", "id card no"],
-        "full_name": ["name", "full name", "given names", "surname", "surame", "last name", "first name"],
+        "full_name": ["name", "full name", "given names", "surname", "surame", "sumame", "last name", "first name", "given name", "given names"],
         "date_of_birth": ["date of birth", "dob", "birth date", "born", "birthday"],
         "date_of_expiry": ["date of expiry", "expiry date", "valid until", "expiration", "exp date", "valid thru"],
         "date_of_issue": ["date of issue", "issue date", "issued on", "iss date"],

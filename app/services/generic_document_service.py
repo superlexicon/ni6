@@ -2,14 +2,15 @@
 Generic Document Service for processing documents with auto-detection.
 
 This service handles the 'auto' document type by:
-1. Detecting document type, country, and entity (three-tier detection)
-2. Selecting the appropriate schema with fallback
-3. Extracting fields using GLiNER2 zero-shot NER
-4. Validating name matching against passport (if available)
-5. Returning results in the standard SequentialJobResponse format
+1. Routing to the appropriate Qwen extractor based on document type and country
+2. Extracting fields using Qwen3-VL (NRIC, PAN, UAE TRC, Generic)
+3. Validating name matching against passport (if available)
+4. Returning results in the standard SequentialJobResponse format
 
-The service integrates with the existing document processing pipeline
-but uses the new generic schema system for flexibility.
+The service does NOT handle:
+- passport (handled by SequentialPassportService)
+- bank_statement (handled by SequentialBankStatementService)
+- selfie (handled by separate logic)
 """
 
 import asyncio
@@ -17,20 +18,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
 
 from app.core import get_logger
-from app.core.gliner_ner_model import GLiNERNERModel
 from app.dto import DocumentErrorCode
-from app.schemas.generic import (
-    SchemaRegistry,
-    DocumentDetectionResult,
-    ExtractionResult,
-)
-from app.helper.doctr.document_text_extractor import DocumentTextExtractor
-from app.helper.extractors.generic import (
-    DocumentTypeDetector,
-    SchemaSelector,
-    detect_document_type,
-    select_schema,
-)
 from app.dto.verification_session import SequentialJobResponse
 from app.schemas.bank_statement_schema import BankStatementData
 from app.schemas.id_card_schema import IDCardData
@@ -38,6 +26,10 @@ from app.schemas.tax_statement_schema import TaxStatementData
 from app.schemas.passport_schema import PassportData
 from app.utils.string_matching import fuzzy_match_names, get_match_details
 from app.config.verification_config import verification_settings
+from app.services.extractors.qwen_pan_extractor import QwenPANExtractor
+from app.services.extractors.qwen_singapore_nric_extractor import QwenSingaporeNricExtractor
+from app.services.extractors.qwen_uae_trc_extractor import QwenUAETrcExtractor
+from app.services.extractors.qwen_generic_document_extractor import QwenGenericDocumentExtractor
 
 
 logger = get_logger()
@@ -68,24 +60,20 @@ class GenericDocumentService:
     Service for processing documents with auto-detection.
 
     This service is triggered when document_type="auto" and:
-    1. Detects the document type (tax_return, id_card, driving_license, etc.)
-    2. Detects the country (SG, IN, US, etc.)
-    3. Detects the entity (DBS, SBI, IRAS, etc.)
-    4. Selects the appropriate schema
-    5. Extracts fields using GLiNER2
-    6. Returns results in standard format
+    1. Routes to the appropriate Qwen extractor based on document type and country
+    2. Extracts fields using Qwen3-VL (NRIC, PAN, UAE TRC, Generic)
+    3. Validates name matching against passport (if available)
+    4. Returns results in standard format
 
-    The service does NOT handle:
-    - passport (handled by SequentialPassportService)
-    - bank_statement (handled by SequentialBankStatementService)
-    - selfie (handled by separate logic)
+    Supported document types:
+    - Singapore NRIC (id_card + SG)
+    - Indian PAN (id_card + IN)
+    - UAE TRC (id_card + AE)
+    - Generic documents (misc, other, unknown)
     """
 
     def __init__(
         self,
-        gliner_model: Optional[GLiNERNERModel] = None,
-        detector: Optional[DocumentTypeDetector] = None,
-        selector: Optional[SchemaSelector] = None,
         user_identity_repo=None,
         photoholmes_service=None,
     ):
@@ -93,17 +81,10 @@ class GenericDocumentService:
         Initialize the generic document service.
 
         Args:
-            gliner_model: Optional GLiNER model (singleton if None)
-            detector: Optional document type detector (created if None)
-            selector: Optional schema selector (created if None)
             user_identity_repo: Repository for fetching user identity (passport name)
             photoholmes_service: Optional PhotoHolmes service for forgery detection
         """
         self.logger = get_logger()
-        self.gliner_model = gliner_model or GLiNERNERModel()
-        self.detector = detector or DocumentTypeDetector(gliner_model=self.gliner_model)
-        self.selector = selector or SchemaSelector()
-        self.text_extractor = DocumentTextExtractor()
         self.user_identity_repo = user_identity_repo
         self.photoholmes_service = photoholmes_service  # Optional forgery detection
 
@@ -112,10 +93,12 @@ class GenericDocumentService:
         file_data: Dict[str, Any],
         client_public_key: str,
         user_identity_id: str,
-        hints: Optional[Dict[str, str]] = None,
+        document_type: str,
+        country_code: Optional[str] = None,
+        entity: Optional[str] = None,
     ) -> SequentialJobResponse:
         """
-        Process a document with auto-detection.
+        Process a document with the specified document type and country.
 
         Args:
             file_data: Dictionary containing file information
@@ -123,95 +106,82 @@ class GenericDocumentService:
                 - file_type: File type (pdf, jpg, png, etc.)
             client_public_key: Client's public key for encryption
             user_identity_id: User identity identifier
-            hints: Optional hints to guide detection
-                - document_type: Hint for document type
-                - country: Hint for country code (ISO 2-letter)
-                - entity: Hint for entity identifier
+            document_type: Document type (e.g., 'id_card', 'nric', 'pan', 'uae_trc', 'misc')
+            country_code: Optional ISO 3166-1 alpha-2 country code (e.g., 'SG', 'IN', 'AE')
+            entity: Optional entity identifier (e.g., bank name)
 
         Returns:
             SequentialJobResponse with extraction results
         """
         self.logger.info(
             f"Processing auto document for user {user_identity_id} "
-            f"with hints: {hints}"
+            f"with document_type={document_type}, country_code={country_code}, entity={entity}"
         )
 
         start_time = datetime.now()
 
         try:
-            # Extract hints
-            hint_document_type = hints.get("document_type") if hints else None
-            hint_country = hints.get("country") if hints else None
-            hint_entity = hints.get("entity") if hints else None
+            # Step 1: Decode file bytes and normalize document type
+            import base64
 
-            # Step 1: Perform OCR
-            ocr_text, text_blocks = await self._perform_ocr(file_data)
+            file_content = file_data.get("file_data", "")
+            if not file_content:
+                raise ValueError("No file_data provided")
 
-            if not ocr_text or len(ocr_text.strip()) < 10:
-                self.logger.warning("OCR extracted too little text, may be image-only document")
-                return self._create_error_response(
-                    error_code=DocumentErrorCode.OCR_FAILED,
-                    error_message="Unable to extract text from document",
-                    user_identity_id=user_identity_id,
-                )
+            file_bytes = base64.b64decode(file_content)
 
-            self.logger.info(f"OCR extracted {len(ocr_text)} characters of text")
+            # Step 2: Normalize document type and country
+            normalized_doc_type = self._normalize_document_type(document_type)
 
-            # Step 2: Detect document type, country, entity
-            detection_result = await self.detector.detect(
-                text=ocr_text,
-                hint_document_type=hint_document_type,
-                hint_country=hint_country,
-                hint_entity=hint_entity,
+            # Infer country from document type if not provided
+            if not country_code:
+                country_code = self._infer_country_from_document_type(document_type)
+                self.logger.info(f"Inferred country code '{country_code}' from document type '{document_type}'")
+
+            # Infer entity from document type if not provided
+            if not entity:
+                entity = self._infer_entity_from_document_type(document_type)
+                if entity:
+                    self.logger.info(f"Inferred entity '{entity}' from document type '{document_type}'")
+
+            normalized_country = self._normalize_country_code(country_code, document_type) if country_code else None
+
+            # Create DocumentDetectionResult from passed parameters
+            from app.schemas.generic import DocumentDetectionResult
+            detection_result = DocumentDetectionResult(
+                document_type=normalized_doc_type,
+                document_type_name=document_type,
+                country_code=normalized_country,
+                country_name=country_code,
+                entity=entity,
+                entity_name=entity,
+                confidence=1.0,  # High confidence since it's provided by caller
+                type_confidence=1.0,
+                country_confidence=1.0 if country_code else 0.0,
+                entity_confidence=1.0 if entity else 0.0,
+                detected_keywords=[],
+                detected_patterns=[],
+                detection_method="direct",
             )
 
             self.logger.info(
-                f"Detection result: type={detection_result.document_type}, "
-                f"country={detection_result.country_code}, "
-                f"entity={detection_result.entity}, "
-                f"confidence={detection_result.confidence:.2f}"
+                f"Using document type: {detection_result.document_type}, "
+                f"country: {detection_result.country_code}"
             )
 
-            # Step 3: Select schema
-            schema_selection = self.selector.select(
-                detection_result=detection_result,
-                confidence_threshold=0.4,
-            )
+            # Step 3: Route to appropriate Qwen extractor
+            extraction_result = await self._route_to_extractor(file_bytes, detection_result)
 
-            if not schema_selection.selected_schema:
-                self.logger.warning("No schema found for detection result")
+            if not extraction_result or not extraction_result.extracted_data:
+                self.logger.warning("Extraction returned no data")
                 return self._create_error_response(
-                    error_code=DocumentErrorCode.NO_SCHEMA,
-                    error_message=f"No schema found for document type: {detection_result.document_type}",
+                    error_code=DocumentErrorCode.PROCESSING_ERROR,
+                    error_message="No data could be extracted from the document",
                     user_identity_id=user_identity_id,
                     detection_result=detection_result,
                 )
 
-            selected_schema = schema_selection.selected_schema
-            self.logger.info(
-                f"Selected schema: {selected_schema.schema_id} "
-                f"(method={schema_selection.selection_method})"
-            )
-
-            # Step 4: Extract fields using GLiNER2
-            extraction_result = await self._extract_fields(
-                ocr_text=ocr_text,
-                text_blocks=text_blocks,
-                schema=selected_schema,
-            )
-
-            # Step 4a: Validate extraction results
-            validation_result = self._validate_extraction_result(
-                extraction_result=extraction_result,
-                selected_schema=selected_schema,
-                detection_result=detection_result,
-                user_identity_id=user_identity_id,
-            )
-            if validation_result:
-                # Validation failed - return error response
-                return validation_result
-
-            # Step 4b: Run PhotoHolmes forgery detection
+            # Step 4: Run PhotoHolmes forgery detection
             forgery_checks = None
             if self.photoholmes_service:
                 forgery_checks = await self._run_forgery_detection(
@@ -219,7 +189,7 @@ class GenericDocumentService:
                     detection_result=detection_result,
                 )
 
-                # Step 4c: Validate forgery results
+                # Step 5: Validate forgery results
                 forgery_validation = self._validate_forgery_result(
                     forgery_checks=forgery_checks,
                     detection_result=detection_result,
@@ -229,20 +199,19 @@ class GenericDocumentService:
                     # Forgery detected - return error response
                     return forgery_validation
 
-            # Step 5: Validate name matching against passport
+            # Step 6: Validate name matching against passport
             name_match_result = await self._validate_name_matching(
                 extracted_data=extraction_result.extracted_data,
                 document_type=detection_result.document_type,
                 user_identity_id=user_identity_id,
             )
 
-            # Step 6: Build response
+            # Step 7: Build response
             processing_time = (datetime.now() - start_time).total_seconds()
 
             response = self._create_success_response(
                 detection_result=detection_result,
                 extraction_result=extraction_result,
-                selected_schema=selected_schema,
                 user_identity_id=user_identity_id,
                 processing_time=processing_time,
                 name_match_result=name_match_result,
@@ -266,139 +235,120 @@ class GenericDocumentService:
                 user_identity_id=user_identity_id,
             )
 
-    async def _perform_ocr(
+    async def _route_to_extractor(
         self,
-        file_data: Dict[str, Any]
-    ) -> Tuple[str, List[Dict[str, Any]]]:
+        file_bytes: bytes,
+        detection_result,
+    ) -> Any:
         """
-        Perform OCR on the document.
-
-        Returns:
-            Tuple of (raw_text, text_blocks)
-        """
-        import base64
-
-        # Decode file data
-        file_content = file_data.get("file_data", "")
-        if not file_content:
-            raise ValueError("No file_data provided")
-
-        # Decode base64
-        file_bytes = base64.b64decode(file_content)
-
-        # Determine if PDF
-        file_type = file_data.get("file_type", "").lower()
-        is_pdf = file_type == "pdf"
-
-        # Extract text with geometry using DocumentTextExtractor
-        text_blocks = await self.text_extractor.extract_text_with_geometry(file_bytes, is_pdf=is_pdf)
-
-        # Also get raw text for GLiNER processing
-        ocr_text = await self.text_extractor.extract_text(file_bytes, is_pdf=is_pdf)
-
-        return ocr_text, text_blocks or []
-
-    async def _extract_fields(
-        self,
-        ocr_text: str,
-        text_blocks: List[Dict[str, Any]],
-        schema: Any,
-    ) -> ExtractionResult:
-        """
-        Extract fields using GLiNER2 schema-based extraction.
+        Route to the appropriate Qwen extractor based on document type and country.
 
         Args:
-            ocr_text: Raw OCR text
-            text_blocks: Text blocks with spatial information
-            schema: DocumentTypeSchema to use for extraction
+            file_bytes: Image bytes
+            detection_result: Document detection result
 
         Returns:
-            ExtractionResult with extracted data and confidence scores
+            ExtractionResult with extracted data
         """
+        from app.schemas.generic import ExtractionResult
+
+        doc_type = detection_result.document_type
+        country_code = detection_result.country_code
+
+        self.logger.info(f"Routing document: type={doc_type}, country={country_code}")
+
+        # Handle generic/unknown document types
+        generic_doc_types = ["other", "misc", "unknown", "generic", "document"]
+        if doc_type in generic_doc_types:
+            self.logger.info(f"Using Qwen3-VL generic extractor for document type '{doc_type}'")
+            return await self._extract_with_qwen_generic(file_bytes)
+
+        # Singapore NRIC/FIN: id_card + SG country
+        if doc_type == "id_card" and country_code == "SG":
+            self.logger.info("Using Qwen3-VL for Singapore NRIC/FIN extraction")
+            return await self._extract_with_qwen_nric(file_bytes)
+
+        # PAN Card: id_card + IN country
+        if doc_type == "id_card" and country_code == "IN":
+            self.logger.info("Using Qwen3-VL for PAN Card extraction")
+            return await self._extract_with_qwen_pan(file_bytes)
+
+        # UAE TRC: id_card + AE country (UAE)
+        if doc_type == "id_card" and country_code == "AE":
+            self.logger.info("Using Qwen3-VL for UAE TRC extraction")
+            return await self._extract_with_qwen_uae_trc(file_bytes)
+
+        # For unsupported document types, use generic extractor
+        self.logger.warning(
+            f"Unsupported document type '{doc_type}' with country '{country_code}' - "
+            f"falling back to generic extractor"
+        )
+        return await self._extract_with_qwen_generic(file_bytes)
+
+    async def _extract_with_qwen_nric(self, file_bytes: bytes) -> Any:
+        """
+        Extract Singapore NRIC/FIN fields using Qwen3-VL.
+
+        Args:
+            file_bytes: Image bytes
+
+        Returns:
+            ExtractionResult with extracted data
+        """
+        from app.schemas.generic import ExtractionResult
+
         try:
-            model = await self.gliner_model.get_model_with_gpu()
+            extractor = QwenSingaporeNricExtractor()
+            qwen_extracted_data, qwen_confidence_data = await extractor.extract_fields(file_bytes)
 
-            # Build GLiNER2 schema from extraction_schema
-            field_descriptions = schema.extraction_schema.fields
-
-            if not field_descriptions:
-                self.logger.warning(f"No field descriptions in schema {schema.schema_id}")
-                return ExtractionResult(
-                    schema_used=schema,
-                    extracted_data={},
-                    confidence_scores={},
-                    overall_confidence=0.0,
-                    missing_required_fields=schema.required_fields[:],
-                    extracted_fields=[],
-                )
-
-            # Create GLiNER2 schema
-            gliner_schema = model.create_schema().entities(field_descriptions)
-
-            # Run extraction
-            entities_dict = model.extract(
-                ocr_text,
-                schema=gliner_schema,
-                threshold=schema.extraction_schema.threshold,
-                include_confidence=True,
-                include_spans=True,
-            )
-
-            self.logger.debug(f"GLiNER2 raw response: {entities_dict}")
-
-            # Handle GLiNER2 response format: {'entities': {field_name: [values]}}
-            if 'entities' in entities_dict and isinstance(entities_dict['entities'], dict):
-                entities_dict = entities_dict['entities']
-
-            self.logger.debug(f"GLiNER2 extracted entities: {list(entities_dict.keys())}")
-
-            # Process extraction results
+            # Convert Qwen format to ExtractionResult format
             extracted_data = {}
             confidence_scores = {}
 
-            for field_name, entities in entities_dict.items():
-                if entities is None:
-                    continue
+            for field_name, field_data in qwen_extracted_data.items():
+                if isinstance(field_data, dict) and "value" in field_data:
+                    value = field_data["value"]
+                    confidence = field_data.get("confidence", 1.0)
 
-                # Skip empty lists
-                if isinstance(entities, list) and len(entities) == 0:
-                    continue
+                    # Skip None/null values
+                    if value is None:
+                        continue
 
-                # Handle different entity formats
-                if isinstance(entities, list) and len(entities) > 0:
-                    # Get the highest confidence entity
-                    best = max(entities, key=lambda e: e.get("confidence", 0))
-                    # Use 'text' or 'value' for the entity text
-                    value = best.get("text", best.get("value", "")).strip()
-                    confidence = best.get("confidence", 0.0)
-                elif isinstance(entities, dict):
-                    value = entities.get("text", entities.get("value", "")).strip()
-                    confidence = entities.get("confidence", 0.0)
-                else:
-                    value = str(entities).strip()
-                    confidence = 0.5
-
-                # Clean internal whitespace/newlines
-                value = " ".join(value.split())
-
-                if value:
-                    extracted_data[field_name] = value
-                    confidence_scores[field_name] = confidence
+                    # Map Qwen field names to standard field names
+                    if field_name == "nric_fin_number":
+                        extracted_data["nric_number"] = value
+                        confidence_scores["nric_number"] = confidence
+                    elif field_name == "full_name":
+                        extracted_data["full_name"] = value
+                        confidence_scores["full_name"] = confidence
+                    elif field_name == "date_of_birth":
+                        extracted_data["date_of_birth"] = value
+                        confidence_scores["date_of_birth"] = confidence
+                    elif field_name == "sex":
+                        extracted_data["sex"] = value
+                        confidence_scores["sex"] = confidence
+                    elif field_name == "card_type":
+                        extracted_data["card_type"] = value
+                        confidence_scores["card_type"] = confidence
+                    else:
+                        extracted_data[field_name] = value
+                        confidence_scores[field_name] = confidence
 
             # Calculate overall confidence
             overall_confidence = 0.0
             if confidence_scores:
                 overall_confidence = sum(confidence_scores.values()) / len(confidence_scores)
 
-            # Determine extracted and missing fields
+            # Determine extracted fields
             extracted_fields = list(extracted_data.keys())
-            missing_required_fields = [
-                f for f in schema.required_fields
-                if f not in extracted_data
-            ]
+
+            # No required fields for NRIC extraction
+            missing_required_fields = []
+
+            self.logger.info(f"Qwen3-VL NRIC extraction completed: {len(extracted_data)} fields extracted")
 
             return ExtractionResult(
-                schema_used=schema,
+                schema_used=None,  # No schema needed
                 extracted_data=extracted_data,
                 confidence_scores=confidence_scores,
                 overall_confidence=overall_confidence,
@@ -407,16 +357,393 @@ class GenericDocumentService:
             )
 
         except Exception as e:
-            self.logger.error(f"GLiNER2 extraction failed: {e}")
+            self.logger.error(f"Qwen3-VL NRIC extraction failed: {e}")
             # Return empty result on error
             return ExtractionResult(
-                schema_used=schema,
+                schema_used=None,
                 extracted_data={},
                 confidence_scores={},
                 overall_confidence=0.0,
-                missing_required_fields=schema.required_fields[:],
+                missing_required_fields=[],
                 extracted_fields=[],
             )
+
+    async def _extract_with_qwen_pan(self, file_bytes: bytes) -> Any:
+        """
+        Extract PAN card fields using Qwen3-VL.
+
+        Args:
+            file_bytes: Image bytes
+
+        Returns:
+            ExtractionResult with extracted data
+        """
+        from app.schemas.generic import ExtractionResult
+
+        try:
+            extractor = QwenPANExtractor()
+            qwen_extracted_data, qwen_confidence_data = await extractor.extract_fields(file_bytes)
+
+            # Convert Qwen format to ExtractionResult format
+            extracted_data = {}
+            confidence_scores = {}
+
+            for field_name, field_data in qwen_extracted_data.items():
+                if isinstance(field_data, dict) and "value" in field_data:
+                    value = field_data["value"]
+                    confidence = field_data.get("confidence", 1.0)
+
+                    # Skip None/null values
+                    if value is None:
+                        continue
+
+                    # Store all fields
+                    extracted_data[field_name] = value
+                    confidence_scores[field_name] = confidence
+
+            # Calculate overall confidence
+            overall_confidence = 0.0
+            if confidence_scores:
+                overall_confidence = sum(confidence_scores.values()) / len(confidence_scores)
+
+            # Determine extracted fields
+            extracted_fields = list(extracted_data.keys())
+
+            # No required fields for PAN extraction
+            missing_required_fields = []
+
+            self.logger.info(f"Qwen3-VL PAN extraction completed: {len(extracted_data)} fields extracted")
+
+            return ExtractionResult(
+                schema_used=None,  # No schema needed
+                extracted_data=extracted_data,
+                confidence_scores=confidence_scores,
+                overall_confidence=overall_confidence,
+                missing_required_fields=missing_required_fields,
+                extracted_fields=extracted_fields,
+            )
+
+        except Exception as e:
+            self.logger.error(f"Qwen3-VL PAN extraction failed: {e}")
+            # Return empty result on error
+            return ExtractionResult(
+                schema_used=None,
+                extracted_data={},
+                confidence_scores={},
+                overall_confidence=0.0,
+                missing_required_fields=[],
+                extracted_fields=[],
+            )
+
+    async def _extract_with_qwen_uae_trc(self, file_bytes: bytes) -> Any:
+        """
+        Extract UAE TRC fields using Qwen3-VL.
+
+        Args:
+            file_bytes: Image bytes
+
+        Returns:
+            ExtractionResult with extracted data
+        """
+        from app.schemas.generic import ExtractionResult
+
+        try:
+            extractor = QwenUAETrcExtractor()
+            qwen_extracted_data, qwen_confidence_data = await extractor.extract_fields(file_bytes)
+
+            # Convert Qwen format to ExtractionResult format
+            extracted_data = {}
+            confidence_scores = {}
+
+            for field_name, field_data in qwen_extracted_data.items():
+                if isinstance(field_data, dict) and "value" in field_data:
+                    value = field_data["value"]
+                    # Skip None values
+                    if value is None:
+                        continue
+                    confidence = field_data.get("confidence", 1.0)
+
+                    # Map Qwen field names to standard field names
+                    if field_name == "certificate_number":
+                        extracted_data["certificate_number"] = value
+                        confidence_scores["certificate_number"] = confidence
+                    elif field_name == "full_name":
+                        extracted_data["full_name"] = value
+                        confidence_scores["full_name"] = confidence
+                    elif field_name == "valid_until":
+                        extracted_data["expiry_date"] = value
+                        confidence_scores["expiry_date"] = confidence
+                    elif field_name == "valid_from":
+                        extracted_data["valid_from"] = value
+                        confidence_scores["valid_from"] = confidence
+                    elif field_name == "application_number":
+                        extracted_data["application_number"] = value
+                        confidence_scores["application_number"] = confidence
+                    elif field_name == "passport_number":
+                        extracted_data["passport_number"] = value
+                        confidence_scores["passport_number"] = confidence
+                    elif field_name == "nationality":
+                        extracted_data["nationality"] = value
+                        confidence_scores["nationality"] = confidence
+                    else:
+                        extracted_data[field_name] = value
+                        confidence_scores[field_name] = confidence
+
+            # Calculate overall confidence
+            overall_confidence = 0.0
+            if confidence_scores:
+                overall_confidence = sum(confidence_scores.values()) / len(confidence_scores)
+
+            # Determine extracted fields
+            extracted_fields = list(extracted_data.keys())
+
+            # No required fields for UAE TRC extraction
+            missing_required_fields = []
+
+            self.logger.info(f"Qwen3-VL UAE TRC extraction completed: {len(extracted_data)} fields extracted")
+
+            return ExtractionResult(
+                schema_used=None,  # No schema needed
+                extracted_data=extracted_data,
+                confidence_scores=confidence_scores,
+                overall_confidence=overall_confidence,
+                missing_required_fields=missing_required_fields,
+                extracted_fields=extracted_fields,
+            )
+
+        except Exception as e:
+            self.logger.error(f"Qwen3-VL UAE TRC extraction failed: {e}")
+            # Return empty result on error
+            return ExtractionResult(
+                schema_used=None,
+                extracted_data={},
+                confidence_scores={},
+                overall_confidence=0.0,
+                missing_required_fields=[],
+                extracted_fields=[],
+            )
+
+    async def _extract_with_qwen_generic(self, file_bytes: bytes) -> Any:
+        """
+        Extract document type and PII fields using Qwen3-VL generic extractor.
+
+        This is used for unknown or unspecified document types.
+        It both classifies the document type and extracts all PII fields.
+
+        Args:
+            file_bytes: Image bytes
+
+        Returns:
+            ExtractionResult with extracted data
+        """
+        from app.schemas.generic import ExtractionResult
+
+        try:
+            extractor = QwenGenericDocumentExtractor()
+            qwen_extracted_data, qwen_confidence_data = await extractor.extract_fields(file_bytes)
+
+            # Convert Qwen format to ExtractionResult format
+            extracted_data = {}
+            confidence_scores = {}
+
+            for field_name, field_data in qwen_extracted_data.items():
+                if isinstance(field_data, dict) and "value" in field_data:
+                    value = field_data["value"]
+                    # Skip None values
+                    if value is None:
+                        continue
+                    confidence = field_data.get("confidence", 1.0)
+
+                    # Store all extracted fields
+                    extracted_data[field_name] = value
+                    confidence_scores[field_name] = confidence
+
+            # Calculate overall confidence
+            overall_confidence = 0.0
+            if confidence_scores:
+                overall_confidence = sum(confidence_scores.values()) / len(confidence_scores)
+
+            # Determine extracted fields
+            extracted_fields = list(extracted_data.keys())
+
+            # No required fields for generic extraction
+            missing_required_fields = []
+
+            self.logger.info(
+                f"Qwen3-VL generic document extraction completed: "
+                f"{len(extracted_data)} fields extracted, "
+                f"document_type={extracted_data.get('document_type', 'unknown')}"
+            )
+
+            return ExtractionResult(
+                schema_used=None,  # No schema needed
+                extracted_data=extracted_data,
+                confidence_scores=confidence_scores,
+                overall_confidence=overall_confidence,
+                missing_required_fields=missing_required_fields,
+                extracted_fields=extracted_fields,
+            )
+
+        except Exception as e:
+            self.logger.error(f"Qwen3-VL generic extraction failed: {e}")
+            # Return empty result on error
+            return ExtractionResult(
+                schema_used=None,
+                extracted_data={},
+                confidence_scores={},
+                overall_confidence=0.0,
+                missing_required_fields=[],
+                extracted_fields=[],
+            )
+
+    def _normalize_document_type(self, document_type: str) -> str:
+        """
+        Normalize document type to standard format.
+
+        Maps user-friendly names to internal document types:
+        - 'nric', 'nric_card' -> 'id_card'
+        - 'pan', 'pan_card' -> 'id_card'
+        - 'uae_trc', 'trc' -> 'id_card'
+        - 'id_card' -> 'id_card'
+
+        Args:
+            document_type: User-provided document type
+
+        Returns:
+            Normalized document type for internal use
+        """
+        doc_type_lower = document_type.lower().strip()
+
+        # Singapore NRIC variants
+        if doc_type_lower in ['nric', 'nric_card', 'singapore_nric', 'singapore_nric_card']:
+            return 'id_card'
+
+        # PAN Card variants
+        if doc_type_lower in ['pan', 'pan_card', 'indian_pan']:
+            return 'id_card'
+
+        # UAE TRC variants
+        if doc_type_lower in ['uae_trc', 'trc', 'tax_residency_certificate']:
+            return 'id_card'
+
+        # Already normalized
+        if doc_type_lower == 'id_card':
+            return 'id_card'
+
+        # Default: return as-is for other document types
+        return doc_type_lower
+
+    def _normalize_country_code(self, country_code: str, document_type: str) -> str:
+        """
+        Normalize country code to ISO 3166-1 alpha-2 format.
+
+        Maps user-friendly country names/codes to standard ISO codes:
+        - 'singapore', 'sg' -> 'SG'
+        - 'india', 'in' -> 'IN'
+        - 'uae', 'ae' -> 'AE'
+        - etc.
+
+        Args:
+            country_code: User-provided country code or name
+            document_type: Document type for context-aware normalization
+
+        Returns:
+            Normalized ISO 3166-1 alpha-2 country code
+        """
+        country_upper = country_code.upper().strip()
+
+        # If already in ISO format (2 letters), return as-is
+        if len(country_upper) == 2 and country_upper.isalpha():
+            return country_upper
+
+        # Map common country names to ISO codes
+        country_map = {
+            'SINGAPORE': 'SG',
+            'INDIA': 'IN',
+            'UNITED ARAB EMIRATES': 'AE',
+            'UAE': 'AE',
+            'MALAYSIA': 'MY',
+            'THAILAND': 'TH',
+            'USA': 'US',
+            'UNITED STATES': 'US',
+            'UK': 'GB',
+            'UNITED KINGDOM': 'GB',
+        }
+
+        # Also check lowercase variants
+        country_lower = country_code.lower().strip()
+        country_map_lower = {k.lower(): v for k, v in country_map.items()}
+
+        if country_lower in country_map_lower:
+            return country_map_lower[country_lower]
+
+        # Context-aware defaults based on document type
+        doc_type_lower = document_type.lower().strip()
+        if doc_type_lower in ['nric', 'nric_card', 'singapore_nric']:
+            return 'SG'
+        elif doc_type_lower in ['pan', 'pan_card', 'indian_pan']:
+            return 'IN'
+        elif doc_type_lower in ['uae_trc', 'trc', 'tax_residency_certificate']:
+            return 'AE'
+
+        # Default: return original (will likely fail schema selection)
+        return country_upper
+
+    def _infer_country_from_document_type(self, document_type: str) -> Optional[str]:
+        """
+        Infer country code from document type when not explicitly provided.
+
+        This is used when the caller only provides document_type but not country_code.
+        For Qwen-supported document types, we can infer the country:
+        - 'nric' -> 'SG' (Singapore NRIC)
+        - 'pan' -> 'IN' (India PAN)
+        - 'uae_trc' -> 'AE' (UAE Tax Residency Certificate)
+
+        Args:
+            document_type: User-provided document type
+
+        Returns:
+            Inferred ISO 3166-1 alpha-2 country code, or None if cannot infer
+        """
+        doc_type_lower = document_type.lower().strip()
+
+        # Singapore NRIC variants
+        if doc_type_lower in ['nric', 'nric_card', 'singapore_nric', 'singapore_nric_card']:
+            return 'SG'
+
+        # PAN Card variants
+        if doc_type_lower in ['pan', 'pan_card', 'indian_pan']:
+            return 'IN'
+
+        # UAE TRC variants
+        if doc_type_lower in ['uae_trc', 'trc', 'tax_residency_certificate']:
+            return 'AE'
+
+        # Cannot infer country from this document type
+        return None
+
+    def _infer_entity_from_document_type(self, document_type: str) -> Optional[str]:
+        """
+        Infer entity from document type when not explicitly provided.
+
+        This is used when the caller only provides document_type but not entity.
+        For Qwen-supported document types with specific entities:
+        - 'uae_trc', 'trc', 'tax_residency_certificate' -> 'trc'
+
+        Args:
+            document_type: User-provided document type
+
+        Returns:
+            Inferred entity identifier, or None if cannot infer
+        """
+        doc_type_lower = document_type.lower().strip()
+
+        # UAE TRC variants
+        if doc_type_lower in ['uae_trc', 'trc', 'tax_residency_certificate']:
+            return 'trc'
+
+        # Cannot infer entity from this document type
+        return None
 
     async def _validate_name_matching(
         self,
@@ -559,96 +886,10 @@ class GenericDocumentService:
 
         return normalized_data
 
-    def _validate_extraction_result(
-        self,
-        extraction_result: ExtractionResult,
-        selected_schema: Any,
-        detection_result: DocumentDetectionResult,
-        user_identity_id: str,
-    ) -> Optional[SequentialJobResponse]:
-        """
-        Validate extraction results and return error response if validation fails.
-
-        Args:
-            extraction_result: Result from field extraction
-            selected_schema: The schema used for extraction
-            detection_result: Document detection result
-            user_identity_id: User identity ID
-
-        Returns:
-            SequentialJobResponse if validation fails, None otherwise
-        """
-        required_fields = selected_schema.required_fields or []
-        if not required_fields:
-            # No required fields defined - skip validation
-            return None
-
-        extracted_fields = set(extraction_result.extracted_data.keys())
-        missing_required = set(required_fields) - extracted_fields
-
-        # Calculate extraction percentage
-        extraction_pct = len(extracted_fields & set(required_fields)) / len(required_fields) if required_fields else 1.0
-
-        # Validation: Less than 50% of required fields - wrong document type
-        if extraction_pct < 0.5:
-            self.logger.warning(
-                f"Wrong document type: only {extraction_pct*100:.0f}% of required fields extracted. "
-                f"Required: {required_fields}, Extracted: {extracted_fields}"
-            )
-            return self._create_error_response(
-                error_code=DocumentErrorCode.LOGICAL_WRONG_DOCUMENT_TYPE,
-                error_message=(
-                    f"Document appears to be incorrect type. Only extracted {extraction_pct*100:.0f}% "
-                    f"of required fields. Extracted: {list(extracted_fields)}, Required: {required_fields}"
-                ),
-                user_identity_id=user_identity_id,
-                detection_result=detection_result,
-            )
-
-        # Validation: 100% required not met - poor quality or low confidence
-        if missing_required:
-            self.logger.warning(
-                f"Incomplete extraction: missing required fields {missing_required}"
-            )
-            return self._create_error_response(
-                error_code=DocumentErrorCode.LOGICAL_EXTRACTION_INCOMPLETE,
-                error_message=(
-                    f"Could not extract all required fields. Missing: {list(missing_required)}. "
-                    f"Please upload a clearer image or try again."
-                ),
-                user_identity_id=user_identity_id,
-                detection_result=detection_result,
-            )
-
-        # Check confidence scores for required fields
-        threshold = selected_schema.extraction_schema.threshold if hasattr(selected_schema, 'extraction_schema') else 0.5
-        low_confidence_fields = []
-        for field in required_fields:
-            confidence = extraction_result.confidence_scores.get(field, 0.0)
-            if confidence < threshold:
-                low_confidence_fields.append(field)
-
-        if low_confidence_fields:
-            self.logger.warning(
-                f"Low confidence extraction for fields: {low_confidence_fields}"
-            )
-            return self._create_error_response(
-                error_code=DocumentErrorCode.LOGICAL_EXTRACTION_LOW_CONFIDENCE,
-                error_message=(
-                    f"Low confidence extraction for fields: {low_confidence_fields}. "
-                    f"Please upload a clearer image or try again."
-                ),
-                user_identity_id=user_identity_id,
-                detection_result=detection_result,
-            )
-
-        # All validations passed
-        return None
-
     async def _run_forgery_detection(
         self,
         file_data: Dict[str, Any],
-        detection_result: DocumentDetectionResult,
+        detection_result,
     ) -> Optional[Dict[str, Any]]:
         """
         Run PhotoHolmes forgery detection on the document.
@@ -691,7 +932,7 @@ class GenericDocumentService:
     def _validate_forgery_result(
         self,
         forgery_checks: Optional[Dict[str, Any]],
-        detection_result: DocumentDetectionResult,
+        detection_result,
         user_identity_id: str,
     ) -> Optional[SequentialJobResponse]:
         """
@@ -759,14 +1000,13 @@ class GenericDocumentService:
             )
 
         # Forgery validation passed
-        self.logger.info(f"✅ PhotoHolmes validation passed - {detections} detections (threshold: {threshold})")
+        self.logger.info(f"PhotoHolmes validation passed - {detections} detections (threshold: {threshold})")
         return None
 
     def _create_success_response(
         self,
-        detection_result: DocumentDetectionResult,
-        extraction_result: ExtractionResult,
-        selected_schema: Any,
+        detection_result,
+        extraction_result,
         user_identity_id: str,
         processing_time: float,
         name_match_result: Optional[Dict[str, Any]] = None,
@@ -788,7 +1028,7 @@ class GenericDocumentService:
                 "document_type": detection_result.document_type,
                 "country": detection_result.country_code,
                 "entity": detection_result.entity,
-                "schema_id": selected_schema.schema_id,
+                "extraction_method": "qwen3_vl",
                 "detection_confidence": detection_result.confidence,
             }
         }
@@ -802,7 +1042,7 @@ class GenericDocumentService:
         for field, confidence in extraction_result.confidence_scores.items():
             confidence_data[field] = {
                 'overall_confidence': confidence,
-                'sources': ['gliner2_ner']
+                'sources': ['qwen3_vl']
             }
 
         # Map to appropriate schema model based on document type
@@ -856,7 +1096,7 @@ class GenericDocumentService:
             detected_country=detection_result.country_code,
             detected_entity=detection_result.entity,
             detection_confidence=detection_result.confidence,
-            selected_schema=selected_schema.schema_id,
+            selected_schema="qwen3_vl",
         )
 
         return response
@@ -866,7 +1106,7 @@ class GenericDocumentService:
         error_code: str,
         error_message: str,
         user_identity_id: str,
-        detection_result: Optional[DocumentDetectionResult] = None,
+        detection_result = None,
         forgery_checks: Optional[Dict[str, Any]] = None,
     ) -> SequentialJobResponse:
         """Create an error response."""

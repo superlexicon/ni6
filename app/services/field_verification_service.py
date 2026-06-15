@@ -121,11 +121,15 @@ class FieldVerificationService:
             )
 
             # Extract data from document (type-agnostic)
+            # Note: Field verification requires document_type to be provided by caller
+            # For backward compatibility, default to 'id_card' when not specified
             extraction_response = await generic_service.process_auto_document(
                 file_data=file_data,
                 client_public_key=client_public_key,
                 user_identity_id=user_identity_id,
-                hints=None  # No hints - full auto-detection
+                document_type='id_card',  # Default for field verification
+                country_code=None,
+                entity=None
             )
 
             # Check if extraction was successful

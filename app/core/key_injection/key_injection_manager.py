@@ -179,49 +179,17 @@ class KeyInjectionManager:
         """
         try:
             # Step 1: Choose extraction method based on document type
+            # Legacy: Bank statement key injection with simple_bank_analyzer removed
+            # Bank statement key injection is deprecated - use Qwen3-VL direct extraction instead
             if document_type == DocumentType.BANK_STATEMENT:
-                # Use simple bank statement analyzer with clustering approach
+                # Bank statement key injection disabled - simple_bank_analyzer was removed
                 from app.core.logger import get_logger
                 logger = get_logger()
-                logger.info("Using simple bank statement analyzer with clustering approach")
-
-                # Convert OCR geometry data to text elements
-                text_elements = self._convert_to_text_elements(ocr_geometry_data)
-
-                # Use simple bank analyzer
-                if text_elements is None:
-                    logger.error("Text elements conversion returned None")
-                    raise Exception("Text elements conversion returned None")
-
-                logger.debug(f"Calling simple bank analyzer with {len(text_elements)} text elements")
-
-                from .simple_bank_analyzer import simple_bank_analyzer
-                cluster_result = simple_bank_analyzer.analyze_bank_statement(text_elements)
-
-                if cluster_result is None:
-                    logger.error("Simple bank analyzer returned None result")
-                    raise Exception("Simple bank analyzer returned None result")
-
-                detected_keys = simple_bank_analyzer.create_detected_keys(cluster_result)
-
-                if detected_keys is None:
-                    logger.error("create_detected_keys returned None")
-                    raise Exception("create_detected_keys returned None")
-
-                logger.info(f"Simple bank analyzer extracted {len(detected_keys)} keys")
-                logger.debug(f"Account name: '{cluster_result.account_name}', Address: '{cluster_result.address}'")
-                logger.info(f"Overall confidence: {cluster_result.confidence:.3f}")
-                logger.debug(f"Validation reasons: {cluster_result.validation_reasons}")
-
-                if hasattr(cluster_result, 'cluster_lines') and cluster_result.cluster_lines:
-                    logger.debug(f"Cluster lines: {len(cluster_result.cluster_lines)}")
-                else:
-                    logger.debug("Cluster lines: None or empty")
-
-                # Log the first few text elements for debugging
-                for i, elem in enumerate(text_elements[:10]):
-                    logger.debug(f"TextElement {i+1}: '{elem.text}' at ({elem.geometry['x']}, {elem.geometry['y']}) "
-                                f"size {elem.geometry['width']}x{elem.geometry['height']}")
+                logger.warning("Bank statement key injection disabled (simple_bank_analyzer removed)")
+                # Fall through to traditional spatial analysis as fallback
+                detected_keys = self.spatial_analyzer.extract_key_value_pairs_from_geometry(
+                    ocr_geometry_data, document_type
+                )
             else:
                 # Use traditional spatial analysis for other document types
                 detected_keys = self.spatial_analyzer.extract_key_value_pairs_from_geometry(
@@ -231,28 +199,15 @@ class KeyInjectionManager:
             # Step 2: Handle enhanced confidence differently for bank statements
             enhanced_confidences = {}
             if document_type == DocumentType.BANK_STATEMENT:
-                # Use simple confidence from cluster result for bank statements
-                from .confidence_calculator import ConfidenceFactors, EnhancedConfidence
+                # Legacy: Simple bank analyzer confidence calculation disabled
+                # Use traditional spatial analysis confidence instead
+                detected_keys = self.detector.remove_duplicate_keys(detected_keys)
+                detected_keys = self.detector.prioritize_required_keys(detected_keys, document_type)
 
                 for key in detected_keys:
-                    confidence_value = key.value_confidence or key.confidence
-
-                    # Create proper EnhancedConfidence object with factors
-                    factors = ConfidenceFactors(
-                        ocr_confidence=confidence_value,
-                        spatial_confidence=confidence_value * 0.9,
-                        format_confidence=0.8,  # Good format for bank statement data
-                        key_importance_confidence=0.9,  # Bank statement fields are important
-                        cross_validation_confidence=0.0,  # No cross validation available
-                        pattern_specificity_confidence=0.7  # Moderate pattern specificity
-                    )
-
-                    enhanced_confidences[key.key_name] = EnhancedConfidence(
-                        overall_confidence=confidence_value,
-                        factors=factors,
-                        explanation=f"Simple bank analyzer confidence: {confidence_value:.3f}",
-                        is_reliable=confidence_value >= 0.7,
-                        needs_review=confidence_value < 0.7
+                    cross_values = cross_document_data.get(key.key_name, []) if cross_document_data else None
+                    enhanced_confidences[key.key_name] = self.confidence_calculator.calculate_enhanced_confidence(
+                        key, cross_document_values=cross_values
                     )
             else:
                 # Step 2a: Remove duplicates and prioritize required keys for other document types
