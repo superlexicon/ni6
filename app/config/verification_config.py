@@ -1,3 +1,4 @@
+import os
 try:
     from pydantic import BaseSettings, Field
 except ImportError:
@@ -10,7 +11,7 @@ class VerificationSettings(BaseSettings):
 
     # Face matching threshold (0-100%)
     face_match_threshold: float = Field(
-        70.0,
+        default=70.0,
         description="Minimum face match confidence percentage for passport verification (0-100)"
     )
 
@@ -62,14 +63,15 @@ class VerificationSettings(BaseSettings):
     )
 
     # Document resubmission settings - single rate limit across all document types
+    # Rate limits configurable via environment variables for development/testing
     max_document_submissions_per_hour: int = Field(
-        10,
-        description="Maximum total document submissions per hour (all types combined)"
+        default=int(os.getenv("VERIFICATION_MAX_DOCUMENT_SUBMISSIONS_PER_HOUR", "10")),
+        description="Maximum total document submissions per hour (all types combined). Configure via VERIFICATION_MAX_DOCUMENT_SUBMISSIONS_PER_HOUR env var."
     )
 
     max_document_submissions_per_day: int = Field(
-        30,
-        description="Maximum total document submissions per day (all types combined)"
+        default=int(os.getenv("VERIFICATION_MAX_DOCUMENT_SUBMISSIONS_PER_DAY", "30")),
+        description="Maximum total document submissions per day (all types combined). Configure via VERIFICATION_MAX_DOCUMENT_SUBMISSIONS_PER_DAY env var."
     )
 
     # Resubmission strategy for old documents
