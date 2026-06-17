@@ -805,7 +805,7 @@ class LLMService:
                 "format": "json",  # Force JSON output from model
                 "options": {
                     "temperature": temperature,
-                    "num_predict": max_tokens,
+                    "num_predict": 1000,  # Limit output to ~1000 tokens to prevent excessive generation
                     "think": False,  # Also disable thinking mode in options
                     "reasoning": False  # Also disable reasoning mode
                 }
@@ -820,8 +820,15 @@ class LLMService:
             base_url = self.api_url.replace('/v1', '').replace('/chat/completions', '')
             url = f"{base_url}/api/chat"
 
-            # Call Ollama API
-            response = await client.post(url, json=payload, timeout=300.0)
+            # Call Ollama API with explicit read timeout to interrupt stuck models
+            # Using httpx.Timeout to only override read timeout (not connect/write/pool)
+            request_timeout = httpx.Timeout(
+                connect=10.0,  # Connection timeout
+                read=15.0,     # Read timeout - fail fast if model gets stuck generating Thai text
+                write=10.0,    # Write timeout
+                pool=5.0        # Pool timeout
+            )
+            response = await client.post(url, json=payload, timeout=request_timeout)
 
             elapsed_ms = int((time.time() - start_time) * 1000)
 

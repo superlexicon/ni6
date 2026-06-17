@@ -96,7 +96,7 @@ class QwenBankStatementExtractor:
         image_bytes: bytes,
         bank_name_hint: Optional[str] = None,
         country_hint: Optional[str] = None,
-        max_retries: int = 2
+        max_retries: int = 4
     ) -> Tuple[Dict[str, Any], Dict[str, float]]:
         """
         Extract bank statement fields directly from image using Qwen3-VL.

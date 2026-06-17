@@ -84,7 +84,7 @@ class QwenSingaporeNricExtractor:
     async def extract_fields(
         self,
         image_bytes: bytes,
-        max_retries: int = 2
+        max_retries: int = 4
     ) -> Tuple[Dict[str, Any], Dict[str, float]]:
         """
         Extract Singapore NRIC/FIN fields directly from image using Qwen3-VL.

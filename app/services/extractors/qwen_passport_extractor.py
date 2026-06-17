@@ -98,7 +98,7 @@ class QwenPassportExtractor:
         self,
         image_bytes: bytes,
         country_hint: Optional[str] = None,
-        max_retries: int = 2
+        max_retries: int = 4
     ) -> Tuple[Dict[str, Any], Dict[str, float]]:
         """
         Extract passport fields directly from image using Qwen3-VL.
