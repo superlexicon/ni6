@@ -170,6 +170,12 @@ class QwenPANExtractor:
         # Post-processing: Validate PAN number format
         self._validate_pan_number(extracted_data)
 
+        # Post-processing: Map pan_number to universal tax_id_number field
+        if "pan_number" in extracted_data:
+            pan_number = extracted_data["pan_number"]["value"]
+            if pan_number and "tax_id_number" not in extracted_data:
+                extracted_data["tax_id_number"] = pan_number
+
         # Post-processing: Clean and validate full_name
         self._clean_full_name(extracted_data)
 

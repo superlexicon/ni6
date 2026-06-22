@@ -104,6 +104,7 @@ class QwenGenericDocumentExtractor:
         "email",
         "account_number",
         "tax_id",
+        "tax_id_number",  # Universal tax ID field
         "employer",
         "income",
         "certificate_number",
@@ -518,32 +519,60 @@ Date Normalization:
         # Map pan_number to document_number for PAN cards
         if doc_type == "pan_card" and "pan_number" in extracted_data:
             pan_number = extracted_data["pan_number"]["value"]
-            if pan_number and "document_number" not in extracted_data:
-                extracted_data["document_number"] = {
-                    "value": pan_number,
-                    "confidence": 1.0,
-                    "source": "vision_llm"
-                }
+            if pan_number:
+                if "document_number" not in extracted_data:
+                    extracted_data["document_number"] = {
+                        "value": pan_number,
+                        "confidence": 1.0,
+                        "source": "vision_llm"
+                    }
+                # Map to universal tax_id_number field
+                if "tax_id_number" not in extracted_data:
+                    extracted_data["tax_id_number"] = {
+                        "value": pan_number,
+                        "confidence": 1.0,
+                        "source": "vision_llm"
+                    }
 
-        # Map nric_fin_number to id_number for NRIC
-        if doc_type == "nric" and "nric_fin_number" in extracted_data:
+        # Map nric_fin_number to id_number for NRIC and Singapore documents
+        # Handle Singapore documents regardless of type (nric, residence_permit, etc.)
+        issuing_country = extracted_data.get("issuing_country", {}).get("value", "")
+        is_singapore_doc = doc_type == "nric" or issuing_country.lower() in ["singapore", "sg", "sgp"]
+
+        if is_singapore_doc and "nric_fin_number" in extracted_data:
             nric_number = extracted_data["nric_fin_number"]["value"]
-            if nric_number and "id_number" not in extracted_data:
-                extracted_data["id_number"] = {
-                    "value": nric_number,
-                    "confidence": 1.0,
-                    "source": "vision_llm"
-                }
+            if nric_number:
+                if "id_number" not in extracted_data:
+                    extracted_data["id_number"] = {
+                        "value": nric_number,
+                        "confidence": extracted_data["nric_fin_number"]["confidence"],
+                        "source": extracted_data["nric_fin_number"]["source"]
+                    }
+                # Map to universal tax_id_number field
+                if "tax_id_number" not in extracted_data:
+                    extracted_data["tax_id_number"] = {
+                        "value": nric_number,
+                        "confidence": extracted_data["nric_fin_number"]["confidence"],
+                        "source": extracted_data["nric_fin_number"]["source"]
+                    }
 
         # Map certificate_number to document_number for TRC
         if doc_type == "tax_residency_certificate" and "certificate_number" in extracted_data:
             cert_number = extracted_data["certificate_number"]["value"]
-            if cert_number and "document_number" not in extracted_data:
-                extracted_data["document_number"] = {
-                    "value": cert_number,
-                    "confidence": 1.0,
-                    "source": "vision_llm"
-                }
+            if cert_number:
+                if "document_number" not in extracted_data:
+                    extracted_data["document_number"] = {
+                        "value": cert_number,
+                        "confidence": 1.0,
+                        "source": "vision_llm"
+                    }
+                # Map to universal tax_id_number field
+                if "tax_id_number" not in extracted_data:
+                    extracted_data["tax_id_number"] = {
+                        "value": cert_number,
+                        "confidence": 1.0,
+                        "source": "vision_llm"
+                    }
 
         # Map valid_until to expiry_date
         if "valid_until" in extracted_data and "expiry_date" not in extracted_data:

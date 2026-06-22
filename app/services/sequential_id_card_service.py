@@ -140,6 +140,13 @@ class SequentialIDCardService(DocumentProcessorBase):
                                 'overall_confidence': confidence,
                                 'sources': [source]
                             }
+                            # Also map to universal tax_id_number field
+                            if "tax_id_number" not in extracted_data:
+                                extracted_data["tax_id_number"] = value
+                                confidence_data["tax_id_number"] = {
+                                    'overall_confidence': confidence,
+                                    'sources': [source]
+                                }
                         else:
                             extracted_data[field_name] = value
                             confidence_data[field_name] = {
@@ -169,6 +176,10 @@ class SequentialIDCardService(DocumentProcessorBase):
                     **result.field_values,
                 }
 
+                # Also map identification_number to universal tax_id_number field for UAE TRC
+                if result.identification_number and "tax_id_number" not in extracted_data:
+                    extracted_data["tax_id_number"] = result.identification_number
+
                 confidence_data = {}
                 for field, confidence in result.confidence_scores.items():
                     conf_value = confidence / 100 if confidence > 1 else confidence
@@ -192,7 +203,10 @@ class SequentialIDCardService(DocumentProcessorBase):
                 qwen_extracted_data, qwen_confidence_data = await extractor.extract_fields(image_bytes)
 
                 # Convert Qwen format to service format
-                extracted_data = {}
+                extracted_data = {
+                    "document_type": "PAN",
+                    "issuing_country": "IN",
+                }
 
                 confidence_data = {}
 
@@ -210,6 +224,13 @@ class SequentialIDCardService(DocumentProcessorBase):
                                 'overall_confidence': confidence,
                                 'sources': [source]
                             }
+                            # Also map to universal tax_id_number field
+                            if "tax_id_number" not in extracted_data:
+                                extracted_data["tax_id_number"] = value
+                                confidence_data["tax_id_number"] = {
+                                    'overall_confidence': confidence,
+                                    'sources': [source]
+                                }
                         else:
                             extracted_data[field_name] = value
                             confidence_data[field_name] = {
@@ -237,6 +258,10 @@ class SequentialIDCardService(DocumentProcessorBase):
                     "raw_data": result.raw_data,
                     **result.field_values,
                 }
+
+                # Also map identification_number to universal tax_id_number field for PAN
+                if result.identification_number and "tax_id_number" not in extracted_data:
+                    extracted_data["tax_id_number"] = result.identification_number
 
                 confidence_data = {}
                 for field, confidence in result.confidence_scores.items():
@@ -282,6 +307,13 @@ class SequentialIDCardService(DocumentProcessorBase):
                                 'overall_confidence': confidence,
                                 'sources': [source]
                             }
+                            # Also map to universal tax_id_number field
+                            if "tax_id_number" not in extracted_data:
+                                extracted_data["tax_id_number"] = value
+                                confidence_data["tax_id_number"] = {
+                                    'overall_confidence': confidence,
+                                    'sources': [source]
+                                }
                         elif field_name == "sex":
                             extracted_data["gender"] = value
                             confidence_data["gender"] = {

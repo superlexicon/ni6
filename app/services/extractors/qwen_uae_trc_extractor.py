@@ -178,6 +178,12 @@ class QwenUAETrcExtractor:
         # Post-processing: Validate certificate number pattern
         self._validate_certificate_number(extracted_data)
 
+        # Post-processing: Map certificate_number to universal tax_id_number field
+        if "certificate_number" in extracted_data:
+            cert_number = extracted_data["certificate_number"]["value"]
+            if cert_number and "tax_id_number" not in extracted_data:
+                extracted_data["tax_id_number"] = cert_number
+
         # Post-processing: Find expiry as latest date in document
         self._process_expiry_date(extracted_data)
 

@@ -318,6 +318,10 @@ class GenericDocumentService:
                     if field_name == "nric_fin_number":
                         extracted_data["nric_number"] = value
                         confidence_scores["nric_number"] = confidence
+                        # Also map to universal tax_id_number field
+                        if "tax_id_number" not in extracted_data:
+                            extracted_data["tax_id_number"] = value
+                            confidence_scores["tax_id_number"] = confidence
                     elif field_name == "full_name":
                         extracted_data["full_name"] = value
                         confidence_scores["full_name"] = confidence

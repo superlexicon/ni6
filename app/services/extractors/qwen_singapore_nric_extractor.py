@@ -183,6 +183,12 @@ class QwenSingaporeNricExtractor:
                 "source": "vision_llm"
             }
 
+        # Post-processing: Map nric_fin_number to universal tax_id_number field
+        if "nric_fin_number" in extracted_data:
+            nric_number = extracted_data["nric_fin_number"]["value"]
+            if nric_number and "tax_id_number" not in extracted_data:
+                extracted_data["tax_id_number"] = nric_number
+
         # Post-processing: Clean full_name
         self._clean_full_name(extracted_data)
 
