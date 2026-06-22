@@ -641,26 +641,21 @@ class AddressComponentParser:
                     "confidence": 0.95,
                     "source": "parsed"
                 }
+                # Singapore is a city-state - set city and state to "Singapore"
+                components["address_city"] = {
+                    "value": "Singapore",
+                    "confidence": 0.95,
+                    "source": "parsed"
+                }
+                components["address_state"] = {
+                    "value": "Singapore",
+                    "confidence": 0.95,
+                    "source": "parsed"
+                }
                 # Remove country indicator from address_part using word boundary
                 address_part = re.sub(pattern, '', address_part)
                 country_found = True
                 break
-
-        # Step 3: What remains is the area/city (last meaningful word after cleaning)
-        address_part = address_part.strip(", \t\n-")
-
-        if address_part:
-            # Filter out empty strings and punctuation-only tokens
-            words = [w for w in address_part.split() if w and len(w) > 1 and not w.strip('.,/-:;') == '']
-            if words:
-                # Get last meaningful word as potential area/city
-                potential_area = words[-1].strip(", ")
-                if len(potential_area) >= 3:
-                    components["address_city"] = {
-                        "value": potential_area.title(),
-                        "confidence": 0.75,
-                        "source": "parsed"
-                    }
 
         # Street address is everything before area
         street_part = address
@@ -734,6 +729,12 @@ class AddressComponentParser:
         for city in cities:
             if city in address_part:
                 components["address_city"] = {
+                    "value": city.title(),
+                    "confidence": 0.85,
+                    "source": "parsed"
+                }
+                # UAE emirates function as both city and state
+                components["address_state"] = {
                     "value": city.title(),
                     "confidence": 0.85,
                     "source": "parsed"
