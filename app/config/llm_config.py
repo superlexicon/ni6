@@ -63,6 +63,12 @@ class LLMSettings(BaseSettings):
         description="Maximum tokens in completion response"
     )
 
+    # Context Window Configuration
+    num_ctx: int = Field(
+        8192,
+        description="Context window size for vision models (input + output tokens)"
+    )
+
     timeout: int = Field(
         60,
         description="API timeout in seconds"

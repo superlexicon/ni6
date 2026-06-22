@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from app.core.logger import get_logger
 from app.services.llm_service import LLMService
 from app.core.key_injection.bank_database_lookup import get_bank_database_lookup, BankInfo
+from app.utils.date_parser import parse_date_to_mariadb, format_date_for_display
 
 
 logger = get_logger()
@@ -279,16 +280,36 @@ When name and address appear together, SPLIT them:
   -> account_holder_name: "MANOGRAN S/O THANABALAN"
   -> customer_address: "BLK 29 MARINE CRESCENT #11-25 SINGAPORE 440029"
 
-CRITICAL RULE FOR customer_address:
-The address belonging to the account holder is ALWAYS the customer_address.
-- If there's only ONE address in the document, that's the customer_address
-- The address NEAREST to the account holder's name is the customer_address
-- If there are TWO addresses, the one closest to the name is customer_address
+CRITICAL RULE FOR customer_address vs bank_address:
+- **customer_address** = address belonging to the account holder (nearest to their name)
+- **bank_address** = ONLY the bank's physical branch/location address
 
-CRITICAL RULE FOR bank_address:
-- bank_address is ONLY for the bank's physical branch/location address
-- If there's only ONE address in the document, return null for bank_address
-- bank_address should only be populated if there are clearly TWO addresses
+**SINGLE ADDRESS RULE (MOST IMPORTANT):**
+- If there is ONLY ONE address in the entire document:
+  - That address is ALWAYS the customer_address
+  - Set bank_address to null
+  - NEVER classify a single address as bank_address
+
+- If there are TWO addresses:
+  - The address NEAREST to account_holder_name is customer_address
+  - The other address (if labeled "branch", "head office", etc.) is bank_address
+
+**Keywords indicating customer_address:**
+- "Communication Address", "Correspondence Address", "Mailing Address"
+- Address appearing near customer name
+
+**Keywords indicating bank_address:**
+- "Registered Office", "Branch", "Head Office", "HO"
+- Address labeled with bank name
+
+**Examples:**
+- Single address "H.No 1-21, SETTYGARIPALLE, Chittoor, Andhra Pradesh 517419"
+  -> customer_address: "H.No 1-21, SETTYGARIPALLE, Chittoor, Andhra Pradesh 517419"
+  -> bank_address: null
+
+- "Communication Address: 123 Main St" + "Branch: 456 Bank Ave"
+  -> customer_address: "123 Main St"
+  -> bank_address: "456 Bank Ave"
 
 Address Format Examples:
 - India: "H.No 1-21, SETTYGARIPALLE, Chittoor, Andhra Pradesh 517419"
@@ -466,10 +487,20 @@ ISO country codes: IN, SG, AE, US, GB"""
             if field in extracted_data:
                 value = extracted_data[field]["value"]
                 if value and isinstance(value, str):
-                    # Clean account number: remove spaces and dashes
+                    # Clean account number: remove spaces and dashes, then leading special chars
                     if field == "account_number":
+                        # First remove spaces and dashes
                         cleaned = re.sub(r'[\s\-]', '', value)
-                        extracted_data[field]["value"] = cleaned
+                        # Then remove any leading special characters (non-alphanumeric)
+                        cleaned = re.sub(r'^[^a-zA-Z0-9]+', '', cleaned)
+                        # Validation: account numbers must be numeric-only (no letters)
+                        # This catches masked numbers like "5524XXXXXXXX" or invalid formats like "ACC123456"
+                        if re.search(r'[a-zA-Z]', cleaned):
+                            logger.warning(f"Account number contains letters, marking as invalid: '{cleaned}'")
+                            extracted_data[field]["value"] = None
+                            extracted_data[field]["confidence"] = 0.0
+                        else:
+                            extracted_data[field]["value"] = cleaned
                     # Clean balance values: remove commas and spaces
                     elif field in ["opening_balance", "closing_balance"]:
                         cleaned = re.sub(r'[,\s]', '', value)
@@ -481,6 +512,36 @@ ISO country codes: IN, SG, AE, US, GB"""
             if value and isinstance(value, str):
                 cleaned = self._remove_salutations(value)
                 extracted_data["account_holder_name"]["value"] = cleaned
+
+        # Normalize statement_date to ISO format
+        if "statement_date" in extracted_data:
+            value = extracted_data["statement_date"]["value"]
+            if value and isinstance(value, str):
+                parsed_date = parse_date_to_mariadb(value)
+                if parsed_date:
+                    normalized = format_date_for_display(parsed_date)  # Returns YYYY-MM-DD
+                    extracted_data["statement_date"]["value"] = normalized
+                    logger.debug(f"Normalized statement_date: '{value}' -> '{normalized}'")
+
+        # Fallback: Fix single-address misclassification
+        # If bank_address is set but customer_address is null, the model likely
+        # misclassified a single address as bank_address instead of customer_address
+        bank_addr = extracted_data.get("bank_address", {}).get("value")
+        customer_addr = extracted_data.get("customer_address", {}).get("value")
+
+        if bank_addr and not customer_addr:
+            # Move bank_address to customer_address and set bank_address to null
+            extracted_data["customer_address"] = {
+                "value": bank_addr,
+                "confidence": 1.0,
+                "source": "vision_llm_corrected"
+            }
+            extracted_data["bank_address"] = {
+                "value": None,
+                "confidence": 0.0,
+                "source": "vision_llm_corrected"
+            }
+            logger.info(f"Address fallback applied: moved bank_address to customer_address (single address case)")
 
         return extracted_data
 

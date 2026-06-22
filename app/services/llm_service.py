@@ -806,6 +806,7 @@ class LLMService:
                 "options": {
                     "temperature": temperature,
                     "num_predict": 1000,  # Limit output to ~1000 tokens to prevent excessive generation
+                    "num_ctx": self.settings.num_ctx,  # Use configured context window size (default 8192)
                     "think": False,  # Also disable thinking mode in options
                     "reasoning": False  # Also disable reasoning mode
                 }

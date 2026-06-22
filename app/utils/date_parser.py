@@ -50,6 +50,34 @@ def parse_date_to_mariadb(date_input: Optional[Union[str, date, datetime]]) -> O
     if not date_str:
         return None
 
+    # Handle date ranges (e.g., "From : 02-02-2026 To : 03-02-2026")
+    # Extract the end date (most recent) for statement_date
+    range_patterns = [
+        # "From : DD-MM-YYYY To : DD-MM-YYYY" or "From : DD/MM/YYYY To : DD/MM/YYYY"
+        r'from\s*:\s*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})\s+to\s*:\s*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})',
+        # "From: DD-MM-YYYY to DD-MM-YYYY" (without spaces after colons)
+        r'from\s*:?\s*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})\s+to\s*:?\s*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})',
+        # "DD-MM-YYYY to DD-MM-YYYY" (without From/To labels)
+        r'(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})\s+to\s+(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})',
+    ]
+
+    for pattern in range_patterns:
+        match = re.search(pattern, date_str, re.IGNORECASE)
+        if match:
+            end_date_str = match.group(2)  # Get the second date (end date)
+            # Try parsing with common formats
+            for fmt in ["%d-%m-%Y", "%d/%m/%Y", "%Y-%m-%d", "%Y/%m/%d"]:
+                try:
+                    return datetime.strptime(end_date_str, fmt).date()
+                except ValueError:
+                    continue
+            # If formats don't match, try dateutil as fallback
+            try:
+                return dateutil_parser.parse(end_date_str, dayfirst=True).date()
+            except Exception:
+                pass
+            break  # Found a range pattern but couldn't parse, don't try other patterns
+
     # Month name mapping for DD MMM YYYY format
     months = {
         'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4,

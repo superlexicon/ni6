@@ -138,6 +138,13 @@ class BankDatabaseLookup:
                 return self._build_bank_info_from_row(result)
 
             # Try FULLTEXT search for partial name match
+            # Split search term into meaningful words (4+ chars) for filtering
+            search_words = set(w for w in bank_name_lower.split() if len(w) >= 4)
+
+            # Generic words that appear in many bank names - reject if ONLY these are present
+            generic_words = {'bank', 'ltd', 'limited', 'corp', 'corporation', 'plc', 'co', 'company'}
+            is_generic_only = search_words and search_words.issubset(generic_words)
+
             try:
                 fulltext_query = """
                     SELECT id, swift_code, country_code, legal_name, abbreviations, common_names
@@ -151,37 +158,57 @@ class BankDatabaseLookup:
                     fulltext_query += " AND country_code = %s"
                     ft_params.append(country_upper)
 
-                fulltext_query += " LIMIT 1"
-
+                # Fetch all matches (not just 1) for filtering
                 cursor.execute(fulltext_query, tuple(ft_params))
-                result = cursor.fetchone()
+                results = cursor.fetchall()
 
-                if result:
-                    return self._build_bank_info_from_row(result)
+                if results:
+                    # If search has only generic words, skip FULLTEXT results (too many matches)
+                    if is_generic_only:
+                        logger.debug(f"Search contains only generic words {search_words}, skipping FULLTEXT results")
+                    # If search has 2+ meaningful words, filter to matches with multiple word overlap
+                    elif len(search_words) >= 2:
+                        for result in results:
+                            # Check how many search words appear in this bank's names
+                            bank_text = f"{result['abbreviations']} {result['common_names']}".lower()
+                            word_matches = sum(1 for w in search_words if w in bank_text)
+                            # Require at least 2 word matches OR 50% of words
+                            if word_matches >= max(2, len(search_words) // 2):
+                                return self._build_bank_info_from_row(result)
+                        # No good match found
+                        logger.debug(
+                            f"FULLTEXT had {len(results)} results but none met word match criteria. "
+                            f"Search words: {search_words}"
+                        )
+                    else:
+                        # Single specific word search - return first result (existing behavior)
+                        return self._build_bank_info_from_row(results[0])
             except Exception as e:
                 # FULLTEXT might fail if index doesn't exist or word too short
                 logger.debug(f"FULLTEXT search failed: {e}, falling back to LIKE search")
 
             # Fallback to LIKE search for partial matching
-            fallback_query = """
-                SELECT id, swift_code, country_code, legal_name, abbreviations, common_names
-                FROM banks
-                WHERE is_active = 1
-                  AND common_names LIKE %s
-            """
-            fallback_params = [f"%{bank_name_lower}%"]
+            # Skip if search has only generic words (already handled above)
+            if not is_generic_only:
+                fallback_query = """
+                    SELECT id, swift_code, country_code, legal_name, abbreviations, common_names
+                    FROM banks
+                    WHERE is_active = 1
+                      AND common_names LIKE %s
+                """
+                fallback_params = [f"%{bank_name_lower}%"]
 
-            if country_upper:
-                fallback_query += " AND country_code = %s"
-                fallback_params.append(country_upper)
+                if country_upper:
+                    fallback_query += " AND country_code = %s"
+                    fallback_params.append(country_upper)
 
-            fallback_query += " LIMIT 1"
+                fallback_query += " LIMIT 1"
 
-            cursor.execute(fallback_query, tuple(fallback_params))
-            result = cursor.fetchone()
+                cursor.execute(fallback_query, tuple(fallback_params))
+                result = cursor.fetchone()
 
-            if result:
-                return self._build_bank_info_from_row(result)
+                if result:
+                    return self._build_bank_info_from_row(result)
 
         finally:
             conn.close()
