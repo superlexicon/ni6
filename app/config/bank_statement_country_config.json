@@ -248,6 +248,12 @@
         "list": []
       },
       "unit_patterns": ["^[\\d]+", "^(NO|NUM|NUMBER)\\s*\\d+"],
+      "bank_abbreviations": ["AYA", "CBB", "KBZ", "MAB"],
+      "bank_regulatory_patterns": [
+        "CENTRAL BANK OF MYANMAR",
+        "REGULATED BY.*MYANMAR",
+        "LICENSED BY.*MYANMAR"
+      ],
       "inference_patterns": ["myanmar", "rangoon", "mandalay"]
     },
     "CA": {

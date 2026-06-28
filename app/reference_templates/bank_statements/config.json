@@ -9750,6 +9750,11 @@
         "AYABMMMY"
       ]
     },
+    "CBB": {
+      "MM": [
+        "CBANMMMY"
+      ]
+    },
     "AZTP": {
       "AU": [
         "AZTPAU22"
@@ -99950,6 +99955,16 @@
     "ayabank.com": "AYA",
     "www.ayabank.com": "AYA",
     "info@ayabank.com": "AYA",
+    "CB Bank": "CBB",
+    "cb bank": "CBB",
+    "CB BANK": "CBB",
+    "CBBANK": "CBB",
+    "cbbank": "CBB",
+    "cbbank.com": "CBB",
+    "www.cbbank.com.mm": "CBB",
+    "Citibank Myanmar": "CBB",
+    "citibank myanmar": "CBB",
+    "Cooperative Bank": "CBB",
     "AZUPAY TRADING PTY LTD": "AZTP",
     "AZUPA": "AZTP",
     "azupay trading pty": "AZTP",

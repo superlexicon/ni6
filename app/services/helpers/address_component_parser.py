@@ -840,26 +840,34 @@ class AddressComponentParser:
         except Exception as e:
             logger.debug(f"Failed to load Thai states from library: {e}")
 
-        # Step 4: What remains is the city/district (last meaningful word after cleaning)
+        # Step 4: Extract city using Thai cities database (not just last word)
         address_part = address_part.strip(", \t\n-")
 
-        if address_part:
-            # Split on commas FIRST to handle comma-separated values properly
-            comma_parts = [p.strip() for p in address_part.split(',') if p.strip()]
-            if comma_parts:
-                # Get the last comma-separated part
-                last_part = comma_parts[-1]
-                # Split on whitespace to get individual words
-                words = [w for w in last_part.split() if w and len(w) > 1]
-                if words:
-                    # Get the last word as potential city
-                    potential_city = words[-1].strip(".,/-:;")
-                    if len(potential_city) >= 3:  # Minimum city name length
-                        components["address_city"] = {
-                            "value": potential_city.title(),
-                            "confidence": 0.75,
-                            "source": "parsed"
-                        }
+        # Load cities and match against known city names
+        try:
+            from countrystatecity_countries import get_cities_of_country
+
+            thai_cities = get_cities_of_country("TH")
+            # Sort by length (longest first) to match multi-word cities first
+            sorted_cities = sorted(thai_cities, key=lambda c: len(c.name), reverse=True)
+
+            for city in sorted_cities:
+                city_name_upper = city.name.upper()
+                # Use word boundary regex for consistent matching
+                pattern = rf'\b{re.escape(city_name_upper)}\b'
+                if re.search(pattern, address_part):
+                    # Found city
+                    components["address_city"] = {
+                        "value": city.name.title(),
+                        "confidence": 0.80,
+                        "source": "parsed"
+                    }
+                    # Remove city name from address_part
+                    address_part = re.sub(pattern, '', address_part)
+                    break
+        except Exception as e:
+            logger.debug(f"Failed to load Thai cities from library: {e}")
+            # Fallback: leave city empty rather than setting to partial word
 
         # Step 5: Everything before city is street address
         street_part = address

@@ -346,6 +346,79 @@ def generate_passport_hash(passport_country: str, passport_number: str) -> str:
     return hash_obj.hexdigest()
 
 
+def convert_alpha3_to_alpha2(country_code: str) -> Optional[str]:
+    """
+    Convert ISO 3166-1 alpha-3 country code to alpha-2 format.
+
+    Args:
+        country_code: 3-letter country code (e.g., 'USA', 'GBR')
+
+    Returns:
+        2-letter country code (e.g., 'US', 'GB') or None if not found
+    """
+    if not country_code:
+        return None
+
+    country_code = country_code.upper().strip()
+
+    # Build reverse mapping (alpha-3 to alpha-2)
+    alpha3_to_alpha2 = {v: k for k, v in ISO_COUNTRY_CODES.items()}
+
+    return alpha3_to_alpha2.get(country_code)
+
+
+def country_name_to_code(country_name: str) -> Optional[str]:
+    """
+    Convert country name to ISO 3166-1 alpha-2 country code.
+
+    Args:
+        country_name: Full country name (e.g., 'United States', 'Singapore')
+
+    Returns:
+        2-letter country code (e.g., 'US', 'SG') or None if not found
+    """
+    if not country_name:
+        return None
+
+    # Common country name to alpha-2 mapping
+    COUNTRY_NAME_MAP = {
+        # Common names
+        'united states': 'US', 'usa': 'US', 'america': 'US',
+        'united kingdom': 'GB', 'uk': 'GB', 'britain': 'GB', 'england': 'GB',
+        'singapore': 'SG',
+        'australia': 'AU',
+        'india': 'IN',
+        'malaysia': 'MY',
+        'thailand': 'TH',
+        'philippines': 'PH',
+        'indonesia': 'ID',
+        'vietnam': 'VN',
+        'china': 'CN',
+        'hong kong': 'HK',
+        'japan': 'JP',
+        'south korea': 'KR', 'korea': 'KR',
+        'taiwan': 'TW',
+        'united arab emirates': 'AE', 'uae': 'AE',
+        'saudi arabia': 'SA',
+        'germany': 'DE',
+        'france': 'FR',
+        'italy': 'IT',
+        'spain': 'ES',
+        'netherlands': 'NL',
+        'belgium': 'BE',
+        'switzerland': 'CH',
+        'canada': 'CA',
+        'mexico': 'MX',
+        'brazil': 'BR',
+        'argentina': 'AR',
+        'russia': 'RU',
+        'myanmar': 'MM', 'burma': 'MM',
+    }
+
+    normalized = country_name.lower().strip()
+    return COUNTRY_NAME_MAP.get(normalized)
+
+
 def validate_iso_country_code(country_code: str) -> bool:
     """
     Validate if a country code is in ISO format (2 or 3 letters).

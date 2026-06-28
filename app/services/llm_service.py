@@ -597,81 +597,87 @@ class LLMService:
             logger.error(f"Failed to convert PDF to image: {str(e)}")
             return pdf_bytes
 
-    def _ensure_qwen_compatible_dimensions(self, image_bytes: bytes, target_multiple: int = 28) -> bytes:
+    def _ensure_token_budget(self, image_bytes: bytes) -> bytes:
         """
-        Ensure image dimensions are compatible with qwen3-vl requirements.
+        Ensure image fits within token budget for vision LLM.
 
-        qwen3-vl requires:
-        - Dimensions as multiples of 28 pixels (patch_size × temporal_patch_size)
-        - Minimum 56×56 pixels
-        - Maximum < 1M pixels
-
-        This function checks if dimensions are already compatible and skips processing
-        if they are, avoiding unnecessary image degradation.
+        For qwen3.5 and modern vision LLMs:
+        - Patch size: ~14×14 pixels per patch
+        - Each patch ≈ 1 token
+        - Context window: 8192 tokens (LLM_MAX_TOKENS)
+        - Output tokens: ~1000 (num_predict)
+        - Prompt overhead: ~1192 tokens
+        - Available for image: ~6000 tokens
+        - Max dimension: sqrt(6000) × 14 ≈ 1078 pixels
 
         Args:
-            image_bytes: JPEG image bytes
-            target_multiple: Dimension multiple (default 28 for qwen)
+            image_bytes: Image bytes (JPEG/PNG/PDF supported)
 
         Returns:
-            Resized JPEG image bytes with compatible dimensions (or original if already compatible)
+            Processed image bytes (JPEG format)
         """
         try:
             from PIL import Image
-            import math
+            import io
+            from app.utils.image_preprocessing import crop_to_content
+
+            # Convert PDF to image if needed
+            if image_bytes.startswith(b'%PDF'):
+                image_bytes = self._convert_pdf_to_image(image_bytes)
+
+            # Crop to content to maximize effective resolution
+            # This removes white/empty backgrounds that waste token budget
+            image_bytes = crop_to_content(image_bytes)
 
             img = Image.open(io.BytesIO(image_bytes))
             width, height = img.size
 
-            # Check if dimensions are already multiples of target_multiple
-            is_width_compatible = (width % target_multiple) == 0
-            is_height_compatible = (height % target_multiple) == 0
+            # Handle CMYK color space (common in scanned documents)
+            # Log image mode for debugging
+            logger.debug(f"Image mode: {img.mode}, size: {width}x{height}")
 
-            # Check minimum dimensions
-            is_min_compatible = width >= 56 and height >= 56
+            if img.mode == 'CMYK':
+                logger.info("Converting CMYK image to RGB")
+                try:
+                    # Convert CMYK to RGB
+                    img = img.convert('RGB')
+                except Exception as e:
+                    logger.error(f"CMYK to RGB conversion failed: {e}")
+                    # Fallback: try converting through RGB mode directly
+                    img = img.convert('RGB')
+            elif img.mode != 'RGB':
+                # Handle other color modes (RGBA, L, P, etc.)
+                img = img.convert('RGB')
 
-            # Check maximum pixel count
-            is_max_compatible = (width * height) < 1000000
+            # Calculate max dimension from token budget
+            max_image_tokens = 6000
+            patch_size = 14  # qwen3.5 patch size
+            max_dimension = int((max_image_tokens ** 0.5) * patch_size)  # ≈ 1078 pixels
 
-            if is_width_compatible and is_height_compatible and is_min_compatible and is_max_compatible:
-                logger.debug(
-                    f"Image dimensions already compatible: {width}×{height} "
-                    f"(width%{target_multiple}={width%target_multiple}, height%{target_multiple}={height%target_multiple})"
-                )
-                return image_bytes
+            # Scale down if exceeds token budget
+            max_dim = max(width, height)
+            if max_dim > max_dimension:
+                scale = max_dimension / max_dim
+                width = int(width * scale)
+                height = int(height * scale)
+                logger.debug(f"Scaled image from {max_dim}px to {max_dimension}px to fit token budget")
+                img = img.resize((width, height), Image.LANCZOS)
 
-            # Calculate target dimensions (align to multiples of target_multiple)
-            target_width = max(56, ((width + target_multiple - 1) // target_multiple) * target_multiple)
-            target_height = max(56, ((height + target_multiple - 1) // target_multiple) * target_multiple)
+            # Save as JPEG
+            output = io.BytesIO()
+            img.save(output, format='JPEG', quality=95)
+            result = output.getvalue()
 
-            # Ensure total pixels < 1M
-            total_pixels = target_width * target_height
-            max_pixels = 1000000
-            if total_pixels > max_pixels:
-                scale = math.sqrt(max_pixels / total_pixels)
-                target_width = int(target_width * scale)
-                target_height = int(target_height * scale)
-                # Re-align to multiples of target_multiple
-                target_width = (target_width // target_multiple) * target_multiple
-                target_height = (target_height // target_multiple) * target_multiple
-                # Ensure minimum after scaling
-                target_width = max(56, target_width)
-                target_height = max(56, target_height)
+            estimated_tokens = ((width + patch_size - 1) // patch_size) * ((height + patch_size - 1) // patch_size)
+            logger.debug(f"Token-aware sizing: {width}×{height} → ~{estimated_tokens} tokens (budget: {max_image_tokens})")
 
-            if width != target_width or height != target_height:
-                logger.debug(f"Resizing image from {width}×{height} to {target_width}×{target_height} for qwen compatibility")
-                img = img.resize((target_width, target_height), Image.LANCZOS)
-                output = io.BytesIO()
-                img.save(output, format='JPEG', quality=95)
-                return output.getvalue()
-
-            return image_bytes
+            return result
 
         except ImportError:
             logger.warning("PIL not available, returning original image")
             return image_bytes
         except Exception as e:
-            logger.error(f"Failed to adjust image dimensions: {str(e)}")
+            logger.error(f"Failed to apply token-based sizing: {str(e)}")
             return image_bytes
 
     def _resize_image(self, image_bytes: bytes, max_size: int, quality: int = 85) -> bytes:
@@ -775,15 +781,12 @@ class LLMService:
         start_time = time.time()
 
         try:
-            # Image is already preprocessed in the pipeline to meet qwen requirements
-            # No additional resizing needed here - dimensions are already:
-            # - Multiples of 28 (qwen3-vl requirement)
-            # - < 1M pixels (qwen3-vl limit)
-            # - JPEG format for compatibility
-            logger.debug(f"Using preprocessed image ({len(image_bytes)} bytes) - skipping additional resizing")
+            # Apply token-based image sizing for qwen3.5+ and modern vision LLMs
+            # This replaces the old 28-pixel alignment requirement
+            processed_bytes = self._ensure_token_budget(image_bytes)
 
             # Encode to base64
-            image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+            image_base64 = base64.b64encode(processed_bytes).decode('utf-8')
 
             # Build Ollama vision API payload
             # Ollama uses 'images' array with base64 strings, not OpenAI's image_url format
@@ -815,7 +818,7 @@ class LLMService:
             # Use vision client with longer timeout
             client = await self._get_client(vision_request=True)
 
-            logger.info(f"Calling vision LLM: {self.vision_model} with image ({len(image_bytes)} bytes)")
+            logger.info(f"Calling vision LLM: {self.vision_model} with image ({len(processed_bytes)} bytes)")
 
             # Build Ollama API URL
             base_url = self.api_url.replace('/v1', '').replace('/chat/completions', '')
@@ -895,6 +898,15 @@ class LLMService:
                     "elapsed_ms": elapsed_ms
                 }
 
+        except httpx.HTTPStatusError as e:
+            elapsed_ms = int((time.time() - start_time) * 1000)
+            # Capture Ollama's error response body for debugging
+            error_body = e.response.text[:500] if hasattr(e.response, 'text') else str(e)
+            logger.error(f"Vision LLM HTTP {e.response.status_code}: {error_body}")
+            return {
+                "error": f"HTTP {e.response.status_code}: {error_body}",
+                "elapsed_ms": elapsed_ms
+            }
         except Exception as e:
             elapsed_ms = int((time.time() - start_time) * 1000)
             logger.error(f"Vision LLM call failed: {str(e)}")

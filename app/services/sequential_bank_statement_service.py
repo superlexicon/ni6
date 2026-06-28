@@ -1617,38 +1617,26 @@ class SequentialBankStatementService(DocumentProcessorBase):
 
     def _preprocess_image_for_pipeline(self, image_bytes: bytes) -> tuple[bytes, int, int, dict]:
         """
-        Preprocess image for the pipeline - simplified to eliminate coordinate bleeding.
+        Preprocess image for the pipeline with token-aware sizing.
 
-        This is the ONLY place where image resizing should happen.
-        The resulting image is then passed consistently to both DocTR OCR and Vision LLM,
-        ensuring coordinate alignment between text blocks and bbox coordinates.
+        Token calculation for qwen3.5+:
+        - Patch size: ~14×14 pixels per patch
+        - Each patch ≈ 1 token
+        - Max image tokens = num_ctx (8192) - output tokens (~1000) - prompt overhead
+        - Target: Keep image under ~6000 tokens to leave room for prompt/output
 
-        SIMPLIFIED APPROACH:
-        - Original image is pasted onto 1008×1008 canvas with minimal resizing
-        - Only scales if dimension > 1008 (to fit on canvas)
-        - Maintains single coordinate system to avoid transformation errors
-        - This fixes coordinate bleeding caused by multiple resize operations
-
-        Target dimensions satisfy:
-        - Exactly 1008×1008 (Qwen3-VL optimal reference resolution)
-        - Multiples of 28 (qwen3-vl requirement)
-
-        The 1008×1008 requirement is critical for Qwen3-VL coordinate accuracy.
-        Non-square images cause coordinate misalignment due to aspect ratio issues.
-        See: https://github.com/ggerganov/llama.cpp/issues/16880
+        Max dimension formula: sqrt(6000) × 14 ≈ 1086 pixels
 
         Args:
             image_bytes: Original image or PDF bytes
 
         Returns:
             Tuple of (preprocessed JPEG bytes, width, height, padding_info)
-            - width and height are always 1008
-            - padding_info contains {'left': x, 'top': y, 'right': x, 'bottom': y}
         """
         import fitz  # PyMuPDF
 
         self.logger.info("=" * 80)
-        self.logger.info("UNIFIED IMAGE PREPROCESSING")
+        self.logger.info("PREPROCESSING IMAGE FOR VISION LLM (Token-Aware Sizing)")
         self.logger.info("=" * 80)
 
         # Step 1: Convert PDF to image if needed
@@ -1675,85 +1663,55 @@ class SequentialBankStatementService(DocumentProcessorBase):
         else:
             # Load image
             img = Image.open(io.BytesIO(image_bytes))
-            self.logger.info(f"Input image dimensions: {img.size[0]}×{img.size[1]}")
+            self.logger.info(f"Original dimensions: {img.size[0]}×{img.size[1]} ({len(image_bytes)} bytes)")
 
-        # Convert to RGB
+        # Convert to RGB if needed
         if img.mode != 'RGB':
             img = img.convert('RGB')
+            self.logger.info(f"Converted to RGB")
 
-        # Step 1.5: Crop whitespace margins to improve canvas utilization
+        # Step 2: Crop whitespace margins to improve canvas utilization
         img = self._crop_whitespace(img, margin_threshold=30)
 
         width, height = img.size
 
-        # Step 2: Scale only if too large for 1008×1008 canvas
-        max_dimension = max(width, height)
-        if max_dimension > 1008:
-            scale = 1008 / max_dimension
+        # Step 3: Calculate max dimension based on token limit
+        # For qwen3.5: ~14×14 pixels per patch, each patch ≈ 1 token
+        # Allow ~6000 tokens for image (8192 context - 1000 output - 1192 overhead)
+        max_image_tokens = 6000
+        patch_size = 14  # qwen3.5 patch size
+        max_dimension = int((max_image_tokens ** 0.5) * patch_size)  # ≈ 1086 pixels
+
+        self.logger.info(f"Token-aware sizing: max {max_image_tokens} tokens → max {max_dimension}×{max_dimension}px")
+
+        # Step 4: Scale down if exceeds token budget
+        max_dim = max(width, height)
+        if max_dim > max_dimension:
+            scale = max_dimension / max_dim
             width = int(width * scale)
             height = int(height * scale)
-            self.logger.info(f"Scaled to fit 1008×1008 canvas: {width}×{height}")
-
-        # Step 3: Align to multiples of 28 (Qwen3-VL requirement)
-        new_width = (width // 28) * 28
-        new_height = (height // 28) * 28
-
-        # Ensure minimum dimensions (at least 28)
-        new_width = max(28, new_width)
-        new_height = max(28, new_height)
-
-        self.logger.info(f"Aligned to multiples of 28: {new_width}×{new_height}")
-
-        # Step 4: Resize if needed (single transformation)
-        if (new_width, new_height) != img.size:
-            self.logger.info(f"Resizing from {img.size[0]}×{img.size[1]} to {new_width}×{new_height}")
-            img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            self.logger.info(f"Scaled to fit token budget: {width}×{height} (max {max_dimension}px)")
+            img = img.resize((width, height), Image.Resampling.LANCZOS)
         else:
-            self.logger.info("No resizing needed - dimensions already compatible")
+            self.logger.info(f"Image fits token budget - no scaling needed")
 
-        # Step 5: Pad to exactly 1008×1008 (Qwen3-VL optimal reference resolution)
-        # Qwen3-VL has patch size 14×14, merging 2×2 patches = 28 pixels
-        # 1008 is divisible by 28 (1008 ÷ 28 = 36), preventing internal resizing
-        # See: https://github.com/ggerganov/llama.cpp/issues/16880
-        if (new_width, new_height) != (1008, 1008):
-            self.logger.info(f"Padding to 1008×1008 for Qwen3-VL coordinate accuracy (top-left alignment)")
-
-            # Create 1008×1008 canvas with black padding
-            canvas = Image.new('RGB', (1008, 1008), 'black')
-
-            # Align to top-left (no centering) - simplifies coordinate matching
-            paste_x = 0
-            paste_y = 0
-
-            canvas.paste(img, (paste_x, paste_y))
-
-            # Calculate padding info (padding is only on right/bottom)
-            padding = {
-                'left': 0,
-                'top': 0,
-                'right': 1008 - new_width,
-                'bottom': 1008 - new_height
-            }
-
-            self.logger.info(f"Padding applied: left={padding['left']}, top={padding['top']}, "
-                           f"right={padding['right']}, bottom={padding['bottom']} (top-left aligned)")
-
-            img = canvas
-        else:
-            padding = {'left': 0, 'top': 0, 'right': 0, 'bottom': 0}
-            self.logger.info("Image already 1008×1008 - no padding needed")
+        # Step 5: Calculate estimated token usage
+        estimated_tokens = ((width + patch_size - 1) // patch_size) * ((height + patch_size - 1) // patch_size)
+        self.logger.info(f"Estimated image tokens: ~{estimated_tokens} (budget: {max_image_tokens})")
 
         # Step 6: Save as JPEG
         output = io.BytesIO()
         img.save(output, format='JPEG', quality=95)
         result = output.getvalue()
 
-        self.logger.info(f"Preprocessed image: {len(result)} bytes, 1008×1008")
-        self.logger.info(f"Simplified preprocessing: only scale if > 1008, align to 28, pad to 1008×1008")
-        self.logger.info(f"This eliminates coordinate bleeding from multiple resize operations")
+        # No padding for modern vision LLMs
+        padding = {'left': 0, 'top': 0, 'right': 0, 'bottom': 0}
+
+        self.logger.info(f"Final image: {len(result)} bytes, {width}×{height}")
+        self.logger.info(f"Token-aware preprocessing: scale to fit {max_image_tokens} token budget")
         self.logger.info("=" * 80)
 
-        return result, 1008, 1008, padding
+        return result, width, height, padding
 
     def _generate_layout_signature(self, text_blocks: List[Dict[str, Any]]) -> str:
         """

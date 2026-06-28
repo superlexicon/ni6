@@ -135,7 +135,8 @@ class FaceBiometricsRepository:
                 cursor = conn.cursor()
                 sql = "SELECT COUNT(*) FROM face_biometrics WHERE user_identity_id = %s"
                 cursor.execute(sql, (user_identity_id,))
-                count = cursor.fetchone()[0]
+                result = cursor.fetchone()
+                count = result[0] if result else 0
                 cursor.close()
                 return count
         except Exception as e:

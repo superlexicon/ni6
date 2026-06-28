@@ -383,20 +383,52 @@ class PassportExtractor:
 
     def _extract_fields_logic_based(self, text_blocks: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
-        Extract passport fields using logic-based single-pass algorithm.
+        Extract passport fields using MRZ-first approach.
+
+        Extraction priority:
+        1. MRZ parsing with check digit validation (most reliable)
+        2. Logic-based OCR extraction (fallback)
 
         Algorithm:
-        1. Single pass through OCR blocks
-        2. Check in priority order: type → country → passport → alt_id → "name" → dates → sex
-        3. Skip already-found fields (early exit per field)
-        4. Post-pass: resolve dates (sort) and names (x-proximity)
+        1. Try MRZ extraction first
+        2. If MRZ fails, fall back to single-pass OCR:
+           - Check in priority order: type → country → passport → alt_id → "name" → dates → sex
+           - Skip already-found fields (early exit per field)
+           - Post-pass: resolve dates (sort) and names (x-proximity)
 
         Returns:
             Dict with extracted fields
         """
         self.logger.info("=" * 80)
-        self.logger.info("LOGIC-BASED PASSPORT EXTRACTION (O(N) single-pass)")
+        self.logger.info("LOGIC-BASED PASSPORT EXTRACTION (MRZ-First)")
         self.logger.info("=" * 80)
+
+        # Step 1: Try MRZ extraction
+        from app.utils.mrz_parser import MRZParser
+        mrz_data = MRZParser.find_and_parse_mrz(text_blocks)
+
+        if mrz_data and mrz_data.all_valid:
+            self.logger.info("✓ MRZ extraction successful with valid check digits")
+
+            from app.utils.country_code_converter import convert_alpha3_to_alpha2
+
+            found = {
+                'passport_number': mrz_data.passport_number,
+                'full_name': f"{mrz_data.surname} {mrz_data.given_names}".strip(),
+                'surname': mrz_data.surname,
+                'given_names': mrz_data.given_names,
+                'date_of_birth': MRZParser.normalize_date(mrz_data.date_of_birth),
+                'sex': mrz_data.sex,
+                'date_of_expiry': MRZParser.normalize_date(mrz_data.date_of_expiry),
+                'country_code': convert_alpha3_to_alpha2(mrz_data.country_code) or mrz_data.country_code,
+                'nationality': convert_alpha3_to_alpha2(mrz_data.country_code) or mrz_data.country_code,
+                'extraction_source': 'MRZ'
+            }
+
+            self.logger.info(f"MRZ extraction completed: {len(found)} fields extracted")
+            return found
+
+        self.logger.info("MRZ not available or invalid, falling back to OCR extraction...")
 
         # Initialize state
         found = {

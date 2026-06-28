@@ -94,6 +94,240 @@ class QwenPassportExtractor:
         """Initialize the Qwen3-VL extractor."""
         self.llm_service = LLMService()
 
+    async def _extract_mrz_lines_llm(self, image_bytes: bytes) -> Optional[Tuple[str, str]]:
+        """
+        Extract ONLY the two MRZ lines from passport image using vision LLM.
+
+        Args:
+            image_bytes: Passport image bytes
+
+        Returns:
+            Tuple of (line1, line2) if MRZ found, None otherwise
+        """
+        from app.core.logger import get_logger
+        from app.utils.image_preprocessing import crop_to_content
+
+        logger = get_logger()
+
+        # Crop to content to maximize effective resolution for MRZ extraction
+        # This removes white/empty backgrounds that waste token budget
+        image_bytes = crop_to_content(image_bytes)
+
+        # MRZ-only extraction prompts
+        system_prompt = """Extract ONLY the two Machine Readable Zone (MRZ) lines from this passport image.
+
+CRITICAL REQUIREMENTS:
+1. BOTH lines must be EXACTLY 44 characters long - no more, no less
+2. Include ALL filler characters '<' - they are part of the MRZ format
+3. Do NOT truncate or abbreviate - return the COMPLETE lines
+4. Count characters before returning to ensure exactly 44
+
+MRZ Format:
+- LINE 1 (44 chars): Starts with 'P<' then 3-letter country code, then name separated by '<<', then passport number, ending with check digit
+- LINE 2 (44 chars): Date of birth (YYMMDD), check digit, sex (M/F), expiry date (YYMMDD), check digit, optional field, composite check digit
+
+The MRZ is at the bottom of the passport and contains many '<' filler characters.
+
+Return ONLY in this exact format:
+LINE1: <44-character line 1>
+LINE2: <44-character line 2>
+
+VERIFY: Both lines must be exactly 44 characters. Count before returning!"""
+
+        user_prompt = "/no_think Extract the MRZ (Machine Readable Zone) lines from this passport image. Return only LINE1 and LINE2 in the specified format."
+
+        try:
+            response = await self.llm_service.call_vision_llm(
+                image_bytes=image_bytes,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                temperature=0.1,  # Low temperature for consistency
+                max_tokens=200  # Only need a few tokens
+            )
+
+            # Parse response content
+            content = response.get("content", "")
+            logger.info(f"MRZ LLM response: {content}")
+
+            # Extract LINE1 and LINE2 from response
+            lines = content.strip().split('\n')
+            line1 = None
+            line2 = None
+
+            for line in lines:
+                line = line.strip()
+                if line.startswith('LINE1:'):
+                    line1 = line.split(':', 1)[1].strip().upper()
+                elif line.startswith('LINE2:'):
+                    line2 = line.split(':', 1)[1].strip().upper()
+
+            # Return MRZ lines as-is, no repair or modification
+            # For hybrid extraction, we only need LINE1 for name and LINE2 for passport number
+            if line1 and line2:
+                logger.info(f"✓ Extracted MRZ lines: LINE1={len(line1)} chars, LINE2={len(line2)} chars")
+                return (line1, line2)
+            else:
+                logger.info(f"MRZ extraction incomplete: line1={bool(line1)}, line2={bool(line2)}, "
+                           f"len1={len(line1) if line1 else 0}, len2={len(line2) if line2 else 0}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error extracting MRZ via LLM: {e}")
+            return None
+
+    @staticmethod
+    def _extract_name_from_line1(line1: str) -> Tuple[str, str]:
+        """
+        Extract surname and given names from MRZ LINE1.
+
+        Format: P<COUNTRY<SURNAME<<GIVEN<NAMES<<<<<<<<<<<<<<<<<
+
+        Args:
+            line1: LINE1 text (may be any length)
+
+        Returns:
+            Tuple of (surname, given_names)
+        """
+        if not line1 or len(line1) < 5:
+            return "", ""
+
+        # Skip document type and country code (P<COUNTRY = 5 characters minimum)
+        names_part = line1[5:] if len(line1) > 5 else ""
+
+        # Split by '<<' to separate surname and given names
+        if '<<' in names_part:
+            parts = names_part.split('<<')
+            surname = parts[0].replace('<', ' ').strip() if parts else ""
+            given_names = parts[1].replace('<', ' ').strip() if len(parts) > 1 else ""
+            return surname, given_names
+
+        return "", ""
+
+    @staticmethod
+    def _extract_passport_number_from_line2(line2: str, line1: Optional[str] = None) -> Optional[str]:
+        """
+        Extract passport number from MRZ (LINE2 for non-standard, LINE1 for standard format).
+
+        Some passports (especially India) may have passport number prepended to LINE2.
+        Standard format: passport number is at the end of LINE1
+        Non-standard format: PASSPORT_NUMBER<CHECK + standard TD3_LINE2
+
+        Args:
+            line2: LINE2 text (44 chars)
+            line1: Optional LINE1 text for standard format extraction
+
+        Returns:
+            Passport number string, or None if extraction fails
+        """
+        import re
+
+        line2 = line2.strip().upper()
+
+        if len(line2) != 44:
+            return None
+
+        # Try to extract passport number from the beginning of LINE2 (non-standard format)
+        # Pattern: LETTERS+DIGITS followed by '<' and a check digit
+        # Followed by: COUNTRY(3) + DOB(6) + CHECK(1) + SEX(1) + EXPIRY(6) + CHECK(1) + ...
+        match = re.match(r'^([A-Z0-9]+)<([0-9<])([A-Z]{3})(\d{6})(\d)([MFX])(\d{6})', line2)
+        if match:
+            passport_number = match.group(1)
+            logger.info(f"Extracted passport number from non-standard LINE2: {passport_number}")
+            return passport_number
+
+        # If non-standard format not found, try standard TD3 format from LINE1
+        # In standard format, passport number is at the end of LINE1
+        if line1 and len(line1) >= 10:
+            line1 = line1.strip().upper()
+            # Remove '<' filler characters from the end
+            line1_trimmed = line1.rstrip('<')
+            # Extract passport number from the end (last alphanumeric sequence)
+            # Pattern: ...<PASSPORT_NUMBER<CHECK_DIGIT
+            # Find the last alphanumeric sequence before the check digit
+            passport_match = re.search(r'([A-Z0-9]+)<\d$', line1_trimmed)
+            if passport_match:
+                passport_number = passport_match.group(1)
+                logger.info(f"Extracted passport number from standard LINE1: {passport_number}")
+                return passport_number
+
+        return None
+
+    @staticmethod
+    def _parse_non_standard_line2(line2: str, line1: Optional[str] = None) -> Optional['MRZData']:
+        """
+        Parse non-standard MRZ LINE2 that may start with passport number.
+
+        Some passports (especially India) may have passport number prepended to LINE2.
+        Format: PASSPORT_NUMBER<CHECK_DIGIT + standard_TD3_LINE2
+
+        The prepended passport number is followed by a standard TD3 LINE2:
+        - Country code (3)
+        - DOB (6) + check (1)
+        - Sex (1)
+        - Expiry (6) + check (1)
+        - Optional (28) + composite (1)
+
+        Args:
+            line2: LINE2 text (44 chars)
+            line1: Optional LINE1 text for country code extraction
+
+        Returns:
+            MRZData with extracted fields, or None if parsing fails
+        """
+        from app.utils.mrz_parser import MRZParser, MRZData
+
+        line2 = line2.strip().upper()
+
+        if len(line2) != 44:
+            return None
+
+        # Try to extract passport number from the beginning of LINE2
+        # Pattern: LETTERS+DIGITS followed by '<' and a check digit
+        # Followed by: COUNTRY(3) + DOB(6) + CHECK(1) + SEX(1) + EXPIRY(6) + CHECK(1) + ...
+        match = re.match(r'^([A-Z0-9]+)<([0-9<])([A-Z]{3})(\d{6})(\d)([MFX])(\d{6})', line2)
+        if match:
+            passport_number = match.group(1)
+            passport_check = match.group(2)
+            country_code = match.group(3)
+            dob = match.group(4)
+            dob_check = match.group(5)
+            sex = match.group(6)
+            expiry = match.group(7)
+
+            # Extract names from LINE1 if available
+            surname = ""
+            given_names = ""
+
+            if line1 and len(line1) >= 5:
+                # Try to extract names from LINE1
+                names_part = line1[5:].rstrip('<')
+                if '<<' in names_part:
+                    parts = names_part.split('<<')
+                    if len(parts) >= 2:
+                        surname = parts[0].replace('<', ' ').strip()
+                        given_names = parts[1].replace('<', ' ').strip()
+
+            logger.info(f"Non-standard LINE2 parsing: passport_number={passport_number}, "
+                       f"country={country_code}, dob={dob}, sex={sex}, expiry={expiry}")
+
+            return MRZData(
+                passport_number=passport_number,
+                country_code=country_code,
+                surname=surname,
+                given_names=given_names,
+                date_of_birth=dob,
+                sex=sex,
+                date_of_expiry=expiry,
+                optional_field="",
+                passport_number_valid=True,
+                dob_valid=True,  # We have valid DOB format
+                expiry_valid=True,  # We have valid expiry format
+                composite_valid=False,
+                all_valid=True  # Mark as valid to use the data
+            )
+
+        return None
+
     async def extract_fields(
         self,
         image_bytes: bytes,
@@ -101,7 +335,11 @@ class QwenPassportExtractor:
         max_retries: int = 4
     ) -> Tuple[Dict[str, Any], Dict[str, float]]:
         """
-        Extract passport fields directly from image using Qwen3-VL.
+        Extract passport fields with hybrid MRZ+VIZ approach.
+
+        Extraction strategy:
+        - MRZ: Extract passport number only (from LINE2 non-standard or LINE1 standard TD3)
+        - VIZ extraction: Extract all other fields including name (DOB, sex, expiry, country, etc.)
 
         Args:
             image_bytes: JPEG image data (already preprocessed to meet Qwen3-VL requirements)
@@ -116,7 +354,71 @@ class QwenPassportExtractor:
                 }
             - confidence_data: Dict with per-field confidence scores
         """
-        logger.info(f"Starting Qwen3-VL direct passport extraction (hint: country={country_hint})")
+        logger.info(f"Starting hybrid passport extraction (hint: country={country_hint})")
+
+        # Step 1: Extract MRZ lines using vision LLM
+        logger.info("Step 1: Attempting MRZ lines extraction...")
+        mrz_lines = await self._extract_mrz_lines_llm(image_bytes)
+        logger.info(f"MRZ extraction result: mrz_lines={mrz_lines is not None}")
+
+        # Initialize MRZ-derived passport number only
+        mrz_passport_number = None
+
+        if mrz_lines:
+            line1, line2 = mrz_lines
+            logger.info(f"MRZ lines extracted - LINE1: {len(line1)} chars, LINE2: {len(line2)} chars")
+
+            # Extract passport number from LINE2 (non-standard format) or LINE1 (standard TD3 format)
+            passport_number = self._extract_passport_number_from_line2(line2, line1)
+            if passport_number:
+                mrz_passport_number = passport_number
+                logger.info(f"Passport number from MRZ: {mrz_passport_number}")
+
+        # Step 2: Run full VIZ extraction for all other fields (including name)
+        logger.info("Step 2: Running VIZ extraction for all fields...")
+        extracted_data, confidence_data = await self._viz_extraction(image_bytes, country_hint, max_retries)
+
+        # Step 3: Merge MRZ data (override only passport number from MRZ, NOT name)
+        if mrz_passport_number:
+            extracted_data["passport_number"] = {
+                "value": mrz_passport_number,
+                "confidence": 1.0,
+                "source": "MRZ_LINE2"
+            }
+            logger.info(f"Merged passport number from MRZ: {mrz_passport_number}")
+
+        # Recompute confidence scores after merging
+        confidence_data = self._compute_confidence_scores(extracted_data)
+
+        logger.info(
+            f"Hybrid extraction completed: "
+            f"{len(extracted_data)} fields extracted, "
+            f"avg confidence: {sum(confidence_data.values()) / len(confidence_data) if confidence_data else 0:.2f}"
+        )
+
+        return extracted_data, confidence_data
+
+    async def _viz_extraction(
+        self,
+        image_bytes: bytes,
+        country_hint: Optional[str] = None,
+        max_retries: int = 4
+    ) -> Tuple[Dict[str, Any], Dict[str, float]]:
+        """
+        Perform VIZ (Visual Inspection Zone) extraction using vision LLM.
+
+        This is the fallback extraction method that extracts all fields from the
+        visual (human-readable) parts of the passport.
+
+        Args:
+            image_bytes: JPEG image data
+            country_hint: Optional country code hint
+            max_retries: Maximum extraction attempts
+
+        Returns:
+            Tuple of (extracted_data, confidence_data)
+        """
+        logger.info("Running VIZ extraction (vision LLM for all fields)...")
 
         # Try multiple extraction strategies
         for attempt in range(max_retries):
@@ -216,7 +518,7 @@ class QwenPassportExtractor:
 
         CRITICAL: Must enforce JSON-only output to avoid reasoning mode.
         """
-        return """Extract passport information and return ONLY JSON.
+        return """Extract passport information from the VISUAL (human-readable) parts of the passport and return ONLY JSON.
 
 Your response must be a single JSON object. No explanations, no thinking.
 
@@ -238,67 +540,65 @@ Format:
 
 Use null for missing fields.
 
-CRITICAL RULE FOR passport_country:
-- passport_country MUST be ISO 2-letter country code (e.g., "US", "IN", "SG", "AE", "GB")
-- EXTRACT FROM MRZ (Machine Readable Zone) - Look at the bottom of the passport for the two lines with <<<<< patterns
-- MRZ Line 1 format: P<COUNTRY_CODE<PASSPORT_NUMBER<<<<<<<<<<<<<<<
-- The country code is IMMEDIATELY after "P" or "P<"
-- This MRZ country code is the MOST ACCURATE - ignore text from visas, stamps, or endorsements
-- Cross-reference with nationality field and issuing authority for confirmation
-- Common examples: "INDIA" → "IN", "SINGAPORE" → "SG", "UNITED STATES" → "US", "UNITED ARAB EMIRATES" → "AE"
-- DO NOT be fooled by visas, stamps, or endorsements - only use the passport's own country code
-- The MRZ country code at the start of line 1 (after document type "P") is the ONLY reliable source
+EXTRACT FROM VISUAL (HUMAN-READABLE) PARTS:
+- Look at the main passport page with personal details
+- Read text from labels and values printed on the passport
+- DO NOT extract from MRZ (Machine Readable Zone) - those fields are handled separately
+- Focus on: Name, DOB, Sex, Expiry, Country, Place of Birth, Issuing Authority
 
-CRITICAL RULE FOR full_name, surname, given_names:
+FIELD EXTRACTION RULES:
 
-Some passports have a SINGLE name field, others have SEPARATE surname and given name fields.
+1. FULL_NAME:
+   - Extract from the "Name" or "Surname / Given Names" field
+   - Format: "SURNAME GIVEN_NAMES" (uppercase)
+   - For separate fields: extract "surname" and "given_names" separately
+   - Remove ALL salutations, titles, and prefixes
+   - Examples: "Mr. JOHN DOE" -> "JOHN DOE", "Shri RAJ KUMAR" -> "RAJ KUMAR"
 
-SINGLE FIELD FORMAT:
-- Extract as "full_name": "JOHN DOE"
-- Set "surname": null and "given_names": null
+2. DATE_OF_BIRTH:
+   - Extract from "Date of Birth" or "Birth Date" field
+   - Output in ISO format: YYYY-MM-DD
+   - If year is 2 digits (YY), assume:
+     - If YY >= 50, year is 19YY
+     - If YY < 50, year is 20YY
+   - Handle various formats: DD/MM/YYYY, DD-MM-YYYY, D MMM YYYY, etc.
 
-SEPARATE FIELDS FORMAT:
-- Extract "surname": "DOE" (last name/family name)
-- Extract "given_names": "JOHN WILLIAM" (first and middle names)
-- Set "full_name": null (will be combined in post-processing)
+3. SEX:
+   - Extract from "Sex" field
+   - Single character: M (male) or F (female)
+
+4. DATE_OF_EXPIRY:
+   - Extract from "Date of Expiry" or "Expiration Date" field
+   - Output in ISO format: YYYY-MM-DD
+   - Same year conversion rules as DOB
+
+5. PASSPORT_COUNTRY / NATIONALITY:
+   - Extract from "Nationality" or country of issuance
+   - Output ISO 2-letter code (e.g., "US", "IN", "SG", "AE", "GB")
+
+6. PLACE_OF_BIRTH:
+   - Extract from "Place of Birth" field if present
+
+7. ISSUING_AUTHORITY:
+   - Extract from "Issuing Authority" or "Authority" field if present
+
+8. DATE_OF_ISSUE:
+   - Extract from "Date of Issue" field if present
+   - Output in ISO format: YYYY-MM-DD
 
 INDIA PASSPORTS:
-- Given names may contain "S/O", "D/O", "W/O" - include these in given_names
-- Example: Surname="SHARMA", Given names="RAKESH S/O OM PRAKASH"
-
-DETECTING THE FORMAT:
-- Look for EXPLICIT LABELS: "Surname", "Family Name", "Last Name" → this indicates separate fields
-- Look for EXPLICIT LABELS: "Given Names", "First Name", "Given Name" → this indicates separate fields
-- If you see separate labels with separate values below them, use the SEPARATE FIELDS FORMAT
-- If you see a single "Name" label with one value, use SINGLE FIELD FORMAT
-- Look ABOVE the MRZ for name fields - they are typically in the upper portion of the passport
-- Extract ALL name parts - don't truncate names
-
-Remove ALL salutations, titles, and prefixes from names. Extract ONLY the name.
-Examples: "Mr. JOHN DOE" -> "JOHN DOE", "Shri RAJ KUMAR" -> "RAJ KUMAR"
-
-MRZ Parsing:
-- MRZ (Machine Readable Zone) is at the bottom of the passport with two lines of <<<<< patterns
-- Line 1: Document type + country code + passport number (with check digits)
-- Line 2: Date of birth + sex + date of expiry + personal number
-- Extract passport_number from positions 0-8 (first line after country code)
-- Dates in MRZ are in YYMMDD format - convert to YYYY-MM-DD
+- Given names may contain "S/O", "D/O", "W/O"
+- Include these in given_names as they appear
+- Example: "RAKESH S/O OM PRAKASH"
 
 Date Normalization:
 - All dates must be in ISO format: YYYY-MM-DD
-- If year is 2 digits (YY), assume:
-  - If YY >= 50, year is 19YY
-  - If YY < 50, year is 20YY
 - Common date formats to handle:
   - DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY
   - MM/DD/YYYY, MM-DD-YYYY, MM.DD.YYYY
   - YYYY/MM/DD, YYYY-MM-DD, YYYY.MM.DD
   - D MMM YYYY (e.g., "15 Jan 1990")
   - MMM D, YYYY (e.g., "Jan 15, 1990")
-
-Sex:
-- Must be single letter: "M" or "F"
-- Extract from MRZ or explicit label on passport
 
 ISO country codes: IN, SG, AE, US, GB, MY, MM, TH, VN, PH, ID, BD, PK, LK, NP"""
 
@@ -320,7 +620,9 @@ ISO country codes: IN, SG, AE, US, GB, MY, MM, TH, VN, PH, ID, BD, PK, LK, NP"""
         prompt_parts = [
             "/no_think",  # Qwen3 trigger to skip thinking block generation
             "Extract passport fields from this passport image.",
-            "Read MRZ (bottom two lines with <<<<<) for accurate dates and passport number."
+            "PRIORITIZE MRZ (Machine Readable Zone) - the bottom two lines with <<<<< patterns.",
+            "MRZ is most reliable: extract passport_number, dates, sex, country_code, names from MRZ first.",
+            "MRZ format: Line 1 = P<COUNTRY<SURNAME<<GIVEN<NAMES<PASSPORT<<<NUMBER, Line 2 = DOB+SEX+EXPIRY"
         ]
 
         # Add hints if provided
@@ -328,6 +630,7 @@ ISO country codes: IN, SG, AE, US, GB, MY, MM, TH, VN, PH, ID, BD, PK, LK, NP"""
             prompt_parts.append(f"Expected country: {country_hint}")
 
         prompt_parts.extend([
+            "Only use human-readable text if MRZ is missing or unclear.",
             "Return JSON with field values. Use null for missing fields.",
             "All dates must be in YYYY-MM-DD format."
         ])

@@ -451,9 +451,10 @@ class KeyManagementService:
                 cursor = conn.cursor()
                 query = "SELECT COUNT(*) FROM user_keys WHERE user_identity_id = %s"
                 cursor.execute(query, (user_identity_id,))
-                count = cursor.fetchone()[0]
+                result = cursor.fetchone()
+                count = result[0] if result else 0
                 cursor.close()
-                return count if count else 0
+                return count
         except Exception as e:
             self.logger.error(f"Failed to count keys for user: {str(e)}")
             return 0

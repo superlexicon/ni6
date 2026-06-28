@@ -425,3 +425,93 @@ def preprocess_for_face_detection(
     """
     preprocessor = get_image_preprocessor()
     return preprocessor.preprocess_image(image, quality_assessment)
+
+
+def crop_to_content(image_bytes: bytes, margin_threshold: int = 30) -> bytes:
+    """
+    Automatically crop image to actual content, removing white/empty backgrounds.
+
+    Detects and removes blank margins from all four sides, keeping only the
+    content area. This maximizes the effective resolution for Vision LLM processing
+    by eliminating wasted token budget on empty whitespace.
+
+    Handles both white and dark backgrounds - detects pixels that are either
+    near black (<30) or near white (>240) as empty space.
+
+    Args:
+        image_bytes: Input image as bytes (JPEG/PNG supported)
+        margin_threshold: Pixels of whitespace to preserve at edges (safety margin)
+
+    Returns:
+        Cropped image as bytes (JPEG format)
+
+    Example:
+        >>> wide = Path('passport_wide.jpg').read_bytes()
+        >>> cropped = crop_to_content(wide)
+        >>> # Cropped from 2000x400 to ~567x400 (passport content only)
+    """
+    from PIL import Image
+    import io
+
+    logger = get_logger()
+
+    try:
+        # Load image
+        img = Image.open(io.BytesIO(image_bytes))
+        original_size = img.size
+
+        # Ensure RGB for processing
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+
+        logger.debug(f"Cropping content from {original_size[0]}×{original_size[1]} image")
+
+        # Convert to numpy array for efficient processing
+        img_array = np.array(img)
+
+        # Convert to grayscale for simpler thresholding
+        gray = np.mean(img_array, axis=2).astype(np.uint8)
+
+        # Define whitespace (either near black OR near white)
+        # Documents can have black or white backgrounds
+        is_dark = gray < 30  # Near black
+        is_light = gray > 240  # Near white
+        has_content = ~(is_dark | is_light)  # Has actual content
+
+        # Find content bounds
+        rows_with_content = np.any(has_content, axis=1)
+        cols_with_content = np.any(has_content, axis=0)
+
+        if not np.any(rows_with_content) or not np.any(cols_with_content):
+            # No content found, return original
+            logger.warning("No content detected in image, skipping crop")
+            return image_bytes
+
+        # Find bounding box of content
+        top = np.argmax(rows_with_content)
+        bottom = len(rows_with_content) - np.argmax(rows_with_content[::-1])
+        left = np.argmax(cols_with_content)
+        right = len(cols_with_content) - np.argmax(cols_with_content[::-1])
+
+        # Add safety margin
+        top = max(0, top - margin_threshold)
+        left = max(0, left - margin_threshold)
+        bottom = min(img.size[1], bottom + margin_threshold)
+        right = min(img.size[0], right + margin_threshold)
+
+        # Crop image
+        cropped = img.crop((left, top, right, bottom))
+
+        logger.debug(f"Cropped from {original_size[0]}×{original_size[1]} to "
+                    f"{cropped.size[0]}×{cropped.size[1]} "
+                    f"(removed {left}px left, {top}px top, "
+                    f"{original_size[0]-right}px right, {original_size[1]-bottom}px bottom)")
+
+        # Save as JPEG
+        output = io.BytesIO()
+        cropped.save(output, format='JPEG', quality=95)
+        return output.getvalue()
+
+    except Exception as e:
+        logger.error(f"Content-aware cropping failed: {e}")
+        return image_bytes
