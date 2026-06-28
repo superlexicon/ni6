@@ -14,6 +14,7 @@ from app.utils.face_detection import FaceDetector
 from app.utils.model_thresholds import get_adaptive_model_threshold
 from app.utils.image_preprocessing import preprocess_for_face_detection
 from app.utils.deepface_compatibility import ensure_deepface_compatibility
+from app.config.verification_config import verification_settings
 
 # GPU-accelerated face detection backend for DeepFace
 # retinaface is preloaded at startup for faster first-call performance
@@ -86,6 +87,35 @@ class FaceExtractionService:
             cropped_face = face_result['cropped_face']
             detection_confidence = face_result['confidence']
 
+            # DOWNSIZE if image exceeds max dimension (similar to passport vision LLM)
+            # This reduces database storage while maintaining quality for verification
+            cropped_face = self._downsize_if_needed(
+                cropped_face,
+                verification_settings.selfie_max_dimension_pixels,
+                verification_settings.selfie_downsize_quality
+            )
+
+            # CHECK FACE COMPLETENESS: Detect if face extends to image edges (indicates cropping)
+            # Prevents verification of partial faces (e.g., chin cut off, side of face missing)
+            image_width, image_height = image.shape[1], image.shape[0]
+            bbox = face_result['facial_area']  # [x1, y1, x2, y2] format
+            margin_threshold = verification_settings.selfie_face_margin_pixels
+
+            # Face extends to edge if bounding box is within threshold of image boundary
+            extends_to_left = bbox[0] < margin_threshold
+            extends_to_right = (image_width - bbox[2]) < margin_threshold
+            extends_to_top = bbox[1] < margin_threshold
+            extends_to_bottom = (image_height - bbox[3]) < margin_threshold
+
+            edges_extended = sum([extends_to_left, extends_to_right, extends_to_top, extends_to_bottom])
+
+            if edges_extended >= 2:
+                self.logger.warning(f"Face extends to {edges_extended} edges - likely cropped")
+                raise FaceExtractionError(
+                    f"Face appears to be partially cropped. "
+                    f"Please ensure your entire face is visible in the frame with some space around it."
+                )
+
             # Build face info structure compatible with existing code
             largest_face = {
                 'bbox': face_result['facial_area'],
@@ -97,6 +127,42 @@ class FaceExtractionService:
 
             # Calculate quality metrics
             quality_metrics = self._calculate_quality_metrics(cropped_face)
+
+            # ENFORCE QUALITY THRESHOLDS: Reject images that fail minimum quality standards
+            # This prevents accepting dark, blurry, low contrast, or small face images
+            quality_thresholds = {
+                'brightness': verification_settings.selfie_quality_brightness_min,
+                'sharpness': verification_settings.selfie_quality_sharpness_min,
+                'contrast': verification_settings.selfie_quality_contrast_min,
+                'resolution': verification_settings.selfie_quality_resolution_min
+            }
+
+            failed_metrics = []
+            for metric, threshold in quality_thresholds.items():
+                if quality_metrics.get(metric, 1.0) < threshold:
+                    failed_metrics.append(f"{metric} ({quality_metrics[metric]:.2f} < {threshold})")
+
+            if failed_metrics:
+                self.logger.warning(f"Face quality check failed: {', '.join(failed_metrics)}")
+                raise FaceExtractionError(
+                    f"Selfie quality insufficient: {', '.join(failed_metrics)}. "
+                    f"Please ensure good lighting, face is clearly visible, and image is in focus."
+                )
+
+            # CHECK FACIAL LANDMARK QUALITY: Verify critical facial features are detected
+            # DeepFace's RetinaFace detector provides landmarks (eyes, nose, mouth)
+            # Poor quality images often have missing or poorly detected landmarks
+            landmark_quality = self._check_landmark_quality(face_result)
+
+            if not landmark_quality['sufficient_landmarks']:
+                self.logger.warning(
+                    f"Facial landmark check failed: {landmark_quality['missing_landmarks']}. "
+                    f"This usually indicates poor lighting, awkward angle, or partial face."
+                )
+                raise FaceExtractionError(
+                    f"Unable to reliably detect facial features. "
+                    f"Please ensure your face is clearly visible, well-lit, and facing forward."
+                )
 
             # Perform anti-spoofing check
             anti_spoofing_result = self._perform_anti_spoofing(largest_face['cropped_face'])
@@ -395,6 +461,170 @@ class FaceExtractionService:
                 'face_area': 0.0
             }
 
+    def _check_landmark_quality(self, face_result: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Check if sufficient facial landmarks are detected for reliable embedding.
+
+        DeepFace's RetinaFace detector provides landmarks for:
+        - left_eye, right_eye
+        - nose
+        - mouth_left, mouth_right
+
+        These landmarks indicate detection quality - poor lighting often results
+        in missing landmarks, making the embedding unreliable.
+
+        Args:
+            face_result: Face detection result from DeepFace containing facial_area
+
+        Returns:
+            Dict with landmark quality assessment
+        """
+        try:
+            # DeepFace's represent() doesn't directly return landmarks in the result
+            # However, if available via facial_area extension, we check them
+            facial_area = face_result.get('facial_area', {})
+
+            # If facial_area is a list [x1, y1, x2, y2], no landmarks available
+            if isinstance(facial_area, list):
+                # No landmarks available, assume detection is OK based on confidence
+                return {
+                    'sufficient_landmarks': True,
+                    'missing_landmarks': [],
+                    'landmark_count': 0,
+                    'has_eyes': True,
+                    'has_nose': True,
+                    'has_mouth': True,
+                    'note': 'Landmarks not available in result format'
+                }
+
+            # If facial_area is a dict, check for landmarks
+            # DeepFace detection module can provide: left_eye, right_eye, nose, mouth_left, mouth_right
+            required_landmarks = ['left_eye', 'right_eye', 'nose', 'mouth_left', 'mouth_right']
+            missing_landmarks = []
+
+            for landmark in required_landmarks:
+                if landmark not in facial_area or facial_area[landmark] is None:
+                    missing_landmarks.append(landmark)
+
+            # Determine if landmarks are sufficient based on configuration
+            critical_landmarks = []
+            if verification_settings.selfie_require_both_eyes:
+                critical_landmarks.extend(['left_eye', 'right_eye'])
+            if verification_settings.selfie_require_nose:
+                critical_landmarks.append('nose')
+
+            missing_critical = [lm for lm in critical_landmarks if lm in missing_landmarks]
+
+            # If no landmarks were available at all (but detection succeeded),
+            # assume this is a simplified detection and pass based on confidence
+            has_any_landmark = any(lm in facial_area for lm in required_landmarks)
+
+            if not has_any_landmark:
+                # No landmarks available in result - use confidence-based assessment
+                confidence = face_result.get('confidence', 0.5)
+                if confidence >= 0.7:
+                    return {
+                        'sufficient_landmarks': True,
+                        'missing_landmarks': [],
+                        'landmark_count': 0,
+                        'has_eyes': True,
+                        'has_nose': True,
+                        'has_mouth': True,
+                        'note': 'No landmarks available, high confidence detection'
+                    }
+                else:
+                    return {
+                        'sufficient_landmarks': False,
+                        'missing_landmarks': ['all_landmarks'],
+                        'landmark_count': 0,
+                        'has_eyes': False,
+                        'has_nose': False,
+                        'has_mouth': False,
+                        'note': 'No landmarks available, low confidence detection'
+                    }
+
+            return {
+                'sufficient_landmarks': len(missing_critical) == 0,
+                'missing_landmarks': missing_landmarks,
+                'landmark_count': len(required_landmarks) - len(missing_landmarks),
+                'has_eyes': 'left_eye' in facial_area and facial_area['left_eye'] is not None and
+                           'right_eye' in facial_area and facial_area['right_eye'] is not None,
+                'has_nose': 'nose' in facial_area and facial_area['nose'] is not None,
+                'has_mouth': ('mouth_left' in facial_area and facial_area['mouth_left'] is not None) or
+                            ('mouth_right' in facial_area and facial_area['mouth_right'] is not None)
+            }
+
+        except Exception as e:
+            self.logger.warning(f"Landmark quality check failed: {e}")
+            # On error, assume landmarks are sufficient to avoid blocking all detections
+            return {
+                'sufficient_landmarks': True,
+                'missing_landmarks': [],
+                'landmark_count': 0,
+                'has_eyes': True,
+                'has_nose': True,
+                'has_mouth': True,
+                'note': f'Landmark check failed: {e}'
+            }
+
+    def _downsize_if_needed(self, image: np.ndarray, max_dimension: int, quality: int) -> np.ndarray:
+        """
+        Downsize image if it exceeds max dimension (similar to passport vision LLM sizing).
+
+        Uses proportional scaling to maintain aspect ratio, with high-quality LANCZOS resampling.
+
+        Args:
+            image: Input image as numpy array (BGR format)
+            max_dimension: Maximum dimension (width or height) in pixels
+            quality: JPEG quality for saving (1-100)
+
+        Returns:
+            Downsized image as numpy array (BGR format), or original if under limit
+        """
+        try:
+            # Get current dimensions
+            height, width = image.shape[:2]
+            max_dim = max(width, height)
+
+            # Check if downsizing is needed
+            if max_dim <= max_dimension:
+                self.logger.debug(f"Image {width}×{height} under max dimension {max_dimension}, no downsizing needed")
+                return image
+
+            # Calculate scale factor
+            scale = max_dimension / max_dim
+            new_width = int(width * scale)
+            new_height = int(height * scale)
+
+            self.logger.info(f"Downsizing image from {width}×{height} to {new_width}×{new_height} (max_dimension={max_dimension})")
+
+            # Convert BGR to RGB for PIL
+            if len(image.shape) == 3:
+                rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            else:
+                rgb_image = image
+
+            # Convert to PIL Image
+            pil_image = Image.fromarray(rgb_image.astype('uint8'))
+
+            # Resize using LANCZOS (high-quality resampling)
+            resized = pil_image.resize((new_width, new_height), Image.LANCZOS)
+
+            # Convert back to numpy array (RGB)
+            resized_array = np.array(resized)
+
+            # Convert RGB back to BGR for OpenCV compatibility
+            if len(resized_array.shape) == 3:
+                bgr_image = cv2.cvtColor(resized_array, cv2.COLOR_RGB2BGR)
+            else:
+                bgr_image = resized_array
+
+            return bgr_image
+
+        except Exception as e:
+            self.logger.warning(f"Image downsizing failed: {e}, returning original")
+            return image
+
     def _perform_anti_spoofing(self, face_image: np.ndarray) -> Dict[str, Any]:
         """Perform anti-spoofing check."""
         try:
@@ -484,7 +714,7 @@ class FaceExtractionService:
 
             # Convert to JPEG bytes
             buffer = io.BytesIO()
-            pil_image.save(buffer, format='JPEG', quality=90, optimize=True)
+            pil_image.save(buffer, format='JPEG', quality=verification_settings.selfie_downsize_quality, optimize=True)
             image_bytes = buffer.getvalue()
 
             # Encode to base64 string

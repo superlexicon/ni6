@@ -114,6 +114,58 @@ class VerificationSettings(BaseSettings):
         description="Skip face matching checks (useful for testing without selfie image)"
     )
 
+    # Selfie quality thresholds (stricter to prevent accepting poor quality images)
+    selfie_quality_brightness_min: float = Field(
+        0.4,
+        description="Minimum brightness threshold for selfie quality check (0.0-1.0). Reject very dark/bright images."
+    )
+
+    selfie_quality_sharpness_min: float = Field(
+        0.5,
+        description="Minimum sharpness threshold for selfie quality check (0.0-1.0). Reject blurry images."
+    )
+
+    selfie_quality_contrast_min: float = Field(
+        0.45,
+        description="Minimum contrast threshold for selfie quality check (0.0-1.0). Reject low contrast images."
+    )
+
+    selfie_quality_resolution_min: float = Field(
+        0.5,
+        description="Minimum resolution threshold for selfie quality check (0.0-1.0). Reject small faces."
+    )
+
+    selfie_face_margin_pixels: int = Field(
+        50,
+        description="Face margin in pixels from image edge for completeness check. Face extending to 2+ edges within this margin indicates cropping."
+    )
+
+    selfie_require_both_eyes: bool = Field(
+        True,
+        description="Require both eyes to be detected in facial landmark check"
+    )
+
+    selfie_require_nose: bool = Field(
+        True,
+        description="Require nose to be detected in facial landmark check"
+    )
+
+    selfie_min_landmarks: int = Field(
+        3,
+        description="Minimum critical landmarks required (eyes + nose) for reliable face detection"
+    )
+
+    # Selfie downsizing settings (similar to passport vision LLM sizing)
+    selfie_max_dimension_pixels: int = Field(
+        1024,
+        description="Maximum dimension (width or height) for stored selfie face images. Images exceeding this will be proportionally scaled down."
+    )
+
+    selfie_downsize_quality: int = Field(
+        90,
+        description="JPEG quality for downsized selfie images (1-100)"
+    )
+
     model_config = {
         "env_prefix": "VERIFICATION_",
         "env_file": ".env",
