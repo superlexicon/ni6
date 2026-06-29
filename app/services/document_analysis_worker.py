@@ -305,11 +305,13 @@ class DocumentAnalysisWorker:
             # Check if this is a step validation error (session has progressed)
             if (response_data and
                 isinstance(response_data, dict) and
+                response_data.get("sequential_response") and  # Check sequential_response is not None
+                isinstance(response_data.get("sequential_response"), dict) and  # Check it's a dict
                 not response_data.get("sequential_response", {}).get("success", True) and
                 "Invalid step for" in response_data.get("sequential_response", {}).get("message", "")):
 
                 # Don't retry this job - the session has moved on
-                error_msg = response_data["sequential_response"]["message"]
+                error_msg = response_data.get("sequential_response", {}).get("message", "Unknown error")
                 self.logger.info(f"Job {job_id} cannot be retried - session has progressed: {error_msg}")
                 # Delete the job since it's a stale retry
                 if self.job_manager.delete_job(job_id):

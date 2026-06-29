@@ -324,7 +324,36 @@ class ComprehensivePhotoHolmesService:
 
         Returns:
             Preprocessed numpy array (RGB, shape: target_size x target_size x 3)
+
+        Raises:
+            ValueError: If image_bytes is invalid, empty, or cannot be decoded
         """
+        # Validate image_bytes before attempting to decode
+        if not image_bytes:
+            raise ValueError("Empty image bytes provided")
+
+        if len(image_bytes) < 100:  # Minimum reasonable size for any image format
+            raise ValueError(f"Image bytes too small ({len(image_bytes)} bytes), likely invalid")
+
+        # Check for common image format signatures (magic bytes)
+        if len(image_bytes) >= 4:
+            header = image_bytes[:4]
+            # JPEG: FF D8 FF
+            # PNG: 89 50 4E 47
+            # GIF: 47 49 46 38
+            # WebP: 52 49 46 46
+            # BMP: 42 4D
+            valid_signatures = {
+                b'\xFF\xD8\xFF': 'JPEG',
+                b'\x89PNG': 'PNG',
+                b'GIF8': 'GIF',
+                b'RIFF': 'WebP',
+                b'BM': 'BMP'
+            }
+            has_valid_signature = any(header.startswith(sig) for sig in valid_signatures.keys())
+            if not has_valid_signature:
+                self.logger.warning(f"Image bytes lack valid format signature (header: {header.hex()})")
+
         try:
             with Image.open(io.BytesIO(image_bytes)) as image:
                 # Convert to RGB if needed
@@ -395,8 +424,16 @@ class ComprehensivePhotoHolmesService:
         # OPTIMIZATION: Decode and preprocess image ONCE for all methods
         # Previously each method was decoding the same image independently (8x redundant)
         preprocess_start = time.time()
-        shared_image_np = self._preprocess_image_shared(image_bytes)
-        self.logger.info(f"Shared image preprocessing took {time.time() - preprocess_start:.3f}s")
+        try:
+            shared_image_np = self._preprocess_image_shared(image_bytes)
+            self.logger.info(f"Shared image preprocessing took {time.time() - preprocess_start:.3f}s")
+        except ValueError as e:
+            # Preprocessing failed - return empty results instead of crashing
+            self.logger.warning(f"PhotoHolmes preprocessing failed, returning empty results: {e}")
+            results.total_methods_run = 0
+            results.methods_with_detections = 0
+            results.overall_forgery_probability = 0.0
+            return results
 
         # Extract EXIF data once for all methods that need it
         shared_exif_data = self.exif_extractor.extract_exif_data(image_bytes)

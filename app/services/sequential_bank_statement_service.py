@@ -42,6 +42,12 @@ from app.core.key_injection.global_banks import COUNTRY_NAMES, CURRENCY_COUNTRIE
 from app.dto import DocumentErrorCode
 from app.core.logger import get_logger
 
+# Vision LLM token parameters (must match DocumentPreprocessingService)
+# These ensure consistent token-aware sizing across all document types
+_MAX_IMAGE_TOKENS = 6000
+_PATCH_SIZE = 14  # pixels per patch for Qwen3.5
+_MAX_DIMENSION = int((_MAX_IMAGE_TOKENS ** 0.5) * _PATCH_SIZE)  # ≈ 1078 pixels
+
 
 def decompose_address_simple(address_text: str, country_hint: str = None) -> dict:
     """
@@ -1617,15 +1623,14 @@ class SequentialBankStatementService(DocumentProcessorBase):
 
     def _preprocess_image_for_pipeline(self, image_bytes: bytes) -> tuple[bytes, int, int, dict]:
         """
-        Preprocess image for the pipeline with token-aware sizing.
+        Preprocess image for bank statement pipeline.
 
-        Token calculation for qwen3.5+:
-        - Patch size: ~14×14 pixels per patch
-        - Each patch ≈ 1 token
-        - Max image tokens = num_ctx (8192) - output tokens (~1000) - prompt overhead
-        - Target: Keep image under ~6000 tokens to leave room for prompt/output
+        This method ensures consistent image processing across the entire pipeline:
+        - OCR and Vision LLM process the SAME image for coordinate alignment
+        - Uses the same token-aware sizing parameters as DocumentPreprocessingService
 
-        Max dimension formula: sqrt(6000) × 14 ≈ 1086 pixels
+        Token calculation uses module-level constants (_MAX_IMAGE_TOKENS, _PATCH_SIZE, _MAX_DIMENSION)
+        which are synchronized with DocumentPreprocessingService for consistency.
 
         Args:
             image_bytes: Original image or PDF bytes
@@ -1636,7 +1641,7 @@ class SequentialBankStatementService(DocumentProcessorBase):
         import fitz  # PyMuPDF
 
         self.logger.info("=" * 80)
-        self.logger.info("PREPROCESSING IMAGE FOR VISION LLM (Token-Aware Sizing)")
+        self.logger.info("PREPROCESSING IMAGE FOR BANK STATEMENT PIPELINE")
         self.logger.info("=" * 80)
 
         # Step 1: Convert PDF to image if needed
@@ -1675,31 +1680,23 @@ class SequentialBankStatementService(DocumentProcessorBase):
 
         width, height = img.size
 
-        # Step 3: Calculate max dimension based on token limit
-        # For qwen3.5: ~14×14 pixels per patch, each patch ≈ 1 token
-        # Allow ~6000 tokens for image (8192 context - 1000 output - 1192 overhead)
-        max_image_tokens = 6000
-        patch_size = 14  # qwen3.5 patch size
-        max_dimension = int((max_image_tokens ** 0.5) * patch_size)  # ≈ 1086 pixels
-
-        self.logger.info(f"Token-aware sizing: max {max_image_tokens} tokens → max {max_dimension}×{max_dimension}px")
-
-        # Step 4: Scale down if exceeds token budget
+        # Step 3: Apply token-aware sizing using module-level constants
+        # Uses same parameters as DocumentPreprocessingService for consistency
         max_dim = max(width, height)
-        if max_dim > max_dimension:
-            scale = max_dimension / max_dim
+        if max_dim > _MAX_DIMENSION:
+            scale = _MAX_DIMENSION / max_dim
             width = int(width * scale)
             height = int(height * scale)
-            self.logger.info(f"Scaled to fit token budget: {width}×{height} (max {max_dimension}px)")
+            self.logger.info(f"Scaled to fit token budget: {width}×{height} (max {_MAX_DIMENSION}px)")
             img = img.resize((width, height), Image.Resampling.LANCZOS)
         else:
             self.logger.info(f"Image fits token budget - no scaling needed")
 
-        # Step 5: Calculate estimated token usage
-        estimated_tokens = ((width + patch_size - 1) // patch_size) * ((height + patch_size - 1) // patch_size)
-        self.logger.info(f"Estimated image tokens: ~{estimated_tokens} (budget: {max_image_tokens})")
+        # Step 4: Calculate estimated token usage
+        estimated_tokens = ((width + _PATCH_SIZE - 1) // _PATCH_SIZE) * ((height + _PATCH_SIZE - 1) // _PATCH_SIZE)
+        self.logger.info(f"Estimated image tokens: ~{estimated_tokens} (budget: {_MAX_IMAGE_TOKENS})")
 
-        # Step 6: Save as JPEG
+        # Step 5: Save as JPEG
         output = io.BytesIO()
         img.save(output, format='JPEG', quality=95)
         result = output.getvalue()
@@ -1708,7 +1705,7 @@ class SequentialBankStatementService(DocumentProcessorBase):
         padding = {'left': 0, 'top': 0, 'right': 0, 'bottom': 0}
 
         self.logger.info(f"Final image: {len(result)} bytes, {width}×{height}")
-        self.logger.info(f"Token-aware preprocessing: scale to fit {max_image_tokens} token budget")
+        self.logger.info(f"Token-aware preprocessing: scale to fit {_MAX_IMAGE_TOKENS} token budget")
         self.logger.info("=" * 80)
 
         return result, width, height, padding

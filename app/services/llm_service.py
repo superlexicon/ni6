@@ -599,16 +599,15 @@ class LLMService:
 
     def _ensure_token_budget(self, image_bytes: bytes) -> bytes:
         """
-        Ensure image fits within token budget for vision LLM.
+        Prepare image for vision LLM by handling format conversions.
 
-        For qwen3.5 and modern vision LLMs:
-        - Patch size: ~14×14 pixels per patch
-        - Each patch ≈ 1 token
-        - Context window: 8192 tokens (LLM_MAX_TOKENS)
-        - Output tokens: ~1000 (num_predict)
-        - Prompt overhead: ~1192 tokens
-        - Available for image: ~6000 tokens
-        - Max dimension: sqrt(6000) × 14 ≈ 1078 pixels
+        NOTE: Token-aware sizing is now handled by the preprocessing service.
+        This method only handles:
+        - PDF to image conversion (for PDF inputs)
+        - Color space normalization (CMYK, RGBA, etc. → RGB)
+
+        The preprocessing service ensures images are already sized correctly
+        for the vision LLM token budget (max 1078px for ~6000 tokens with Qwen3.5).
 
         Args:
             image_bytes: Image bytes (JPEG/PNG/PDF supported)
@@ -619,23 +618,14 @@ class LLMService:
         try:
             from PIL import Image
             import io
-            from app.utils.image_preprocessing import crop_to_content
 
             # Convert PDF to image if needed
             if image_bytes.startswith(b'%PDF'):
                 image_bytes = self._convert_pdf_to_image(image_bytes)
 
-            # Crop to content to maximize effective resolution
-            # This removes white/empty backgrounds that waste token budget
-            image_bytes = crop_to_content(image_bytes)
-
             img = Image.open(io.BytesIO(image_bytes))
-            width, height = img.size
 
             # Handle CMYK color space (common in scanned documents)
-            # Log image mode for debugging
-            logger.debug(f"Image mode: {img.mode}, size: {width}x{height}")
-
             if img.mode == 'CMYK':
                 logger.info("Converting CMYK image to RGB")
                 try:
@@ -649,27 +639,10 @@ class LLMService:
                 # Handle other color modes (RGBA, L, P, etc.)
                 img = img.convert('RGB')
 
-            # Calculate max dimension from token budget
-            max_image_tokens = 6000
-            patch_size = 14  # qwen3.5 patch size
-            max_dimension = int((max_image_tokens ** 0.5) * patch_size)  # ≈ 1078 pixels
-
-            # Scale down if exceeds token budget
-            max_dim = max(width, height)
-            if max_dim > max_dimension:
-                scale = max_dimension / max_dim
-                width = int(width * scale)
-                height = int(height * scale)
-                logger.debug(f"Scaled image from {max_dim}px to {max_dimension}px to fit token budget")
-                img = img.resize((width, height), Image.LANCZOS)
-
             # Save as JPEG
             output = io.BytesIO()
             img.save(output, format='JPEG', quality=95)
             result = output.getvalue()
-
-            estimated_tokens = ((width + patch_size - 1) // patch_size) * ((height + patch_size - 1) // patch_size)
-            logger.debug(f"Token-aware sizing: {width}×{height} → ~{estimated_tokens} tokens (budget: {max_image_tokens})")
 
             return result
 
@@ -677,7 +650,7 @@ class LLMService:
             logger.warning("PIL not available, returning original image")
             return image_bytes
         except Exception as e:
-            logger.error(f"Failed to apply token-based sizing: {str(e)}")
+            logger.error(f"Failed to prepare image for LLM: {str(e)}")
             return image_bytes
 
     def _resize_image(self, image_bytes: bytes, max_size: int, quality: int = 85) -> bytes:

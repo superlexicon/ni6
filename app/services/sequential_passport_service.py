@@ -27,6 +27,7 @@ from app.services.verification_state_service import VerificationStateService
 from app.services import comprehensive_photoholmes_service
 from app.services.face_extraction_service import FaceExtractionService
 from app.services.detailed_analysis_service import DetailedAnalysisService
+from app.services.document_preprocessing_service import get_document_preprocessing_service
 from app.core.logger import get_logger
 from app.helper.deepface_helper import DeepfaceHelper
 from app.helper.extractors import PassportExtractor
@@ -81,6 +82,7 @@ class SequentialPassportService:
     def __init__(self):
         self.logger = get_logger()
         self.face_extraction_service = FaceExtractionService()
+        self.preprocessing_service = get_document_preprocessing_service()
         self.state_service = VerificationStateService()
         self.user_key_repo = UserKeyRepository()
         self.user_identity_repo = UserIdentityRepository()
@@ -326,14 +328,43 @@ class SequentialPassportService:
             image_bytes = base64.b64decode(file_data)
             is_pdf = filename.lower().endswith('.pdf') or image_bytes.startswith(b'%PDF')
 
-            # PHASE 1, 2, 3: Run PhotoHolmes + OCR + Face extraction in PARALLEL for performance
-            self.logger.info("Running PhotoHolmes, OCR, and face extraction in parallel...")
+            # PHASE 1: Standardized preprocessing (crop, downsize, quality checks, PhotoHolmes)
+            self.logger.info("Running standardized document preprocessing...")
+
+            # Run standardized preprocessing pipeline (steps 1-4)
+            # This performs: crop/downsize, quality checks, PhotoHolmes, and face completeness (for selfies)
+            prep_result = await self.preprocessing_service.preprocess_document(
+                image_bytes=image_bytes,
+                document_type=document_type,
+                user_identity_id=user_identity_id
+            )
+
+            # Check if preprocessing failed
+            if not prep_result.get('quality_passed', False):
+                error_msg = prep_result.get('error', 'Document preprocessing failed')
+                self.logger.warning(f"Document preprocessing failed: {error_msg}")
+                current_state = self.state_service.get_verification_state(client_public_key)
+                current_seq = self.state_service.get_sequence_no(client_public_key)
+                return SequentialJobResponse(
+                    result=False,
+                    job_id=job_id,
+                    verification_state=current_state,
+                    sequence_no=current_seq,
+                    error=error_msg,
+                    error_code=DocumentErrorCode.QUALITY_CHECK_FAILED
+                )
+
+            # Get PhotoHolmes results from preprocessing
+            photoholmes_results = prep_result.get('photoholmes_results')
+
+            # PHASE 2, 3: Run OCR + Face extraction in PARALLEL for performance
+            self.logger.info("Running OCR and face extraction in parallel (preprocessing done)...")
 
             async def safe_face_extraction():
                 """Wrapper to catch face extraction errors"""
                 try:
                     return await self.face_extraction_service.extract_face_embedding(
-                        image_bytes=image_bytes,
+                        image_bytes=prep_result['cropped_image_bytes'],
                         public_key=client_public_key,
                         user_identity_id=user_identity_id,
                         document_type="passport"
@@ -344,7 +375,7 @@ class SequentialPassportService:
 
             # Try QwenPassportExtractor first, fall back to unified_extractor if it fails
             self.logger.info("Attempting Qwen3.5 vision LLM extraction...")
-            qwen_result = await self._extract_passport_with_qwen(image_bytes, document_type)
+            qwen_result = await self._extract_passport_with_qwen(prep_result['cropped_image_bytes'], document_type)
 
             if qwen_result:
                 # Qwen extraction succeeded
@@ -353,13 +384,10 @@ class SequentialPassportService:
             else:
                 # Fall back to unified_extractor
                 self.logger.warning("Qwen3.5 extraction failed, falling back to UnifiedIDExtractor...")
-                document_data = await self.unified_extractor.extract(image_bytes, is_pdf)
+                document_data = await self.unified_extractor.extract(prep_result['cropped_image_bytes'], is_pdf)
 
-            # Run PhotoHolmes and face extraction in parallel (document extraction is done)
-            photoholmes_results, face_biometric = await asyncio.gather(
-                comprehensive_photoholmes_service.run_all_methods(image_bytes, document_type=document_type),
-                safe_face_extraction()
-            )
+            # Run face extraction (PhotoHolmes already done in preprocessing)
+            face_biometric = await safe_face_extraction()
 
             # Process PhotoHolmes results
             forgery_checks = None
@@ -1266,25 +1294,61 @@ class SequentialPassportService:
             is_pdf = filename.lower().endswith('.pdf') or image_bytes.startswith(b'%PDF')
 
             # ═══════════════════════════════════════════════════════════════
-            # STEP 1: PhotoHolmes Authenticity Checks
+            # STEP 0: Standardized Preprocessing
             # ═══════════════════════════════════════════════════════════════
-            self.logger.info("[STEP 1/6] Running PhotoHolmes authenticity checks...")
-            step1_result = await self._step1_photoholmes_check(image_bytes, document_type)
-            if not step1_result['passed']:
+            self.logger.info("[STEP 0/6] Running standardized document preprocessing...")
+
+            prep_result = await self.preprocessing_service.preprocess_document(
+                image_bytes=image_bytes,
+                document_type=document_type,
+                user_identity_id=user_identity_id
+            )
+
+            if not prep_result.get('quality_passed', False):
+                error_msg = prep_result.get('error', 'Document preprocessing failed')
                 return self._fail_strict_result(
-                    step="photoholmes",
-                    reason=step1_result['reason'],
+                    step="preprocessing",
+                    reason=error_msg,
                     user_identity_id=user_identity_id,
                     job_id=job_id,
                     start_time=start_time,
                     client_public_key=client_public_key
                 )
 
-            forgery_checks = step1_result.get('forgery_checks')
+            preprocessed_image_bytes = prep_result['cropped_image_bytes']
+            photoholmes_results = prep_result.get('photoholmes_results')
+
+            # ═══════════════════════════════════════════════════════════════
+            # STEP 1: PhotoHolmes Authenticity Checks (from preprocessing)
+            # ═══════════════════════════════════════════════════════════════
+            self.logger.info("[STEP 1/6] PhotoHolmes authenticity checks... (validated from preprocessing)")
+
+            # PhotoHolmes already run in preprocessing, validate results
+            from app.services.selfie_validation_service import SelfieValidationService
+            validation_service = SelfieValidationService()
+            detailed_results = self.detailed_analysis_service.transform_photoholmes_results(photoholmes_results)
+            photoholmes_valid, photoholmes_error, photoholmes_error_code = validation_service.validate_photoholmes_results(detailed_results)
+
+            if not photoholmes_valid:
+                return self._fail_strict_result(
+                    step="photoholmes",
+                    reason=photoholmes_error,
+                    user_identity_id=user_identity_id,
+                    job_id=job_id,
+                    start_time=start_time,
+                    client_public_key=client_public_key
+                )
+
+            forgery_checks = {}
+            for check in detailed_results.checks:
+                forgery_checks[check.name] = {
+                    "score": round(check.raw_score, 3),
+                    "threshold": check.research_threshold
+                }
 
             # Extract document data using Qwen
             self.logger.info("Running Qwen3.5 vision LLM extraction...")
-            qwen_result = await self._extract_passport_with_qwen(image_bytes, document_type)
+            qwen_result = await self._extract_passport_with_qwen(preprocessed_image_bytes, document_type)
 
             if qwen_result:
                 document_data = qwen_result
@@ -1292,7 +1356,7 @@ class SequentialPassportService:
             else:
                 # Fall back to unified_extractor
                 self.logger.warning("Qwen3.5 extraction failed, falling back to UnifiedIDExtractor...")
-                document_data = await self.unified_extractor.extract(image_bytes, is_pdf)
+                document_data = await self.unified_extractor.extract(preprocessed_image_bytes, is_pdf)
 
             # ═══════════════════════════════════════════════════════════════
             # STEP 2: Field Extraction Validation (using Qwen results)
@@ -1348,7 +1412,7 @@ class SequentialPassportService:
             self.logger.info(f"[STEP 2] Field validation passed: country={country}, number={number[:4]}****, name={full_name}")
 
             # Convert image to numpy for processing
-            image_np = self._decode_image_to_numpy(image_bytes)
+            image_np = self._decode_image_to_numpy(preprocessed_image_bytes)
 
             # ═══════════════════════════════════════════════════════════════
             # STEP 3: Face Matching + Remove Face Region

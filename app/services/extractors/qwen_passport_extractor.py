@@ -105,13 +105,15 @@ class QwenPassportExtractor:
             Tuple of (line1, line2) if MRZ found, None otherwise
         """
         from app.core.logger import get_logger
-        from app.utils.image_preprocessing import crop_to_content
+        # Cropping now handled by preprocessing service
+        # from app.utils.image_preprocessing import crop_to_content
 
         logger = get_logger()
 
         # Crop to content to maximize effective resolution for MRZ extraction
         # This removes white/empty backgrounds that waste token budget
-        image_bytes = crop_to_content(image_bytes)
+        # REMOVED: image_bytes = crop_to_content(image_bytes)
+        # Cropping is now handled by the standardized preprocessing service
 
         # MRZ-only extraction prompts
         system_prompt = """Extract ONLY the two Machine Readable Zone (MRZ) lines from this passport image.

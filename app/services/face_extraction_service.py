@@ -56,6 +56,10 @@ class FaceExtractionService:
 
         Raises:
             FaceExtractionError: If face extraction fails
+
+        Note:
+            Quality checks are only performed for selfies. For passports and other documents,
+            quality checks are done on the document image in the preprocessing service.
         """
         try:
             # Load image
@@ -125,29 +129,35 @@ class FaceExtractionService:
                 'extraction_method': f'deepface_{DEEPFACE_DETECTOR_BACKEND}'
             }
 
-            # Calculate quality metrics
+            # Calculate quality metrics (needed for adaptive threshold and metadata)
             quality_metrics = self._calculate_quality_metrics(cropped_face)
 
-            # ENFORCE QUALITY THRESHOLDS: Reject images that fail minimum quality standards
-            # This prevents accepting dark, blurry, low contrast, or small face images
-            quality_thresholds = {
-                'brightness': verification_settings.selfie_quality_brightness_min,
-                'sharpness': verification_settings.selfie_quality_sharpness_min,
-                'contrast': verification_settings.selfie_quality_contrast_min,
-                'resolution': verification_settings.selfie_quality_resolution_min
-            }
+            # QUALITY CHECKS: Only perform quality checks for selfies
+            # For passports and other documents, quality checks are done on the document image
+            # in the preprocessing service, not on the face crop
+            if document_type == 'selfie':
+                # ENFORCE QUALITY THRESHOLDS: Reject images that fail minimum quality standards
+                # This prevents accepting dark, blurry, low contrast, or small face images
+                quality_thresholds = {
+                    'brightness': verification_settings.selfie_quality_brightness_min,
+                    'sharpness': verification_settings.selfie_quality_sharpness_min,
+                    'contrast': verification_settings.selfie_quality_contrast_min,
+                    'resolution': verification_settings.selfie_quality_resolution_min
+                }
 
-            failed_metrics = []
-            for metric, threshold in quality_thresholds.items():
-                if quality_metrics.get(metric, 1.0) < threshold:
-                    failed_metrics.append(f"{metric} ({quality_metrics[metric]:.2f} < {threshold})")
+                failed_metrics = []
+                for metric, threshold in quality_thresholds.items():
+                    if quality_metrics.get(metric, 1.0) < threshold:
+                        failed_metrics.append(f"{metric} ({quality_metrics[metric]:.2f} < {threshold})")
 
-            if failed_metrics:
-                self.logger.warning(f"Face quality check failed: {', '.join(failed_metrics)}")
-                raise FaceExtractionError(
-                    f"Selfie quality insufficient: {', '.join(failed_metrics)}. "
-                    f"Please ensure good lighting, face is clearly visible, and image is in focus."
-                )
+                if failed_metrics:
+                    self.logger.warning(f"Face quality check failed: {', '.join(failed_metrics)}")
+                    raise FaceExtractionError(
+                        f"Selfie quality insufficient: {', '.join(failed_metrics)}. "
+                        f"Please ensure good lighting, face is clearly visible, and image is in focus."
+                    )
+            else:
+                self.logger.debug(f"Skipping quality checks for {document_type} (done on document image in preprocessing)")
 
             # CHECK FACIAL LANDMARK QUALITY: Verify critical facial features are detected
             # DeepFace's RetinaFace detector provides landmarks (eyes, nose, mouth)

@@ -114,24 +114,24 @@ class VerificationSettings(BaseSettings):
         description="Skip face matching checks (useful for testing without selfie image)"
     )
 
-    # Selfie quality thresholds (stricter to prevent accepting poor quality images)
+    # Selfie quality thresholds (lowered to reduce false rejections)
     selfie_quality_brightness_min: float = Field(
-        0.4,
+        0.25,
         description="Minimum brightness threshold for selfie quality check (0.0-1.0). Reject very dark/bright images."
     )
 
     selfie_quality_sharpness_min: float = Field(
-        0.5,
+        0.2,
         description="Minimum sharpness threshold for selfie quality check (0.0-1.0). Reject blurry images."
     )
 
     selfie_quality_contrast_min: float = Field(
-        0.45,
+        0.25,
         description="Minimum contrast threshold for selfie quality check (0.0-1.0). Reject low contrast images."
     )
 
     selfie_quality_resolution_min: float = Field(
-        0.5,
+        0.3,
         description="Minimum resolution threshold for selfie quality check (0.0-1.0). Reject small faces."
     )
 
@@ -164,6 +164,30 @@ class VerificationSettings(BaseSettings):
     selfie_downsize_quality: int = Field(
         90,
         description="JPEG quality for downsized selfie images (1-100)"
+    )
+
+    # Document processing settings (common to all document types)
+    # Note: Token-aware sizing is now primarily handled by DocumentPreprocessingService
+    # which calculates max dimension from token budget (max ~1078px for Qwen3.5)
+    # This setting is kept as a fallback/upper limit for other use cases
+    document_max_dimension_pixels: int = Field(
+        2048,
+        description="Maximum dimension (width or height) for processed document images. Images exceeding this will be proportionally scaled down."
+    )
+
+    document_quality_brightness_min: float = Field(
+        0.25,
+        description="Minimum brightness threshold for document quality check (0.0-1.0)"
+    )
+
+    document_quality_sharpness_min: float = Field(
+        0.15,
+        description="Minimum sharpness threshold for document quality check (0.0-1.0)"
+    )
+
+    document_quality_contrast_min: float = Field(
+        0.2,
+        description="Minimum contrast threshold for document quality check (0.0-1.0)"
     )
 
     model_config = {
