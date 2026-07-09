@@ -4,7 +4,7 @@ import time
 import json
 import aiohttp
 import requests
-from typing import Optional
+from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from app.dto.job_models import JobDatabaseRecord, JobStatus
