@@ -494,17 +494,6 @@ class DocumentAnalysisWorker:
                 response = loop.run_until_complete(
                     asyncio.wait_for(coro, timeout=self.job_timeout)
                 )
-            elif document_type == "id_card":
-                # ID cards use GLiNER-based extraction
-                coro = self.sequential_id_card_service.process_id_card(
-                    client_public_key=client_public_key,
-                    file_data=file_data["file_data"],
-                    filename=file_data["filename"],
-                    callback_url=callback_url
-                )
-                response = loop.run_until_complete(
-                    asyncio.wait_for(coro, timeout=self.job_timeout)
-                )
             elif document_type == "bank_statement":
                 coro = self.sequential_bank_statement_service.process_bank_statement(
                     client_public_key=client_public_key,
@@ -673,41 +662,68 @@ class DocumentAnalysisWorker:
                     asyncio.wait_for(coro, timeout=self.job_timeout)
                 )
             else:
-                # Generic document types - route to GenericDocumentService
-                # Includes: tax_return, tax_residency_certificate, driving_license, utility_bill,
-                #           payslip, insurance_policy, employment_letter, residence_proof, etc.
-                GENERIC_DOCUMENT_TYPES = {
-                    "tax_return", "tax_residency_certificate", "driving_license",
-                    "utility_bill", "payslip", "insurance_policy", "employment_letter",
-                    "residence_proof", "pan_card"
+                # Handle optional ID documents (does NOT affect verification state)
+                # These are for supplementary information only
+                OPTIONAL_ID_DOCUMENT_TYPES = {
+                    "id_card", "nric", "driving_license", "pan_card"
                 }
 
-                if document_type in GENERIC_DOCUMENT_TYPES:
-                    # Generic document type - uses GenericDocumentService
-                    from app.services.generic_document_service import GenericDocumentService
+                if document_type in OPTIONAL_ID_DOCUMENT_TYPES:
+                    # Import base64 for decoding
+                    import base64
 
-                    self.logger.info(f"Generic document type '{document_type}' requested, using generic document service")
+                    self.logger.info(f"Processing optional ID document: {document_type}")
 
-                    generic_service = GenericDocumentService(
-                        user_identity_repo=self.user_identity_repository
-                    )
+                    # Decode image from base64
+                    image_bytes = base64.b64decode(file_data["file_data"])
+                    filename = file_data.get("filename", "id_document.jpg")
 
-                    # Extract document type, country, and entity for direct passing
-                    doc_type = document_type  # Already have this
-                    country = file_data.get("country")
-                    entity = file_data.get("entity")
-
-                    coro = generic_service.process_auto_document(
-                        file_data=file_data,
-                        client_public_key=client_public_key,
-                        user_identity_id=user_identity_id,
-                        document_type=doc_type,
-                        country_code=country,
-                        entity=entity
+                    # Process as optional ID document (does not affect verification state)
+                    coro = self._process_optional_id_document(
+                        document_type=document_type,
+                        image_bytes=image_bytes,
+                        filename=filename,
+                        user_identity_id=user_identity_id
                     )
                     response = loop.run_until_complete(
                         asyncio.wait_for(coro, timeout=self.job_timeout)
                     )
+                else:
+                    # Generic document types - route to GenericDocumentService
+                    # Includes: tax_return, tax_residency_certificate, utility_bill,
+                    #           payslip, insurance_policy, employment_letter, residence_proof, etc.
+                    GENERIC_DOCUMENT_TYPES = {
+                        "tax_return", "tax_residency_certificate",
+                        "utility_bill", "payslip", "insurance_policy", "employment_letter",
+                        "residence_proof"
+                    }
+
+                    if document_type in GENERIC_DOCUMENT_TYPES:
+                        # Generic document type - uses GenericDocumentService
+                        from app.services.generic_document_service import GenericDocumentService
+
+                        self.logger.info(f"Generic document type '{document_type}' requested, using generic document service")
+
+                        generic_service = GenericDocumentService(
+                            user_identity_repo=self.user_identity_repository
+                        )
+
+                        # Extract document type, country, and entity for direct passing
+                        doc_type = document_type  # Already have this
+                        country = file_data.get("country")
+                        entity = file_data.get("entity")
+
+                        coro = generic_service.process_auto_document(
+                            file_data=file_data,
+                            client_public_key=client_public_key,
+                            user_identity_id=user_identity_id,
+                            document_type=doc_type,
+                            country_code=country,
+                            entity=entity
+                        )
+                        response = loop.run_until_complete(
+                            asyncio.wait_for(coro, timeout=self.job_timeout)
+                        )
                 else:
                     raise ValueError(f"Unsupported document type for sequential processing: {document_type}")
 
@@ -828,6 +844,68 @@ class DocumentAnalysisWorker:
             error_msg = f"Unexpected error during async callback for job {job_id}: {str(e)}"
             self.logger.error(error_msg)
             return False
+
+    async def _process_optional_id_document(
+        self,
+        document_type: str,
+        image_bytes: bytes,
+        filename: str,
+        user_identity_id: str
+    ) -> Dict[str, Any]:
+        """
+        Process optional ID document without affecting verification state.
+
+        This is for supplementary information only and does NOT count towards
+        verification requirements or affect the verification sequence.
+        """
+        from app.services.extractors.qwen_universal_id_extractor import QwenUniversalIDExtractor
+
+        try:
+            # Extract using universal ID extractor
+            extractor = QwenUniversalIDExtractor()
+            extraction_result = await extractor.extract_from_image(
+                image_bytes=image_bytes
+            )
+
+            extracted_data = extraction_result.extracted_data
+
+            # Validate required fields
+            required_fields = ['issuing_country', 'id_type', 'id_number', 'full_name']
+            missing_fields = [f for f in required_fields if f not in extracted_data]
+
+            if missing_fields:
+                return {
+                    'success': False,
+                    'error': f'Missing required fields: {", ".join(missing_fields)}',
+                    'document_type': document_type
+                }
+
+            # Return extracted data without affecting verification state
+            # Format: Compatible with existing response handling
+            return {
+                'success': True,
+                'status': 'completed',
+                'document_type': document_type,
+                'extracted_data': {
+                    'issuing_country': extracted_data.get('issuing_country', {}).get('value'),
+                    'id_type': extracted_data.get('id_type', {}).get('value'),
+                    'id_number': extracted_data.get('id_number', {}).get('value'),
+                    'full_name': extracted_data.get('full_name', {}).get('value'),
+                    'expiry_date': extracted_data.get('expiry_date', {}).get('value'),
+                    'is_supplementary': True  # Flag indicating this doesn't affect verification
+                },
+                # Verification state is NOT affected (remains unchanged)
+                'verification_state': None,  # Indicates no change to verification state
+                'is_supplementary': True
+            }
+
+        except Exception as e:
+            self.logger.error(f"Optional ID processing failed: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'document_type': document_type
+            }
 
     def get_worker_stats(self) -> dict:
         """Get worker statistics"""

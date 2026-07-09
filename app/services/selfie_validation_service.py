@@ -1,7 +1,6 @@
 from typing import Dict, Tuple, Optional
 from datetime import datetime, timezone
 from app.repositories.otp_repository import OTPRepository
-from app.repositories.user_key_repository import UserKeyRepository
 from app.core.logger import get_logger
 from app.config.verification_config import verification_settings
 from app.dto import DocumentErrorCode
@@ -139,20 +138,24 @@ class SelfieValidationService:
     def validate_otp(
         self,
         extracted_otp: str
-    ) -> Tuple[bool, str, Optional[str], Optional[str], Optional[str]]:
+    ) -> Tuple[bool, str, Optional[str], Optional[str]]:
         """
-        Validate OTP and return mobile_number and identity_id for face lookup.
+        Validate OTP for key recovery flow.
 
-        This method is used for temp key recovery flow where OTP is looked up by
-        code (not public_key), then we traverse to get mobile_number and identity_id.
+        This method validates the OTP code, expiry, and verification status.
+        The identity_id will come from face matching, not from mobile_number lookup.
 
-        Flow: OTP code -> mobile_number (from OTP) -> identity_id (from user_keys) -> face_biometrics
+        This removes the mobile_number bottleneck - we only validate OTP validity,
+        not require a successful mobile_number match in user_keys.
+
+        Flow: OTP code -> validate code, expiry, verification status -> success
+        (identity_id will be obtained later from face matching)
 
         Args:
             extracted_otp: OTP code extracted from selfie
 
         Returns:
-            Tuple of (success, error_message, mobile_number, identity_id, error_code)
+            Tuple of (success, error_message, mobile_number, error_code)
         """
         try:
             # Step 1: Lookup OTP by code (not public_key!)
@@ -160,34 +163,20 @@ class SelfieValidationService:
 
             if not otp_record:
                 self.logger.error(f"OTP validation failed - no OTP found for code: {extracted_otp[:4]}***")
-                return False, "OTP validation failed - incorrect OTP", None, None, DocumentErrorCode.SELFIE_OTP_INCORRECT
+                return False, "OTP validation failed - incorrect OTP", None, DocumentErrorCode.SELFIE_OTP_INCORRECT
 
+            # Mobile number is optional - only used for logging/audit purposes
             mobile_number = otp_record.get('mobile_number')
-            if not mobile_number:
-                self.logger.error(f"OTP validation failed - no mobile_number in OTP record: {extracted_otp[:4]}***")
-                return False, "OTP validation failed - no mobile number found", None, None, DocumentErrorCode.PROCESSING_ERROR
-
-            # Step 2: Get identity_id from user_keys using mobile_number
-            # NOTE: OTP table stores mobile_number and country_code separately,
-            # but user_keys table stores the full number with country code in mobile_number column.
-            # We need to combine them for the lookup.
             country_code = otp_record.get('country_code')
-            full_mobile_number = f"{country_code}{mobile_number}" if country_code else mobile_number
+            full_mobile_number = f"{country_code}{mobile_number}" if country_code and mobile_number else mobile_number
 
-            user_key_repo = UserKeyRepository()
-            identity_id = user_key_repo.get_identity_id_by_mobile_number(full_mobile_number)
-
-            if not identity_id:
-                self.logger.error(f"OTP validation failed - no identity found for mobile: {full_mobile_number}")
-                return False, "OTP validation failed - no identity found", None, None, DocumentErrorCode.PROCESSING_ERROR
-
-            # Step 3: Verify OTP matches (redundant since we looked up by code, but for safety)
+            # Step 2: Verify OTP matches (redundant since we looked up by code, but for safety)
             expected_otp = otp_record.get('random_number')
             if extracted_otp != expected_otp:
                 self.logger.error(f"OTP validation failed - mismatch: expected {expected_otp}, got {extracted_otp}")
-                return False, "OTP validation failed - incorrect OTP", None, None, DocumentErrorCode.SELFIE_OTP_INCORRECT
+                return False, "OTP validation failed - incorrect OTP", None, DocumentErrorCode.SELFIE_OTP_INCORRECT
 
-            # Step 4: Check not expired
+            # Step 3: Check not expired
             if otp_record.get('expires_at'):
                 expires_at = otp_record['expires_at']
                 now_utc = datetime.now(timezone.utc)
@@ -195,19 +184,22 @@ class SelfieValidationService:
                 if expires_at.tzinfo is None:
                     expires_at = expires_at.replace(tzinfo=timezone.utc)
                 if now_utc > expires_at:
-                    return False, "OTP validation failed - OTP expired", None, None, DocumentErrorCode.SELFIE_OTP_EXPIRED
+                    return False, "OTP validation failed - OTP expired", None, DocumentErrorCode.SELFIE_OTP_EXPIRED
 
-            # Step 5: Check not already verified
+            # Step 4: Check not already verified
             if otp_record.get('is_verified'):
                 self.logger.error("OTP validation failed - OTP already used")
-                return False, "OTP validation failed - OTP already verified", None, None, DocumentErrorCode.SELFIE_OTP_ALREADY_VERIFIED
+                return False, "OTP validation failed - OTP already verified", None, DocumentErrorCode.SELFIE_OTP_ALREADY_VERIFIED
 
-            self.logger.info(f"OTP validated successfully for mobile: {full_mobile_number}, identity: {identity_id[:16]}...")
-            return True, None, full_mobile_number, identity_id, None
+            if mobile_number:
+                self.logger.info(f"OTP validated successfully for mobile: {full_mobile_number}")
+            else:
+                self.logger.info("OTP validated successfully (no mobile number in record)")
+            return True, None, full_mobile_number, None
 
         except Exception as e:
             self.logger.error(f"OTP validation error: {str(e)}")
-            return False, f"OTP validation error: {str(e)}", None, None, DocumentErrorCode.PROCESSING_ERROR
+            return False, f"OTP validation error: {str(e)}", None, DocumentErrorCode.PROCESSING_ERROR
 
     def validate_photoholmes_results(
         self,

@@ -228,10 +228,11 @@ class SelfieVerificationFlow:
                     'error': "OTP not found in selfie image or filename"
                 }
 
-            # For recovery mode (public_key is None), use new OTP validation flow
+            # For recovery mode (public_key is None), use OTP validation flow
             if public_key is None:
-                # Recovery mode: validate OTP by code and get mobile_number + identity_id
-                otp_valid, otp_error, mobile_number, identity_id, otp_error_code = self.validation_service.validate_otp(
+                # Recovery mode: validate OTP by code and get mobile_number
+                # identity_id will come from face matching later
+                otp_valid, otp_error, mobile_number, otp_error_code = self.validation_service.validate_otp(
                     extracted_otp
                 )
 
@@ -245,14 +246,14 @@ class SelfieVerificationFlow:
                         'error_code': otp_error_code
                     }
 
-                self.logger.debug(f"OTP validation passed for recovery mode: {extracted_otp}, mobile: {mobile_number}, identity: {identity_id[:16]}...")
+                self.logger.debug(f"OTP validation passed for recovery mode: {extracted_otp}, mobile: {mobile_number}")
                 # Note: We don't delete OTP in recovery mode since we don't have a public_key to look up
 
                 return {
                     'success': True,
                     'otp': extracted_otp,
                     'mobile_number': mobile_number,
-                    'identity_id': identity_id,
+                    'identity_id': None,  # Will be set from face matching
                     'error': None,
                     'error_code': None
                 }

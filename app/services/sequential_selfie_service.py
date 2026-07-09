@@ -318,17 +318,19 @@ class SequentialSelfieService:
 
                 if not moved:
                     self.logger.error(f"Failed to move pending key to user_keys for {client_public_key[:16]}...")
-                    # Fallback: Try to create from otp_record data (for backward compatibility)
-                    self.logger.info(f"Fallback: Creating user_keys from otp_record data for {client_public_key[:16]}...")
-                    key_data = {
-                        'mobile_number': otp_record.get('mobile_number'),
-                        'country_code': otp_record.get('country_code'),
-                        'user_public_key': client_public_key,
-                        'encrypted_secret_share': otp_record.get('encrypted_secret_share'),
-                        'user_identity_id': user_identity_id
-                    }
-                    self.user_key_repository.create_key(key_data)
-                    pending_key_repo.delete_pending_key(client_public_key)
+                    # Fail loudly - no fallback, this will expose the real issue
+                    return SequentialJobResponse(
+                        result=False,
+                        job_id=job_id,
+                        verification_state=0,
+                        sequence_no=0,
+                        processing_time_seconds=round(time.time() - start_time, 2),
+                        error="Failed to create user account. Please try the verification process again.",
+                        error_code=DocumentErrorCode.PROCESSING_ERROR,
+                        extracted_data=extracted_data,
+                        forgery_checks=forgery_checks,
+                        other_checks=other_checks
+                    )
 
             self.logger.info(f"✅ Moved pending key to user_keys for public_key: {client_public_key[:16]}...")
 

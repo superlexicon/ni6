@@ -27,6 +27,7 @@ from PIL import Image
 from app.core.logger import get_logger
 from app.config.verification_config import verification_settings
 from app.services.comprehensive_photoholmes_service import ComprehensivePhotoHolmesService
+import fitz  # PyMuPDF for PDF to image conversion
 
 
 class DocumentPreprocessingService:
@@ -386,7 +387,62 @@ class DocumentPreprocessingService:
             return image
 
     def _load_image(self, image_bytes: bytes) -> np.ndarray:
-        """Load image from bytes."""
+        """Load image from bytes, handling PDF conversion if needed."""
+        # Check if input is PDF
+        is_pdf = image_bytes.startswith(b'%PDF')
+
+        if is_pdf:
+            self.logger.info("PDF detected, converting to image first...")
+            try:
+                # Open PDF document
+                pdf_document = fitz.open(stream=image_bytes, filetype="pdf")
+
+                if pdf_document.page_count == 0:
+                    raise ValueError("PDF is empty")
+
+                # Use first page for passport processing
+                page = pdf_document[0]
+
+                # Calculate zoom factor for desired resolution
+                # Higher zoom = better quality but slower processing
+                zoom = 4.0
+
+                # Render page to pixmap
+                mat = fitz.Matrix(zoom, zoom)
+                pix = page.get_pixmap(matrix=mat)
+
+                # Convert to PNG bytes
+                image_bytes = pix.tobytes("png")
+                pdf_document.close()
+
+                self.logger.info(f"PDF converted to image successfully ({len(image_bytes)} bytes)")
+
+            except Exception as e:
+                self.logger.error(f"PDF to image conversion failed: {str(e)}")
+                raise ValueError(f"Failed to convert PDF to image: {str(e)}")
+
+        # Validate image bytes before attempting to decode
+        if not image_bytes:
+            raise ValueError("Image data is empty")
+
+        if len(image_bytes) < 100:
+            raise ValueError(f"Image data too small ({len(image_bytes)} bytes)")
+
+        # Check for valid image format signatures (magic bytes)
+        if len(image_bytes) >= 4:
+            header = image_bytes[:4]
+            valid_signatures = {
+                b'\xFF\xD8\xFF': 'JPEG',
+                b'\x89PNG': 'PNG',
+                b'GIF8': 'GIF',
+                b'RIFF': 'WebP',
+                b'BM': 'BMP'
+            }
+            has_valid_signature = any(header.startswith(sig) for sig in valid_signatures.keys())
+            if not has_valid_signature:
+                self.logger.warning(f"Invalid image format signature (header: {header.hex()})")
+                raise ValueError(f"Invalid image format - expected JPEG/PNG/GIF/WebP/BMP")
+
         try:
             pil_image = Image.open(io.BytesIO(image_bytes))
             if pil_image.mode != 'RGB':

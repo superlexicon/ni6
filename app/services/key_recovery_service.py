@@ -360,10 +360,11 @@ class KeyRecoveryService:
         else:
             self.logger.info("Using image selfie verification with OCR OTP")
             # For OTP validation, we pass None as public_key for recovery mode
-            # The new validate_otp() flow will:
-            # 1. Lookup OTP by code (not public_key)
-            # 2. Get mobile_number from OTP
-            # 3. Get identity_id from user_keys using mobile_number
+            # The validate_otp() flow validates:
+            # 1. OTP code exists and is correct
+            # 2. OTP not expired
+            # 3. OTP not already verified
+            # The identity_id will be obtained from face matching later
             verification_result = await self.selfie_verification.verify_selfie(
                 selfie_bytes=selfie_bytes,
                 public_key=None,  # No registered key for OTP validation - use recovery flow
