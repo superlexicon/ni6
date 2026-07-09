@@ -724,8 +724,8 @@ class DocumentAnalysisWorker:
                         response = loop.run_until_complete(
                             asyncio.wait_for(coro, timeout=self.job_timeout)
                         )
-                else:
-                    raise ValueError(f"Unsupported document type for sequential processing: {document_type}")
+                    else:
+                        raise ValueError(f"Unsupported document type for sequential processing: {document_type}")
 
             processing_time = time.time() - start_time
             self.logger.info(f"Sequential job {job_id} completed in {processing_time:.2f} seconds")
