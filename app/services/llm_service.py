@@ -801,7 +801,7 @@ class LLMService:
             # Using httpx.Timeout to only override read timeout (not connect/write/pool)
             request_timeout = httpx.Timeout(
                 connect=10.0,  # Connection timeout
-                read=15.0,     # Read timeout - fail fast if model gets stuck generating Thai text
+                read=float(self.settings.ollama_vision_read_timeout),  # Read timeout - configurable via LLM_OLLAMA_VISION_READ_TIMEOUT
                 write=10.0,    # Write timeout
                 pool=5.0        # Pool timeout
             )

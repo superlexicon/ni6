@@ -15,3 +15,4 @@ EXPOSE 12410
 
 # Default command
 CMD ["python3", "-m", "app.main"]
+#testetest

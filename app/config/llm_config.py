@@ -74,6 +74,11 @@ class LLMSettings(BaseSettings):
         description="API timeout in seconds"
     )
 
+    ollama_vision_read_timeout: int = Field(
+        60,
+        description="Read timeout for Ollama vision API calls in seconds (adjust based on testing)"
+    )
+
     # Prompt Generation Settings
     prompt_examples_count: int = Field(
         4,
