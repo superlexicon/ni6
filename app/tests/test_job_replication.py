@@ -333,14 +333,19 @@ class TestCreateSubmissionFromPeer(unittest.TestCase):
 
 
 class TestRoleAwareStartup(unittest.TestCase):
-    """load_pending_jobs_on_startup: shadow rows never enqueued; demotion fails leftovers."""
+    """load_pending_jobs_on_startup: shadow rows never enqueued; role-aware own rows."""
 
-    def _make_job(self, job_id, processing_server=None):
+    def _make_job(self, job_id, processing_server=None,
+                  file_type="document", document_type="passport"):
         from app.dto.job_models import JobDatabaseRecord, JobStatus
         return JobDatabaseRecord(
             id=job_id,
             status=JobStatus.PENDING,
-            request_data={"target_server_public_key": "route-key"},
+            request_data={
+                "target_server_public_key": "route-key",
+                "files": [{"filename": "f.jpg", "file_type": file_type,
+                           "document_type": document_type}],
+            },
             created_at=datetime.utcnow(),
             processing_server=processing_server,
         )
@@ -362,62 +367,75 @@ class TestRoleAwareStartup(unittest.TestCase):
         manager.logger = MagicMock()
         return manager, queue
 
-    def test_origin_skips_shadow_rows(self):
+    def test_origin_enqueues_all_own_jobs_and_skips_shadow_rows(self):
         from app.services import job_manager as jm_module
 
-        own = self._make_job("own-1")
+        own_llm = self._make_job("own-llm")
+        own_recovery = self._make_job(
+            "own-recovery", file_type="selfie", document_type="secret_share_recovery")
         shadow = self._make_job("shadow-1", processing_server="http://origin:12410")
-        manager, queue = self._make_manager([own, shadow])
+        manager, queue = self._make_manager([own_llm, own_recovery, shadow])
 
         with patch.object(jm_module, "is_llm_server_configured", return_value=True):
             loaded = manager.load_pending_jobs_on_startup()
 
-        self.assertEqual(loaded, 1)
-        self.assertEqual(queue.put.call_count, 1)
-        self.assertEqual(queue.put.call_args.args[0].id, "own-1")
+        self.assertEqual(loaded, 2)
+        self.assertEqual(queue.put.call_count, 2)
+        enqueued_ids = {c.args[0].id for c in queue.put.call_args_list}
+        self.assertEqual(enqueued_ids, {"own-llm", "own-recovery"})
 
-    def test_shadow_only_instance_enqueues_nothing_and_fails_own_jobs(self):
+    def test_shadow_enqueues_non_llm_fails_llm_skips_shadow_rows(self):
         from app.services import job_manager as jm_module
         from app.dto.job_models import JobStatus
 
-        own = self._make_job("own-1")
+        own_llm = self._make_job("own-llm")
+        own_recovery = self._make_job(
+            "own-recovery", file_type="selfie", document_type="secret_share_recovery")
         shadow = self._make_job("shadow-1", processing_server="http://origin:12410")
-        manager, queue = self._make_manager([own, shadow])
+        manager, queue = self._make_manager([own_llm, own_recovery, shadow])
         manager.update_job_status = MagicMock(return_value=True)
 
-        with patch.object(jm_module, "is_llm_server_configured", return_value=False):
+        with patch.object(jm_module, "is_llm_server_configured", return_value=False), \
+             patch.object(jm_module, "job_broadcast_service"):
             loaded = manager.load_pending_jobs_on_startup()
 
-        self.assertEqual(loaded, 0)
-        queue.put.assert_not_called()
-        # Own leftover job failed loudly; shadow row left for the recovery pull
+        self.assertEqual(loaded, 1)
+        self.assertEqual(queue.put.call_count, 1)
+        self.assertEqual(queue.put.call_args.args[0].id, "own-recovery")
+        # Own leftover LLM job failed loudly; shadow row untouched (recovery pull owns it)
         self.assertEqual(manager.update_job_status.call_count, 1)
         args = manager.update_job_status.call_args.args
-        self.assertEqual(args[0], "own-1")
+        self.assertEqual(args[0], "own-llm")
         self.assertEqual(args[1], JobStatus.FAILED)
 
 
 class TestShadowSubmissionHandling(unittest.TestCase):
-    """Shadow-only instances: LLM-dependent submissions are silently dropped."""
+    """Shadow instances: LLM jobs silently dropped; selfie/recovery processed locally."""
 
     def _make_manager(self):
         from app.services.job_manager import JobManager
 
         manager = JobManager.__new__(JobManager)  # skip __init__ (DB connection)
+        manager.instance_public_key = "test-instance-key"
         manager.job_repo = MagicMock()
+        manager.job_repo.create_job.return_value = True
         manager.job_queue = MagicMock()
         manager._worker = None
         manager.default_callback_url = None
         manager.max_job_retries = 3
         manager.logger = MagicMock()
+        manager._get_user_identity_id_from_public_key = MagicMock(return_value=None)
         return manager
 
-    def _request(self, file_type="document", document_type="passport"):
+    def _request(self, file_type="document", document_type="passport",
+                 filename="doc.jpg", target="route-key"):
         from app.dto.job_models import JobRequest, FileObject
         return JobRequest(
             client_public_key="pk",
+            iv="dGVzdC1pdg==",  # required for plain (non-envelope) selfie submissions
+            target_server_public_key=target,
             files=[FileObject(
-                filename="doc.jpg", file_data="Zm9v",
+                filename=filename, file_data="Zm9v",
                 file_type=file_type, document_type=document_type,
             )],
         )
@@ -431,10 +449,16 @@ class TestShadowSubmissionHandling(unittest.TestCase):
             self._request(document_type="auto")))  # generic detection uses Qwen
         self.assertTrue(manager._request_requires_vision_llm(
             self._request(document_type=None)))  # unknown -> assume LLM
+        self.assertTrue(manager._request_requires_vision_llm(
+            self._request(document_type="tax_statement")))  # documents are LLM-bound
         self.assertFalse(manager._request_requires_vision_llm(
-            self._request(file_type="selfie", document_type="selfie")))
+            self._request(file_type="selfie", document_type="selfie",
+                          filename="selfie_otp123456.jpg")))
         self.assertFalse(manager._request_requires_vision_llm(
-            self._request(document_type="tax_statement")))  # DocTR-only
+            self._request(file_type="selfie", document_type="secret_share_recovery",
+                          filename="recovery_selfie_otp080684.jpg")))
+        self.assertFalse(manager._request_requires_vision_llm(
+            self._request(document_type="video_selfie")))
         # Key-operation jobs have no files -> non-LLM
         from app.dto.job_models import JobRequest
         self.assertFalse(manager._request_requires_vision_llm(
@@ -445,7 +469,8 @@ class TestShadowSubmissionHandling(unittest.TestCase):
         from app.services import job_manager as jm_module
 
         manager = self._make_manager()
-        with patch.object(jm_module, "is_llm_server_configured", return_value=False):
+        with patch.object(jm_module, "is_llm_server_configured", return_value=False), \
+             patch.object(jm_module, "job_broadcast_service"):
             response = asyncio.run(manager.create_job(self._request(document_type="passport")))
 
         # Client sees a normal acceptance; nothing was persisted or queued
@@ -454,18 +479,49 @@ class TestShadowSubmissionHandling(unittest.TestCase):
         manager.job_repo.create_job.assert_not_called()
         manager.job_queue.put.assert_not_called()
 
-    def test_non_llm_job_still_rejected_loudly(self):
+    def test_tax_statement_silently_dropped_on_shadow(self):
         import asyncio
         from app.services import job_manager as jm_module
 
         manager = self._make_manager()
-        with patch.object(jm_module, "is_llm_server_configured", return_value=False):
-            response = asyncio.run(manager.create_job(
-                self._request(file_type="selfie", document_type="selfie")))
+        with patch.object(jm_module, "is_llm_server_configured", return_value=False), \
+             patch.object(jm_module, "job_broadcast_service"):
+            response = asyncio.run(manager.create_job(self._request(document_type="tax_statement")))
 
-        self.assertFalse(response.success)
+        self.assertTrue(response.success)
         manager.job_repo.create_job.assert_not_called()
         manager.job_queue.put.assert_not_called()
+
+    def test_recovery_job_accepted_and_queued_on_shadow(self):
+        """Key recovery fans out to all instances - shadows must process it locally."""
+        import asyncio
+        from app.services import job_manager as jm_module
+
+        manager = self._make_manager()
+        with patch.object(jm_module, "is_llm_server_configured", return_value=False), \
+             patch.object(jm_module, "job_broadcast_service"):
+            response = asyncio.run(manager.create_job(self._request(
+                file_type="selfie", document_type="secret_share_recovery",
+                filename="recovery_selfie_otp080684.jpg")))
+
+        self.assertTrue(response.success)
+        manager.job_repo.create_job.assert_called_once()
+        manager.job_queue.put.assert_called_once()
+
+    def test_selfie_job_accepted_and_queued_on_shadow(self):
+        import asyncio
+        from app.services import job_manager as jm_module
+
+        manager = self._make_manager()
+        with patch.object(jm_module, "is_llm_server_configured", return_value=False), \
+             patch.object(jm_module, "job_broadcast_service"):
+            response = asyncio.run(manager.create_job(self._request(
+                file_type="selfie", document_type="selfie",
+                filename="selfie_otp123456.jpg")))
+
+        self.assertTrue(response.success)
+        manager.job_repo.create_job.assert_called_once()
+        manager.job_queue.put.assert_called_once()
 
 
 class TestBroadcastGating(unittest.TestCase):
@@ -486,7 +542,9 @@ class TestBroadcastGating(unittest.TestCase):
             svc.broadcast_job_failed("j1", "err")
         svc._spawn.assert_not_called()
 
-    def test_job_created_requires_llm_role(self):
+    def test_job_created_broadcasts_regardless_of_role(self):
+        """job_created replication is role-independent: non-LLM jobs (selfie,
+        key recovery) processed on shadows must replicate to peers too."""
         from app.services import job_broadcast_service as jbs_module
         from app.services.job_broadcast_service import JobBroadcastService
 
@@ -498,7 +556,9 @@ class TestBroadcastGating(unittest.TestCase):
             cfg.has_peers.return_value = True
             cfg.instance_url = "http://me:12410"
             svc.broadcast_job_created("j1", {})
-        svc._spawn.assert_not_called()
+
+        svc._spawn.assert_called_once()
+        svc._spawn.call_args.args[0].close()
 
     def test_job_result_pushes_regardless_of_role(self):
         """An instance that processed a job propagates results even if demoted mid-flight."""

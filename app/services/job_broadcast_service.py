@@ -54,11 +54,15 @@ class JobBroadcastService:
         user_identity_id: Optional[str] = None,
         callback_url: Optional[str] = None
     ) -> None:
-        """Push a shadow copy of a newly created job to all peers (origin role only)."""
-        from app.config.llm_config import is_llm_server_configured
+        """
+        Push a shadow copy of a newly created job to all peers.
 
-        if not is_llm_server_configured():
-            return
+        Not gated on the LLM role: LLM-dependent jobs are silently dropped
+        before creation on shadow instances, so anything created here is
+        processable by this instance - and non-LLM jobs (selfie liveness,
+        key recovery) processed on shadows must replicate to peers like any
+        other job so all instances converge.
+        """
         if not instance_config.has_peers():
             self.logger.debug("No peer instances configured - skipping job_created broadcast")
             return

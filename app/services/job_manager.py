@@ -179,25 +179,38 @@ class JobManager:
             lambda: hashlib.sha256(content_json.encode()).hexdigest()
         )
 
-    # Document types whose extraction runs on the vision LLM server.
-    # Everything else (selfie/video liveness, key operations, DocTR-only
-    # types) is processed with local models. Mirrors the worker's routing.
+    # Job types processed with local models only (DeepFace, PhotoHolmes,
+    # MediaPipe) - no vision LLM required. These must work on EVERY instance:
+    # key recovery fans out to all instances (each holds a share; quorum
+    # needs multiple successes) and selfie liveness is local-model based.
+    # All document extraction types run on the LLM server.
     NON_LLM_DOCUMENT_TYPES = {
-        'selfie', 'video_selfie', 'secret_share_recovery', 'tax_statement',
-        'tax_return', 'resume', 'driving_license', 'national_id',
-        'add_public_key', 'remove_public_key',
+        'selfie', 'video_selfie', 'secret_share_recovery',
     }
+
+    def _file_requires_vision_llm(self, file_type, document_type) -> bool:
+        """Classify a single file: True if its processing needs the vision LLM."""
+        file_type = (file_type or '').lower().strip()
+        doc_type = (document_type or file_type or 'auto').lower().strip().replace(' ', '_')
+        return not (file_type == 'selfie' or doc_type in self.NON_LLM_DOCUMENT_TYPES)
 
     def _request_requires_vision_llm(self, job_request: JobRequest) -> bool:
         """True if any file in the request needs the vision LLM for extraction."""
         if not job_request.files:
             return False
-        for f in job_request.files:
-            file_type = (f.file_type or '').lower().strip()
-            doc_type = (f.document_type or file_type or 'auto').lower().strip().replace(' ', '_')
-            if file_type == 'selfie' or doc_type in self.NON_LLM_DOCUMENT_TYPES:
+        return any(
+            self._file_requires_vision_llm(f.file_type, f.document_type)
+            for f in job_request.files
+        )
+
+    def _request_data_requires_vision_llm(self, request_data: dict) -> bool:
+        """Same classification for a persisted job record's request_data dict."""
+        files = (request_data or {}).get('files') or []
+        for f in files:
+            if not isinstance(f, dict):
                 continue
-            return True
+            if self._file_requires_vision_llm(f.get('file_type'), f.get('document_type')):
+                return True
         return False
 
     async def create_job(self, job_request: JobRequest, skip_state_validation: bool = False) -> JobSubmissionResponse:
@@ -212,29 +225,19 @@ class JobManager:
         # LLM-dependent documents. Such submissions are accepted and silently
         # dropped instead of erroring: an error response leaves clients
         # waiting on a job that will never exist, and no row is persisted.
-        if not is_llm_server_configured():
-            if self._request_requires_vision_llm(job_request):
-                drop_job_id = str(uuid.uuid4())
-                self.logger.warning(
-                    f"Silently dropping LLM-dependent job {drop_job_id} "
-                    f"(no LLM server configured on this instance)"
-                )
-                return JobSubmissionResponse(
-                    success=True,
-                    job_id=drop_job_id,
-                    status=JobStatus.PENDING,
-                    message="Job queued successfully"
-                )
-
+        # Non-LLM jobs (selfie liveness, key recovery - local models only)
+        # process normally on every instance.
+        if not is_llm_server_configured() and self._request_requires_vision_llm(job_request):
+            drop_job_id = str(uuid.uuid4())
             self.logger.warning(
-                "Rejecting non-LLM job: no LLM server configured on this instance"
+                f"Silently dropping LLM-dependent job {drop_job_id} "
+                f"(no LLM server configured on this instance)"
             )
             return JobSubmissionResponse(
-                success=False,
-                job_id="",
-                status=JobStatus.FAILED,
-                message=("This instance has no LLM server configured and cannot "
-                         "process documents. Submit to the LLM-enabled instance.")
+                success=True,
+                job_id=drop_job_id,
+                status=JobStatus.PENDING,
+                message="Job queued successfully"
             )
 
         # Check if this is a secret share recovery job (allows empty iv)
@@ -695,17 +698,17 @@ class JobManager:
         """
         Load pending jobs from MySQL into in-memory queue on startup.
 
-        Role-aware with peer job replication:
-        - Instances with an LLM server enqueue their own pending jobs
-          (processing_server NULL). Replicated shadow rows (processing_server
-          set) are never enqueued - they are owned by the peer that received
-          the client request.
-        - Shadow-only instances (no LLM server) enqueue nothing. Leftover own
-          pending rows are marked failed: this instance can no longer process
-          them, and their stored payloads are stripped so no other instance
-          could either. Clients must resubmit.
-        - On all instances, shadow rows older than the TTL are marked failed
-          (origin crashed before delivering the result and is unreachable).
+        - Replicated shadow rows (processing_server set) are never enqueued -
+          they are owned by the peer that received the client request and are
+          resolved by the recovery pull / result push.
+        - Own LLM-dependent rows are enqueued only on instances with an LLM
+          server; on shadow-only instances they are marked failed (this
+          instance can no longer process them and stored payloads are
+          stripped, so no instance could - clients must resubmit).
+        - Own non-LLM rows (selfie liveness, key recovery) are enqueued on
+          every instance: they only need local models, and key recovery
+          fans out to all instances by design.
+        - Shadow rows older than the TTL are marked failed (safety net).
         """
         self.logger.info("Loading pending jobs from database into in-memory queue...")
 
@@ -720,12 +723,18 @@ class JobManager:
         # Load pending jobs and re-insert into in-memory queue
         pending_jobs = self.job_repo.get_pending_jobs(limit=1000)
         loaded_count = 0
+        llm_configured = is_llm_server_configured()
 
-        if not is_llm_server_configured():
-            # Shadow-only instance: mark leftover own jobs failed (resubmit needed)
-            for job in pending_jobs:
-                if job.processing_server:
-                    continue  # shadow row - resolved by the recovery pull
+        for job in pending_jobs:
+            # Never enqueue replicated shadow rows - they are owned by a peer
+            if job.processing_server:
+                continue
+
+            if job.status != JobStatus.PENDING or job.retry_count >= job.max_retries:
+                continue
+
+            # Leftover LLM-dependent job on a shadow-only instance: fail loudly
+            if self._request_data_requires_vision_llm(job.request_data) and not llm_configured:
                 self.logger.warning(
                     f"Failing own pending job {job.id}: LLM server no longer configured"
                 )
@@ -740,39 +749,30 @@ class JobManager:
                     )
                 except Exception:
                     pass
-            self.logger.info("Shadow-only instance (no LLM server): no jobs enqueued for local processing")
-            return 0
+                continue
 
-        for job in pending_jobs:
-            # Check if job is still pending and hasn't exceeded retry limit
-            if job.status == JobStatus.PENDING and job.retry_count < job.max_retries:
-                # Never enqueue replicated shadow rows - they are owned by a peer
-                if job.processing_server:
+            # Check if job is already being tracked in the queue
+            if not self.job_queue.is_job_tracked(job.id):
+                # Skip jobs without target_server_public_key (cannot route)
+                routing_key = job.request_data.get("target_server_public_key")
+                if not routing_key:
+                    self.logger.warning(f"Skipping job {job.id} - missing target_server_public_key")
                     continue
 
-                # Check if job is already being tracked in the queue
-                if not self.job_queue.is_job_tracked(job.id):
-                    # Convert to JobDatabaseRecord and add to queue
-                    # Skip jobs without target_server_public_key (cannot route)
-                    routing_key = job.request_data.get("target_server_public_key")
-                    if not routing_key:
-                        self.logger.warning(f"Skipping job {job.id} - missing target_server_public_key")
-                        continue
+                from datetime import datetime
+                from app.dto.job_models import JobDatabaseRecord
 
-                    from datetime import datetime
-                    from app.dto.job_models import JobDatabaseRecord
-
-                    job_record = JobDatabaseRecord(
-                        id=job.id,
-                        status=job.status,
-                        request_data=job.request_data,
-                        callback_url=job.callback_url,
-                        max_retries=job.max_retries,
-                        created_at=job.created_at,
-                        updated_at=datetime.utcnow()
-                    )
-                    self.job_queue.put(job_record)
-                    loaded_count += 1
+                job_record = JobDatabaseRecord(
+                    id=job.id,
+                    status=job.status,
+                    request_data=job.request_data,
+                    callback_url=job.callback_url,
+                    max_retries=job.max_retries,
+                    created_at=job.created_at,
+                    updated_at=datetime.utcnow()
+                )
+                self.job_queue.put(job_record)
+                loaded_count += 1
 
         self.logger.info(f"Loaded {loaded_count} pending jobs into in-memory queue")
 
