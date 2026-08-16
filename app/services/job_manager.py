@@ -179,6 +179,27 @@ class JobManager:
             lambda: hashlib.sha256(content_json.encode()).hexdigest()
         )
 
+    # Document types whose extraction runs on the vision LLM server.
+    # Everything else (selfie/video liveness, key operations, DocTR-only
+    # types) is processed with local models. Mirrors the worker's routing.
+    NON_LLM_DOCUMENT_TYPES = {
+        'selfie', 'video_selfie', 'secret_share_recovery', 'tax_statement',
+        'tax_return', 'resume', 'driving_license', 'national_id',
+        'add_public_key', 'remove_public_key',
+    }
+
+    def _request_requires_vision_llm(self, job_request: JobRequest) -> bool:
+        """True if any file in the request needs the vision LLM for extraction."""
+        if not job_request.files:
+            return False
+        for f in job_request.files:
+            file_type = (f.file_type or '').lower().strip()
+            doc_type = (f.document_type or file_type or 'auto').lower().strip().replace(' ', '_')
+            if file_type == 'selfie' or doc_type in self.NON_LLM_DOCUMENT_TYPES:
+                continue
+            return True
+        return False
+
     async def create_job(self, job_request: JobRequest, skip_state_validation: bool = False) -> JobSubmissionResponse:
         """
         Create a new job and add it to the queue.
@@ -188,11 +209,25 @@ class JobManager:
             skip_state_validation: If True, skip state validation (for signed endpoint only)
         """
         # Shadow-only instances (no LLM server configured) never process
-        # documents; reject loudly so the client resubmits to the
-        # LLM-enabled instance
+        # LLM-dependent documents. Such submissions are accepted and silently
+        # dropped instead of erroring: an error response leaves clients
+        # waiting on a job that will never exist, and no row is persisted.
         if not is_llm_server_configured():
+            if self._request_requires_vision_llm(job_request):
+                drop_job_id = str(uuid.uuid4())
+                self.logger.warning(
+                    f"Silently dropping LLM-dependent job {drop_job_id} "
+                    f"(no LLM server configured on this instance)"
+                )
+                return JobSubmissionResponse(
+                    success=True,
+                    job_id=drop_job_id,
+                    status=JobStatus.PENDING,
+                    message="Job queued successfully"
+                )
+
             self.logger.warning(
-                "Rejecting document job: no LLM server configured on this instance"
+                "Rejecting non-LLM job: no LLM server configured on this instance"
             )
             return JobSubmissionResponse(
                 success=False,
@@ -347,7 +382,6 @@ class JobManager:
         # Generate unique job ID using standard UUID format
         # This ensures unique job IDs per request, preventing collisions when multiple
         # instances receive identical encrypted content
-        import uuid
         job_id = str(uuid.uuid4())
 
         # Create job in database first (for audit/history)

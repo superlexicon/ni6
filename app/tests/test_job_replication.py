@@ -397,6 +397,77 @@ class TestRoleAwareStartup(unittest.TestCase):
         self.assertEqual(args[1], JobStatus.FAILED)
 
 
+class TestShadowSubmissionHandling(unittest.TestCase):
+    """Shadow-only instances: LLM-dependent submissions are silently dropped."""
+
+    def _make_manager(self):
+        from app.services.job_manager import JobManager
+
+        manager = JobManager.__new__(JobManager)  # skip __init__ (DB connection)
+        manager.job_repo = MagicMock()
+        manager.job_queue = MagicMock()
+        manager._worker = None
+        manager.default_callback_url = None
+        manager.max_job_retries = 3
+        manager.logger = MagicMock()
+        return manager
+
+    def _request(self, file_type="document", document_type="passport"):
+        from app.dto.job_models import JobRequest, FileObject
+        return JobRequest(
+            client_public_key="pk",
+            files=[FileObject(
+                filename="doc.jpg", file_data="Zm9v",
+                file_type=file_type, document_type=document_type,
+            )],
+        )
+
+    def test_classification(self):
+        manager = self._make_manager()
+
+        self.assertTrue(manager._request_requires_vision_llm(
+            self._request(document_type="passport")))
+        self.assertTrue(manager._request_requires_vision_llm(
+            self._request(document_type="auto")))  # generic detection uses Qwen
+        self.assertTrue(manager._request_requires_vision_llm(
+            self._request(document_type=None)))  # unknown -> assume LLM
+        self.assertFalse(manager._request_requires_vision_llm(
+            self._request(file_type="selfie", document_type="selfie")))
+        self.assertFalse(manager._request_requires_vision_llm(
+            self._request(document_type="tax_statement")))  # DocTR-only
+        # Key-operation jobs have no files -> non-LLM
+        from app.dto.job_models import JobRequest
+        self.assertFalse(manager._request_requires_vision_llm(
+            JobRequest(client_public_key="pk")))
+
+    def test_llm_job_silently_dropped(self):
+        import asyncio
+        from app.services import job_manager as jm_module
+
+        manager = self._make_manager()
+        with patch.object(jm_module, "is_llm_server_configured", return_value=False):
+            response = asyncio.run(manager.create_job(self._request(document_type="passport")))
+
+        # Client sees a normal acceptance; nothing was persisted or queued
+        self.assertTrue(response.success)
+        self.assertNotEqual(response.job_id, "")
+        manager.job_repo.create_job.assert_not_called()
+        manager.job_queue.put.assert_not_called()
+
+    def test_non_llm_job_still_rejected_loudly(self):
+        import asyncio
+        from app.services import job_manager as jm_module
+
+        manager = self._make_manager()
+        with patch.object(jm_module, "is_llm_server_configured", return_value=False):
+            response = asyncio.run(manager.create_job(
+                self._request(file_type="selfie", document_type="selfie")))
+
+        self.assertFalse(response.success)
+        manager.job_repo.create_job.assert_not_called()
+        manager.job_queue.put.assert_not_called()
+
+
 class TestBroadcastGating(unittest.TestCase):
     """Broadcasts must no-op without peers, and job_created without the origin role."""
 
