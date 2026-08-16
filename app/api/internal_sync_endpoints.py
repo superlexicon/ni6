@@ -8,6 +8,7 @@ Authentication: ECDSA signature-based verification
 from fastapi import APIRouter, HTTPException, Depends, Request
 from typing import Dict, Any, List, Optional
 from datetime import datetime
+import json
 import time
 
 from app.repositories.otp_repository import OTPRepository
@@ -207,14 +208,106 @@ async def receive_otp_sync(
         raise HTTPException(status_code=400, detail=f"Invalid event_type: {event_type}")
 
 
-@router.post("/jobs/accept")
-async def accept_job(
-    job_data: Dict[str, Any],
+@router.post("/jobs/sync")
+async def sync_job_event(
+    event: Dict[str, Any],
     sender_public_key: str = Depends(verify_internal_request)
 ):
-    """Accept a job from a peer instance."""
-    logger.info(f"Received job {job_data.get('id')} from {sender_public_key[:16]}...")
-    return {"status": "accepted"}
+    """
+    Receive a job lifecycle event from a peer instance.
+
+    Event types:
+    - job_created: store a shadow copy of the job (never processed locally)
+    - job_result : store the submission from the origin's result, delete shadow
+    - job_failed : mark the shadow row failed
+    """
+    from app.services.replication_handlers import (
+        handle_job_created_event, handle_job_result_event, handle_job_failed_event
+    )
+
+    event_type = event.get("event_type")
+    sender_id = event.get("instance_id")
+    our_instance_id = instance_config.instance_public_key[:16]
+
+    if sender_id == our_instance_id:
+        logger.debug("Skipping job sync event from self")
+        return {"status": "skipped", "reason": "self-event"}
+
+    logger.info(f"Received job {event_type} event from {sender_id}")
+
+    if event_type == "job_created":
+        return handle_job_created_event(event)
+    elif event_type == "job_result":
+        return handle_job_result_event(event)
+    elif event_type == "job_failed":
+        return handle_job_failed_event(event)
+    else:
+        raise HTTPException(status_code=400, detail=f"Invalid event_type: {event_type}")
+
+
+@router.post("/jobs/status")
+async def get_jobs_status(
+    request: Dict[str, Any],
+    job_repo: JobRepository = Depends(),
+    sender_public_key: str = Depends(verify_internal_request)
+):
+    """
+    Report the status of jobs to a peer instance running the recovery pull.
+
+    Served by every instance regardless of LLM role - it only reads local
+    tables. Per job: 'pending'/'processing'/'failed' from the jobs table,
+    'completed' (with the reconstructed result payload) from
+    document_submissions, or 'unknown' when the job was dropped.
+    """
+    from app.repositories.document_submission_repository import DocumentSubmissionRepository
+
+    job_ids = request.get("job_ids")
+    if not isinstance(job_ids, list) or not job_ids:
+        raise HTTPException(status_code=400, detail="job_ids list required")
+
+    logger.info(f"Internal job status request from {sender_public_key[:16]}... for {len(job_ids)} job(s)")
+
+    submission_repo = DocumentSubmissionRepository()
+    results = []
+
+    for job_id in job_ids:
+        job = job_repo.get_job_by_id(job_id)
+        if job:
+            results.append({"job_id": job_id, "state": job.status.value})
+            continue
+
+        submission = submission_repo.get_submission_by_job_id(job_id)
+        if submission:
+            # Reconstruct the result payload from the submission row. The
+            # extracted_data_encrypted envelope is passed through verbatim -
+            # ECIES envelopes decrypt identically for the client regardless
+            # of which instance produced them.
+            response_data = submission_repo._construct_response_data(submission)
+            response_data["user_identity_id"] = submission.get("user_identity_id")
+            if submission.get("verification_state") is not None and "verification_state" not in response_data:
+                response_data["verification_state"] = submission.get("verification_state")
+            if submission.get("sequence_no") is not None and "sequence_no" not in response_data:
+                response_data["sequence_no"] = submission.get("sequence_no")
+
+            request_data = submission.get("request_data")
+            if isinstance(request_data, str):
+                try:
+                    request_data = json.loads(request_data)
+                except (json.JSONDecodeError, TypeError):
+                    request_data = {}
+
+            results.append({
+                "job_id": job_id,
+                "state": "completed",
+                "result": {
+                    "response_data": response_data,
+                    "request_data": request_data or {}
+                }
+            })
+        else:
+            results.append({"job_id": job_id, "state": "unknown"})
+
+    return {"jobs": results, "count": len(results)}
 
 
 @router.get("/health")

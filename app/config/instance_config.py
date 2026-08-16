@@ -63,6 +63,17 @@ class InstanceConfig(BaseSettings):
         description="Timeout for peer HTTP requests (seconds)"
     )
 
+    # Job replication settings (peer job record + result sharing)
+    job_replication_timeout: int = Field(
+        default=10,
+        description="Timeout for peer job replication/result HTTP requests (seconds)"
+    )
+
+    shadow_job_ttl_hours: int = Field(
+        default=24,
+        description="Mark replicated (shadow) jobs failed after this many hours without a result"
+    )
+
     # Peer public keys mapping for signature-based authentication (JSON string)
     peer_public_keys_raw: str = Field(
         default='{}',

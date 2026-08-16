@@ -329,6 +329,10 @@ class DocumentAnalysisWorker:
                 if self.job_manager.delete_job(job_id):
                     self.logger.info(f"Job {job_id} deleted after successful document submission storage")
 
+                    # Push the result to peer instances so they finalize their
+                    # shadow rows (fire-and-forget, never blocks the worker)
+                    self._broadcast_job_result(job_id, request_data, response_data)
+
                     # Attempt callback if URL is provided
                     callback_url = job_record.callback_url
                     if callback_url:
@@ -779,6 +783,50 @@ class DocumentAnalysisWorker:
             if error_code:
                 error_response["error_code"] = error_code
             return error_response
+
+    def _broadcast_job_result(self, job_id: str, request_data: dict, response_data: dict) -> None:
+        """
+        Push a completed job's result to peer instances (fire-and-forget).
+
+        Sends the full result payload plus the decrypted (stripped) request
+        data and the user's key/identity/state mapping so peers can store an
+        identical submission row without reprocessing the document.
+        """
+        try:
+            from app.repositories.document_submission_repository import strip_large_fields
+            from app.services.job_broadcast_service import job_broadcast_service
+
+            client_public_key = request_data.get('client_public_key')
+            user_key_info = {
+                'client_public_key': client_public_key,
+                'user_identity_id': response_data.get('user_identity_id'),
+                'verification_state': response_data.get('verification_state'),
+                'sequence_no': response_data.get('sequence_no'),
+            }
+
+            # Fill state from user_keys when the response shape lacks it
+            if client_public_key and (
+                user_key_info['verification_state'] is None
+                or user_key_info['sequence_no'] is None
+            ):
+                try:
+                    from app.repositories.user_key_repository import UserKeyRepository
+                    user_key_repo = UserKeyRepository()
+                    if user_key_info['verification_state'] is None:
+                        user_key_info['verification_state'] = user_key_repo.get_verification_state(client_public_key)
+                    if user_key_info['sequence_no'] is None:
+                        user_key_info['sequence_no'] = user_key_repo.get_sequence_no(client_public_key)
+                except Exception:
+                    pass
+
+            job_broadcast_service.broadcast_job_result(
+                job_id=job_id,
+                response_data=response_data,
+                request_data_decrypted_stripped=strip_large_fields(request_data),
+                user_key_info=user_key_info
+            )
+        except Exception as e:
+            self.logger.warning(f"Failed to broadcast job_result for {job_id}: {e}")
 
     def _send_callback(self, callback_url: str, job_id: str, response_data: dict) -> bool:
         """Send callback with job results using async HTTP (non-blocking)"""

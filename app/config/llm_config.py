@@ -10,9 +10,11 @@ class LLMSettings(BaseSettings):
     """LLM API configuration settings for prompt generation"""
 
     # API Connection Settings
+    # Empty means no LLM server is configured: the instance runs in shadow-only
+    # mode (stores replicated jobs, waits for results from the processing server)
     api_url: str = Field(
-        "https://api.openai.com/v1",
-        description="LLM API base URL"
+        "",
+        description="LLM API base URL (e.g., http://gpu-host:1177/v1 for Ollama). Empty = no LLM server configured"
     )
 
     # API Credentials
@@ -23,8 +25,8 @@ class LLMSettings(BaseSettings):
 
     # Model Configuration
     model: str = Field(
-        "gpt-4o-mini",
-        description="LLM model to use for prompt generation"
+        "",
+        description="LLM model to use for prompt generation (e.g., mistral:latest, llama3:latest for Ollama)"
     )
 
     # Text-Only Model Configuration (for coordinate prediction from OCR blocks)
@@ -158,3 +160,15 @@ class LLMSettings(BaseSettings):
 
 # Global settings instance
 llm_settings = LLMSettings()
+
+
+def is_llm_server_configured() -> bool:
+    """
+    True if an LLM server URL is explicitly configured (env var or .env file).
+
+    Instances with an LLM server act as processing origins: they process the
+    documents they receive and replicate job records + results to peers.
+    Instances without one are shadow-only: they store replicated jobs and
+    wait for the result push from the processing server.
+    """
+    return bool(llm_settings.api_url and llm_settings.api_url.strip())

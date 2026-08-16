@@ -584,6 +584,24 @@ def initialize_job_system():
         if loaded_count > 0:
             logger.info(f"Loaded {loaded_count} pending jobs on startup")
 
+        # Warn when peers rely on INSTANCE_URL for replication routing but it
+        # is left at the default (shadow rows would point peers at the wrong URL)
+        if instance_config.has_peers() and instance_config.instance_url == "http://localhost:12410":
+            logger.warning(
+                "INSTANCE_URL is left at the default http://localhost:12410 while peers are "
+                "configured - job replication and recovery calls depend on INSTANCE_URL being "
+                "the peer-reachable URL of this instance"
+            )
+
+        # Resolve pending shadow rows (replicated jobs) against their processing
+        # servers: finalize completed ones, mark dropped/failed ones
+        try:
+            from app.services.shadow_job_recovery_service import ShadowJobRecoveryService
+            ShadowJobRecoveryService().start()
+            logger.info("Shadow job recovery service started")
+        except Exception as e:
+            logger.warning(f"Shadow job recovery service failed to start: {e}")
+
         # Initialize startup sync service to fetch jobs from peers on startup
         if instance_config.startup_sync_enabled:
             from app.services.startup_sync_service import StartupSyncService

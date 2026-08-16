@@ -122,6 +122,10 @@ class JobDatabaseRecord(BaseModel):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     callback_attempted_at: Optional[datetime] = None
+    # URL of the instance processing this job. NULL = owned locally (this
+    # instance processes it). Set = replicated shadow row owned by another
+    # instance; never enqueue shadow rows for local processing.
+    processing_server: Optional[str] = None
 
 
 class SignatureData(BaseModel):

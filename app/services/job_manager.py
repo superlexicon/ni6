@@ -13,6 +13,9 @@ from app.dto.job_models import (
 from app.repositories.job_repository import JobRepository
 from app.core.job_queue import JobQueue
 from app.services.job_timing_service import get_job_timing_service
+from app.services.job_broadcast_service import job_broadcast_service
+from app.config.instance_config import instance_config
+from app.config.llm_config import is_llm_server_configured
 from app.core.logger import get_logger
 
 
@@ -184,6 +187,21 @@ class JobManager:
             job_request: Job request with encrypted envelope and file information
             skip_state_validation: If True, skip state validation (for signed endpoint only)
         """
+        # Shadow-only instances (no LLM server configured) never process
+        # documents; reject loudly so the client resubmits to the
+        # LLM-enabled instance
+        if not is_llm_server_configured():
+            self.logger.warning(
+                "Rejecting document job: no LLM server configured on this instance"
+            )
+            return JobSubmissionResponse(
+                success=False,
+                job_id="",
+                status=JobStatus.FAILED,
+                message=("This instance has no LLM server configured and cannot "
+                         "process documents. Submit to the LLM-enabled instance.")
+            )
+
         # Check if this is a secret share recovery job (allows empty iv)
         is_secret_share_recovery = False
         if job_request.files:
@@ -412,6 +430,19 @@ class JobManager:
         if self._worker:
             self._worker.signal_job_available()
 
+        # Replicate a shadow copy of the job record to peers (fire-and-forget).
+        # Peers store it unprocessed and finalize it when the result is pushed.
+        try:
+            job_broadcast_service.broadcast_job_created(
+                job_id=job_id,
+                request_data_stripped=self.job_repo._strip_large_fields(request_data),
+                client_public_key=request_data.get('client_public_key'),
+                user_identity_id=user_identity_id,
+                callback_url=callback_url
+            )
+        except Exception as e:
+            self.logger.warning(f"Failed to broadcast job_created for {job_id}: {e}")
+
         # Calculate expected completion time based on queue position
         expected_time = self._calculate_expected_completion_time(
             routing_key, request_data
@@ -614,16 +645,38 @@ class JobManager:
         else:
             # Max retries reached, mark as failed
             self.logger.error(f"Job {job_id} failed after {job_record.retry_count} retries: {error_message}")
-            return self.update_job_status(job_id, JobStatus.FAILED, error_message)
+            result = self.update_job_status(job_id, JobStatus.FAILED, error_message)
+
+            # Notify peers so they mark their shadow rows failed
+            try:
+                job_broadcast_service.broadcast_job_failed(
+                    job_id, error_message or "Job failed after max retries"
+                )
+            except Exception as e:
+                self.logger.warning(f"Failed to broadcast job_failed for {job_id}: {e}")
+
+            return result
 
     def load_pending_jobs_on_startup(self) -> int:
         """
         Load pending jobs from MySQL into in-memory queue on startup.
 
-        This ensures that any pending jobs from a previous run
-        are re-inserted into the in-memory queue for processing.
+        Role-aware with peer job replication:
+        - Instances with an LLM server enqueue their own pending jobs
+          (processing_server NULL). Replicated shadow rows (processing_server
+          set) are never enqueued - they are owned by the peer that received
+          the client request.
+        - Shadow-only instances (no LLM server) enqueue nothing. Leftover own
+          pending rows are marked failed: this instance can no longer process
+          them, and their stored payloads are stripped so no other instance
+          could either. Clients must resubmit.
+        - On all instances, shadow rows older than the TTL are marked failed
+          (origin crashed before delivering the result and is unreachable).
         """
         self.logger.info("Loading pending jobs from database into in-memory queue...")
+
+        # Safety net: fail stale replicated rows past the TTL
+        self.job_repo.fail_stale_replicated_jobs(instance_config.shadow_job_ttl_hours)
 
         # First, reset any stale jobs that were processing when the application stopped
         stale_jobs_count = self.job_repo.reset_stale_jobs()
@@ -634,9 +687,35 @@ class JobManager:
         pending_jobs = self.job_repo.get_pending_jobs(limit=1000)
         loaded_count = 0
 
+        if not is_llm_server_configured():
+            # Shadow-only instance: mark leftover own jobs failed (resubmit needed)
+            for job in pending_jobs:
+                if job.processing_server:
+                    continue  # shadow row - resolved by the recovery pull
+                self.logger.warning(
+                    f"Failing own pending job {job.id}: LLM server no longer configured"
+                )
+                self.update_job_status(
+                    job.id,
+                    JobStatus.FAILED,
+                    "LLM server no longer configured on this instance - resubmit to the LLM-enabled instance"
+                )
+                try:
+                    job_broadcast_service.broadcast_job_failed(
+                        job.id, "LLM server no longer configured on the processing instance - resubmit"
+                    )
+                except Exception:
+                    pass
+            self.logger.info("Shadow-only instance (no LLM server): no jobs enqueued for local processing")
+            return 0
+
         for job in pending_jobs:
             # Check if job is still pending and hasn't exceeded retry limit
             if job.status == JobStatus.PENDING and job.retry_count < job.max_retries:
+                # Never enqueue replicated shadow rows - they are owned by a peer
+                if job.processing_server:
+                    continue
+
                 # Check if job is already being tracked in the queue
                 if not self.job_queue.is_job_tracked(job.id):
                     # Convert to JobDatabaseRecord and add to queue

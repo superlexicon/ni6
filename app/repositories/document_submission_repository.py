@@ -431,6 +431,155 @@ class DocumentSubmissionRepository(BaseRepository):
             logger.error(error_msg)
             return (False, error_msg)
 
+    def create_submission_from_peer(
+        self,
+        response_data: Dict[str, Any],
+        request_data: Dict[str, Any],
+        job_id: Optional[str] = None
+    ) -> tuple[bool, str]:
+        """
+        Create a document submission from a result pushed by the processing
+        server (or recovered from it via the status endpoint).
+
+        Unlike create_submission(), identity and per-device state values are
+        taken explicitly from the origin's response_data instead of being
+        re-derived from local tables (the origin owns the user's state machine;
+        this instance may not have the user_keys row yet).
+
+        The extracted_data envelope is taken from the origin verbatim when
+        provided (extracted_data_encrypted) - ECIES envelopes are decryptable
+        by the client regardless of which instance produced them. Plaintext
+        extracted_data, when present, is encrypted locally as usual.
+
+        Args:
+            response_data: Result payload from the processing instance
+            request_data: Decrypted request data (stripped) from the origin
+            job_id: Job ID linking the submission to the replicated job
+
+        Returns:
+            Tuple of (success, error_message)
+        """
+        from app.core.db.database import get_db_connection_context
+        client_public_key = request_data.get('client_public_key')
+        user_identity_id = response_data.get('user_identity_id') if response_data else None
+
+        # Extract file info from request data (same logic as create_submission)
+        files = request_data.get('files', [])
+        filename = None
+        document_type = None
+        if files and len(files) > 0:
+            filename = files[0].get('filename')
+            raw_type = files[0].get('document_type') or files[0].get('file_type')
+            if raw_type:
+                document_type = raw_type.lower().replace(' ', '_')
+
+        # Build storage fields from the origin's values (no local user_keys lookups)
+        extracted_data_encrypted = None
+        if response_data:
+            envelope = response_data.get('extracted_data_encrypted')
+            if envelope and client_public_key:
+                # Origin-produced ECIES envelope (recovery path) - pass through verbatim
+                try:
+                    extracted_data_encrypted = (
+                        envelope if isinstance(envelope, str)
+                        else json.dumps(envelope, separators=(',', ':'))
+                    )
+                except (TypeError, ValueError) as e:
+                    logger.warning(f"Failed to serialize passed-through envelope for job {job_id}: {e}")
+                    extracted_data_encrypted = None
+            elif response_data.get('extracted_data') and client_public_key:
+                # Plaintext from the result push - encrypt locally with ECIES
+                try:
+                    from app.services.ecies_encryption_service import get_ecies_encryption_service
+                    encryption_service = get_ecies_encryption_service()
+                    extracted_data_encrypted = encryption_service.create_encryption_envelope(
+                        response_data['extracted_data'], client_public_key
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to encrypt extracted_data with ECIES for job {job_id}: {e}")
+
+        processing_time_seconds = response_data.get('processing_time_seconds') if response_data else None
+        verification_state = response_data.get('verification_state') if response_data else None
+        sequence_no = response_data.get('sequence_no') if response_data else None
+        docs_auth_score = response_data.get('docs_auth_score') if response_data else None
+        id_veri_score = response_data.get('id_veri_score') if response_data else None
+        result_status = response_data.get('result') if response_data else None
+        error_message = response_data.get('error') if response_data else None
+
+        forgery_checks_summary = None
+        if response_data and response_data.get('forgery_checks'):
+            forgery_checks_summary = json.dumps(response_data['forgery_checks'])
+        other_checks_summary = None
+        if response_data and response_data.get('other_checks'):
+            other_checks_summary = json.dumps(response_data['other_checks'])
+
+        request_data_for_db = strip_large_fields(request_data)
+
+        query = """
+            INSERT INTO document_submissions
+            (id, user_identity_id, client_public_key, filename, document_type,
+             request_data, job_id, extracted_data_encrypted, processing_time_seconds,
+             verification_state, sequence_no, docs_auth_score, id_veri_score,
+             forgery_checks_summary, other_checks_summary, result_status, error_message)
+            VALUES (UUID(), %(user_identity_id)s, %(client_public_key)s,
+                    %(filename)s, %(document_type)s, %(request_data)s, %(job_id)s,
+                    %(extracted_data_encrypted)s, %(processing_time_seconds)s, %(verification_state)s,
+                    %(sequence_no)s, %(docs_auth_score)s, %(id_veri_score)s, %(forgery_checks_summary)s,
+                    %(other_checks_summary)s, %(result_status)s, %(error_message)s)
+        """
+
+        params = {
+            'user_identity_id': user_identity_id,
+            'client_public_key': client_public_key,
+            'filename': filename,
+            'document_type': document_type,
+            'request_data': json.dumps(request_data_for_db) if request_data_for_db else None,
+            'job_id': job_id,
+            'extracted_data_encrypted': extracted_data_encrypted,
+            'processing_time_seconds': processing_time_seconds,
+            'verification_state': verification_state,
+            'sequence_no': sequence_no,
+            'docs_auth_score': docs_auth_score,
+            'id_veri_score': id_veri_score,
+            'forgery_checks_summary': forgery_checks_summary,
+            'other_checks_summary': other_checks_summary,
+            'result_status': result_status,
+            'error_message': error_message
+        }
+
+        try:
+            with get_db_connection_context() as conn:
+                with conn.cursor(dictionary=True) as cursor:
+                    cursor.execute(query, params)
+                    conn.commit()
+                    logger.info(
+                        f"Created replicated submission record for {document_type}: {filename} (job {job_id})"
+                    )
+                    return (True, "")
+        except MySQLError as e:
+            error_msg = f"Error creating replicated submission record for job {job_id}: {e}"
+            logger.error(error_msg)
+            return (False, error_msg)
+
+    def get_submission_by_job_id(self, job_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get a document submission by its originating job ID (idempotency check
+        for replicated results).
+        """
+        from app.core.db.database import get_db_connection_context
+        try:
+            with get_db_connection_context() as conn:
+                with conn.cursor(dictionary=True) as cursor:
+                    cursor.execute(
+                        "SELECT * FROM document_submissions WHERE job_id = %s LIMIT 1",
+                        (job_id,)
+                    )
+                    row = cursor.fetchone()
+                    return row
+        except MySQLError as e:
+            logger.error(f"Error getting submission by job_id {job_id}: {e}")
+            return None
+
     def get_submission_by_public_key(
         self,
         client_public_key: str,

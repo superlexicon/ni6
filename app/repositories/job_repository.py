@@ -195,7 +195,8 @@ class JobRepository:
                         updated_at=result['updated_at'],
                         started_at=result['started_at'],
                         completed_at=result['completed_at'],
-                        callback_attempted_at=result['callback_attempted_at']
+                        callback_attempted_at=result['callback_attempted_at'],
+                        processing_server=result.get('processing_server')
                     )
                 return None
         except Exception as e:
@@ -232,7 +233,8 @@ class JobRepository:
                         updated_at=result['updated_at'],
                         started_at=result['started_at'],
                         completed_at=result['completed_at'],
-                        callback_attempted_at=result['callback_attempted_at']
+                        callback_attempted_at=result['callback_attempted_at'],
+                        processing_server=result.get('processing_server')
                     )
                 return None
         except Exception as e:
@@ -271,7 +273,8 @@ class JobRepository:
                     updated_at=r['updated_at'],
                     started_at=r['started_at'],
                     completed_at=r['completed_at'],
-                    callback_attempted_at=r['callback_attempted_at']
+                        callback_attempted_at=r['callback_attempted_at'],
+                        processing_server=r.get('processing_server')
                 ) for r in results]
         except Exception as e:
             self.logger.error(f"Error getting in-progress jobs by user_identity_id: {e}")
@@ -419,7 +422,8 @@ class JobRepository:
                         updated_at=result['updated_at'],
                         started_at=result['started_at'],
                         completed_at=result['completed_at'],
-                        callback_attempted_at=result['callback_attempted_at']
+                        callback_attempted_at=result['callback_attempted_at'],
+                        processing_server=result.get('processing_server')
                     ))
 
                 return jobs
@@ -474,7 +478,8 @@ class JobRepository:
                         updated_at=result['updated_at'],
                         started_at=result['started_at'],
                         completed_at=result['completed_at'],
-                        callback_attempted_at=result['callback_attempted_at']
+                        callback_attempted_at=result['callback_attempted_at'],
+                        processing_server=result.get('processing_server')
                     ))
 
                 return jobs
@@ -563,3 +568,215 @@ class JobRepository:
                     cursor.close()
                 except Exception:
                     pass
+
+    def create_replicated_job(
+        self,
+        job_id: str,
+        request_data: Dict[str, Any],
+        processing_server: str,
+        client_public_key: Optional[str] = None,
+        user_identity_id: Optional[str] = None,
+        callback_url: Optional[str] = None
+    ):
+        """
+        Store a job replicated from a peer instance (shadow row).
+
+        The row is inserted with status 'pending' and processing_server set,
+        which marks it as owned by the peer: it is never enqueued for local
+        processing. It is finalized (submission stored + row deleted) when the
+        processing server pushes the result, or by the startup recovery pull.
+
+        Returns dict if job already exists (idempotent), True on success, False on error.
+        """
+        from app.core.db.database import get_db_connection_context
+        conn = None
+        cursor = None
+        try:
+            existing = self.get_job_by_id(job_id)
+            if existing:
+                self.logger.info(
+                    f"Replicated job {job_id} already exists with status {existing.status.value}"
+                )
+                return {"exists": True, "status": existing.status.value, "job_id": job_id}
+
+            request_data_for_db = self._strip_large_fields(request_data)
+            try:
+                request_json = json.dumps(request_data_for_db, ensure_ascii=False)
+            except (TypeError, ValueError):
+                request_json = json.dumps(str(request_data_for_db), ensure_ascii=False)
+
+            with get_db_connection_context() as conn:
+                cursor = conn.cursor(buffered=True, dictionary=False)
+
+                escaped_request_json = f"'{self._mysql_escape(cursor, str(request_json))}'"
+                escaped_client_public_key = (
+                    "NULL" if not client_public_key
+                    else f"'{self._mysql_escape(cursor, client_public_key)}'"
+                )
+                escaped_user_identity_id = (
+                    "NULL" if not user_identity_id
+                    else f"'{self._mysql_escape(cursor, str(user_identity_id))}'"
+                )
+                escaped_callback_url = (
+                    "NULL" if not callback_url
+                    else f"'{self._mysql_escape(cursor, callback_url)}'"
+                )
+                escaped_processing_server = f"'{self._mysql_escape(cursor, processing_server)}'"
+
+                sql = f"""
+                    INSERT INTO document_analysis_jobs
+                    (id, client_public_key, user_identity_id, status, request_data,
+                     callback_url, max_retries, processing_server)
+                    VALUES ('{self._mysql_escape(cursor, str(job_id))}',
+                           {escaped_client_public_key},
+                           {escaped_user_identity_id},
+                           '{JobStatus.PENDING.value}',
+                           {escaped_request_json},
+                           {escaped_callback_url},
+                           3,
+                           {escaped_processing_server})
+                """
+                cursor.execute(sql)
+                conn.commit()
+                self.logger.info(
+                    f"Stored replicated job {job_id} from processing server {processing_server}"
+                )
+                return True
+
+        except Exception as e:
+            self.logger.error(f"Failed to store replicated job {job_id}: {type(e).__name__}: {e}")
+            try:
+                if conn:
+                    conn.rollback()
+            except Exception:
+                pass
+            return False
+        finally:
+            if cursor:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
+
+    def mark_job_failed_replica(self, job_id: str, error_message: str) -> bool:
+        """
+        Mark a replicated (shadow) job as failed on this instance.
+
+        Used when the processing server reports permanent failure, or the job
+        was dropped (processing server has neither the job nor a submission).
+        Row is kept for inspection, mirroring local failure handling.
+        """
+        from app.core.db.database import get_db_connection_context
+        try:
+            with get_db_connection_context() as conn:
+                cursor = conn.cursor()
+                sql = """
+                UPDATE document_analysis_jobs
+                SET status = %s,
+                    error_message = %s,
+                    completed_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s AND processing_server IS NOT NULL
+                """
+                cursor.execute(sql, (JobStatus.FAILED.value, error_message, job_id))
+                conn.commit()
+                affected = cursor.rowcount
+                cursor.close()
+
+                if affected > 0:
+                    self.logger.info(f"Marked replicated job {job_id} as failed: {error_message}")
+                    return True
+                self.logger.warning(
+                    f"Replicated job {job_id} not found (already finalized?) - failure marking skipped"
+                )
+                return False
+
+        except Exception as e:
+            self.logger.error(f"Failed to mark replicated job {job_id} as failed: {str(e)}")
+            return False
+
+    def get_pending_replicated_jobs(self, limit: int = 500) -> List[JobDatabaseRecord]:
+        """
+        Get pending shadow rows (processing_server set) for the recovery pull.
+
+        Returns them ordered oldest-first so recovery resolves the most
+        stale shadows first.
+        """
+        from app.core.db.database import get_db_connection_context
+        try:
+            with get_db_connection_context() as conn:
+                cursor = conn.cursor(dictionary=True)
+                sql = """
+                SELECT * FROM document_analysis_jobs
+                WHERE status = %s AND processing_server IS NOT NULL
+                ORDER BY created_at ASC
+                LIMIT %s
+                """
+                cursor.execute(sql, (JobStatus.PENDING.value, limit))
+                results = cursor.fetchall()
+                cursor.close()
+
+                jobs = []
+                for result in results:
+                    jobs.append(JobDatabaseRecord(
+                        id=result['id'],
+                        status=JobStatus(result['status']),
+                        request_data=json.loads(result['request_data']) if result['request_data'] else {},
+                        response_data=json.loads(result['response_data']) if result['response_data'] else None,
+                        error_message=result['error_message'],
+                        callback_url=result['callback_url'],
+                        retry_count=result['retry_count'],
+                        max_retries=result['max_retries'],
+                        created_at=result['created_at'],
+                        updated_at=result['updated_at'],
+                        started_at=result['started_at'],
+                        completed_at=result['completed_at'],
+                        callback_attempted_at=result['callback_attempted_at'],
+                        processing_server=result.get('processing_server')
+                    ))
+                return jobs
+
+        except Exception as e:
+            self.logger.error(f"Failed to get pending replicated jobs: {str(e)}")
+            return []
+
+    def fail_stale_replicated_jobs(self, ttl_hours: int = 24) -> int:
+        """
+        Mark shadow rows older than ttl_hours as failed (safety net).
+
+        Covers the case where the processing server crashed before pushing the
+        result and cannot be reached by the recovery pull.
+        """
+        from app.core.db.database import get_db_connection_context
+        try:
+            with get_db_connection_context() as conn:
+                cursor = conn.cursor()
+                sql = """
+                UPDATE document_analysis_jobs
+                SET status = %s,
+                    error_message = %s,
+                    completed_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE status = %s
+                AND processing_server IS NOT NULL
+                AND created_at < DATE_SUB(NOW(), INTERVAL %s HOUR)
+                """
+                cursor.execute(sql, (
+                    JobStatus.FAILED.value,
+                    "No result received from processing server (TTL exceeded)",
+                    JobStatus.PENDING.value,
+                    ttl_hours
+                ))
+                affected = cursor.rowcount
+                conn.commit()
+                cursor.close()
+
+                if affected > 0:
+                    self.logger.warning(
+                        f"Marked {affected} stale replicated job(s) as failed (TTL {ttl_hours}h)"
+                    )
+                return affected
+
+        except Exception as e:
+            self.logger.error(f"Failed to fail stale replicated jobs: {str(e)}")
+            return 0

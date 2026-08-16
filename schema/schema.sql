@@ -294,11 +294,13 @@ CREATE TABLE document_analysis_jobs (
     started_at TIMESTAMP NULL,
     completed_at TIMESTAMP NULL,
     callback_attempted_at TIMESTAMP NULL,
+    processing_server VARCHAR(500) NULL COMMENT 'URL of the instance that received the client request and is processing it (set on replicated shadow rows; NULL = owned locally)',
     INDEX idx_status (status),
     INDEX idx_created_at (created_at),
     INDEX idx_callback_url (callback_url),
     INDEX idx_client_public_key (client_public_key),
-    INDEX idx_user_identity_id (user_identity_id)
+    INDEX idx_user_identity_id (user_identity_id),
+    INDEX idx_processing_server (processing_server)
 );
 
 -- ===============================================
