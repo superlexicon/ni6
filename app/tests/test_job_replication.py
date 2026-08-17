@@ -199,37 +199,85 @@ class TestReplicationHandlers(unittest.TestCase):
         update_mock.assert_called_once_with("pk", {"user_identity_id": "ident-new"})
         state_mock.assert_called_once_with("pk", 1, 2)
 
-    def test_user_key_upsert_creates_missing_row(self):
+    def test_user_key_upsert_migrates_local_pending_share(self):
+        """Missing user_keys row: migrate the LOCAL pending key (which holds
+        this instance's secret share) - never create a share-less row."""
         from app.repositories.user_key_repository import UserKeyRepository
+        from app.repositories.user_keys_pending_repository import UserKeysPendingRepository
         handlers = self._handler_module()
 
         with patch.object(
             UserKeyRepository, "get_key_by_public_key", return_value=None,
         ), patch.object(
-            UserKeyRepository, "create_key", return_value={"id": "k"}
+            UserKeysPendingRepository, "move_pending_to_user_keys", return_value=True
+        ) as move_mock, patch.object(
+            UserKeyRepository, "create_key"
         ) as create_mock, patch.object(
             UserKeyRepository, "update_state_and_sequence", return_value=True
         ) as state_mock:
             handlers._upsert_user_key_info(
                 {"client_public_key": "pk", "user_identity_id": "ident-1",
-                 "verification_state": 0, "sequence_no": 0},
-                {},
-                {"client_public_key": "pk"},
+                 "verification_state": 1, "sequence_no": 1},
+                {"user_identity_id": "ident-1"},
+                {"client_public_key": "pk", "files": [
+                    {"filename": "p.jpg", "file_type": "document", "document_type": "passport"}]},
             )
 
-        create_mock.assert_called_once()
-        self.assertEqual(create_mock.call_args.args[0]["user_public_key"], "pk")
-        self.assertEqual(create_mock.call_args.args[0]["user_identity_id"], "ident-1")
-        state_mock.assert_called_once_with("pk", 0, 0)
+        move_mock.assert_called_once_with("pk", "ident-1")
+        create_mock.assert_not_called()
+        state_mock.assert_called_once_with("pk", 1, 1)
 
-    def test_user_key_upsert_skips_invalid_state(self):
+    def test_user_key_upsert_no_pending_creates_nothing(self):
         from app.repositories.user_key_repository import UserKeyRepository
+        from app.repositories.user_keys_pending_repository import UserKeysPendingRepository
         handlers = self._handler_module()
 
         with patch.object(
             UserKeyRepository, "get_key_by_public_key", return_value=None,
         ), patch.object(
-            UserKeyRepository, "create_key", return_value={"id": "k"}
+            UserKeysPendingRepository, "move_pending_to_user_keys", return_value=False
+        ) as move_mock, patch.object(
+            UserKeyRepository, "create_key"
+        ) as create_mock, patch.object(
+            UserKeyRepository, "update_state_and_sequence"
+        ) as state_mock:
+            handlers._upsert_user_key_info(
+                {"client_public_key": "pk", "user_identity_id": "ident-1",
+                 "verification_state": 1, "sequence_no": 1},
+                {},
+                {"client_public_key": "pk", "files": []},
+            )
+
+        move_mock.assert_called_once_with("pk", "ident-1")
+        create_mock.assert_not_called()
+        state_mock.assert_not_called()
+
+    def test_user_key_upsert_ignores_recovery_temp_keys(self):
+        """Recovery submits under an ephemeral temp key - must never touch user_keys."""
+        from app.repositories.user_key_repository import UserKeyRepository
+        handlers = self._handler_module()
+
+        with patch.object(UserKeyRepository, "get_key_by_public_key") as get_mock:
+            handlers._upsert_user_key_info(
+                {"client_public_key": "temp-pk", "user_identity_id": "ident-1",
+                 "verification_state": 0, "sequence_no": 0},
+                {},
+                {"client_public_key": "temp-pk", "files": [
+                    {"filename": "r.jpg", "file_type": "selfie",
+                     "document_type": "secret_share_recovery"}]},
+            )
+
+        get_mock.assert_not_called()
+
+    def test_user_key_upsert_skips_invalid_state(self):
+        from app.repositories.user_key_repository import UserKeyRepository
+        from app.repositories.user_keys_pending_repository import UserKeysPendingRepository
+        handlers = self._handler_module()
+
+        with patch.object(
+            UserKeyRepository, "get_key_by_public_key", return_value=None,
+        ), patch.object(
+            UserKeysPendingRepository, "move_pending_to_user_keys", return_value=False
         ), patch.object(
             UserKeyRepository, "update_state_and_sequence"
         ) as state_mock:
@@ -240,6 +288,89 @@ class TestReplicationHandlers(unittest.TestCase):
             )
 
         state_mock.assert_not_called()
+
+
+class TestLocalOnlyJobBroadcasts(unittest.TestCase):
+    """Selfie/key-recovery jobs never replicate; only LLM document jobs do."""
+
+    RECOVERY_REQUEST = {"client_public_key": "pk", "files": [
+        {"filename": "r.jpg", "file_type": "selfie", "document_type": "secret_share_recovery"}]}
+    PASSPORT_REQUEST = {"client_public_key": "pk", "files": [
+        {"filename": "p.jpg", "file_type": "document", "document_type": "passport"}]}
+
+    def _make_worker(self):
+        from app.services.document_analysis_worker import DocumentAnalysisWorker
+        from app.services.job_manager import JobManager
+
+        manager = JobManager.__new__(JobManager)
+        worker = DocumentAnalysisWorker.__new__(DocumentAnalysisWorker)
+        worker.logger = MagicMock()
+        worker.job_manager = manager
+        return worker
+
+    def test_worker_result_push_skipped_for_recovery(self):
+        worker = self._make_worker()
+        with patch("app.services.job_broadcast_service.job_broadcast_service") as svc:
+            worker._broadcast_job_result("job-1", dict(self.RECOVERY_REQUEST), {"result": True})
+        svc.broadcast_job_result.assert_not_called()
+
+    def test_worker_result_push_skipped_for_selfie(self):
+        worker = self._make_worker()
+        selfie_request = {"client_public_key": "pk", "files": [
+            {"filename": "s.jpg", "file_type": "selfie", "document_type": "selfie"}]}
+        with patch("app.services.job_broadcast_service.job_broadcast_service") as svc:
+            worker._broadcast_job_result("job-1", selfie_request, {"result": True})
+        svc.broadcast_job_result.assert_not_called()
+
+    def test_worker_result_push_sent_for_passport(self):
+        worker = self._make_worker()
+        response = {"result": True, "user_identity_id": "ident-1",
+                    "verification_state": 2, "sequence_no": 2}
+        with patch("app.services.job_broadcast_service.job_broadcast_service") as svc:
+            worker._broadcast_job_result("job-1", dict(self.PASSPORT_REQUEST), response)
+        svc.broadcast_job_result.assert_called_once()
+
+    def test_mark_job_failed_skips_broadcast_for_recovery(self):
+        from app.services import job_manager as jm_module
+        from app.services.job_manager import JobManager
+        from app.dto.job_models import JobDatabaseRecord, JobStatus
+        from datetime import datetime
+
+        record = JobDatabaseRecord(
+            id="job-1", status=JobStatus.PROCESSING, request_data=self.RECOVERY_REQUEST,
+            retry_count=3, max_retries=3, created_at=datetime.utcnow())
+
+        manager = JobManager.__new__(JobManager)
+        manager.job_repo = MagicMock()
+        manager.job_repo.get_job_by_id.return_value = record
+        manager.logger = MagicMock()
+        manager.update_job_status = MagicMock(return_value=True)
+
+        with patch.object(jm_module, "job_broadcast_service") as broadcast_mock:
+            manager.mark_job_failed("job-1", "boom")
+
+        broadcast_mock.broadcast_job_failed.assert_not_called()
+
+    def test_mark_job_failed_broadcasts_for_passport(self):
+        from app.services import job_manager as jm_module
+        from app.services.job_manager import JobManager
+        from app.dto.job_models import JobDatabaseRecord, JobStatus
+        from datetime import datetime
+
+        record = JobDatabaseRecord(
+            id="job-1", status=JobStatus.PROCESSING, request_data=self.PASSPORT_REQUEST,
+            retry_count=3, max_retries=3, created_at=datetime.utcnow())
+
+        manager = JobManager.__new__(JobManager)
+        manager.job_repo = MagicMock()
+        manager.job_repo.get_job_by_id.return_value = record
+        manager.logger = MagicMock()
+        manager.update_job_status = MagicMock(return_value=True)
+
+        with patch.object(jm_module, "job_broadcast_service") as broadcast_mock:
+            manager.mark_job_failed("job-1", "boom")
+
+        broadcast_mock.broadcast_job_failed.assert_called_once()
 
 
 class TestCreateSubmissionFromPeer(unittest.TestCase):
@@ -492,14 +623,15 @@ class TestShadowSubmissionHandling(unittest.TestCase):
         manager.job_repo.create_job.assert_not_called()
         manager.job_queue.put.assert_not_called()
 
-    def test_recovery_job_accepted_and_queued_on_shadow(self):
-        """Key recovery fans out to all instances - shadows must process it locally."""
+    def test_recovery_job_accepted_and_queued_without_replication(self):
+        """Key recovery fans out to all instances - shadows process it locally
+        and it is NEVER replicated (each instance owns its own copy/share)."""
         import asyncio
         from app.services import job_manager as jm_module
 
         manager = self._make_manager()
         with patch.object(jm_module, "is_llm_server_configured", return_value=False), \
-             patch.object(jm_module, "job_broadcast_service"):
+             patch.object(jm_module, "job_broadcast_service") as broadcast_mock:
             response = asyncio.run(manager.create_job(self._request(
                 file_type="selfie", document_type="secret_share_recovery",
                 filename="recovery_selfie_otp080684.jpg")))
@@ -507,14 +639,15 @@ class TestShadowSubmissionHandling(unittest.TestCase):
         self.assertTrue(response.success)
         manager.job_repo.create_job.assert_called_once()
         manager.job_queue.put.assert_called_once()
+        broadcast_mock.broadcast_job_created.assert_not_called()
 
-    def test_selfie_job_accepted_and_queued_on_shadow(self):
+    def test_selfie_job_accepted_and_queued_without_replication(self):
         import asyncio
         from app.services import job_manager as jm_module
 
         manager = self._make_manager()
         with patch.object(jm_module, "is_llm_server_configured", return_value=False), \
-             patch.object(jm_module, "job_broadcast_service"):
+             patch.object(jm_module, "job_broadcast_service") as broadcast_mock:
             response = asyncio.run(manager.create_job(self._request(
                 file_type="selfie", document_type="selfie",
                 filename="selfie_otp123456.jpg")))
@@ -522,6 +655,20 @@ class TestShadowSubmissionHandling(unittest.TestCase):
         self.assertTrue(response.success)
         manager.job_repo.create_job.assert_called_once()
         manager.job_queue.put.assert_called_once()
+        broadcast_mock.broadcast_job_created.assert_not_called()
+
+    def test_passport_job_replicates_on_origin(self):
+        import asyncio
+        from app.services import job_manager as jm_module
+
+        manager = self._make_manager()
+        with patch.object(jm_module, "is_llm_server_configured", return_value=True), \
+             patch.object(jm_module, "job_broadcast_service") as broadcast_mock:
+            response = asyncio.run(manager.create_job(self._request(document_type="passport")))
+
+        self.assertTrue(response.success)
+        manager.job_queue.put.assert_called_once()
+        broadcast_mock.broadcast_job_created.assert_called_once()
 
 
 class TestBroadcastGating(unittest.TestCase):

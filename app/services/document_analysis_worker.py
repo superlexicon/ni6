@@ -791,8 +791,18 @@ class DocumentAnalysisWorker:
         Sends the full result payload plus the decrypted (stripped) request
         data and the user's key/identity/state mapping so peers can store an
         identical submission row without reprocessing the document.
+
+        ONLY LLM-dependent document jobs are replicated: selfie and
+        key-recovery jobs are processed locally on every instance the client
+        submits them to and never push results to peers.
         """
         try:
+            if not self.job_manager._request_data_requires_vision_llm(request_data):
+                self.logger.debug(
+                    f"Job {job_id} is local-only (selfie/key recovery) - skipping result broadcast"
+                )
+                return
+
             from app.repositories.document_submission_repository import strip_large_fields
             from app.services.job_broadcast_service import job_broadcast_service
 

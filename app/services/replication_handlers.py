@@ -114,23 +114,49 @@ def handle_job_failed_event(event: Dict[str, Any]) -> Dict[str, Any]:
     return {"status": "failed", "job_id": job_id}
 
 
+def _is_secret_share_recovery(request_data: Dict[str, Any]) -> bool:
+    """True if the request is a key-recovery submission (ephemeral temp key)."""
+    files = (request_data or {}).get("files") or []
+    for f in files:
+        if not isinstance(f, dict):
+            continue
+        doc_type = (f.get("document_type") or f.get("file_type") or "").lower().strip()
+        if doc_type == "secret_share_recovery":
+            return True
+    return False
+
+
 def _upsert_user_key_info(
     user_key_info: Dict[str, Any],
     response_data: Dict[str, Any],
     request_data: Dict[str, Any]
 ) -> None:
     """
-    Upsert the user's key -> identity/state mapping so this instance can serve
-    /api/jobs/verification for the replicated submission.
+    Sync the user's key -> identity/state mapping so this instance can serve
+    /api/jobs/verification for the replicated document submission.
 
     Values come from the origin (it owns the state machine); nothing is
     derived from local tables.
+
+    Key-recovery invariants:
+    - Secret-share recovery submits under an EPHEMERAL temp public key - its
+      results must never create user_keys rows.
+    - user_keys rows are never created share-less: each instance's secret
+      share lives in its own user_keys_pending row (registered directly by
+      the client), so a missing user_keys row is completed by migrating the
+      LOCAL pending row (which carries this instance's share), never by
+      inserting an empty one. Share-less rows satisfy recovery lookups but
+      cannot produce shares, breaking the 2-of-3 quorum.
     """
     client_public_key = (
         user_key_info.get("client_public_key")
         or request_data.get("client_public_key")
     )
     if not client_public_key:
+        return
+
+    if _is_secret_share_recovery(request_data):
+        logger.debug("Skipping user_keys sync for secret_share_recovery result (temp key)")
         return
 
     user_identity_id = (
@@ -144,23 +170,33 @@ def _upsert_user_key_info(
     user_key_repo = UserKeyRepository()
 
     existing = user_key_repo.get_key_by_public_key(client_public_key)
+    row_present = bool(existing)
     if existing:
         if user_identity_id and user_identity_id != existing.get("user_identity_id"):
             user_key_repo.update_key_by_public_key(
                 client_public_key, {"user_identity_id": user_identity_id}
             )
-    else:
-        user_key_repo.create_key({
-            "mobile_number": None,
-            "country_code": None,
-            "user_public_key": client_public_key,
-            "encrypted_secret_share": None,
-            "user_identity_id": user_identity_id,
-            "device_id": None,
-            "api_url": None
-        })
+    elif user_identity_id:
+        # Complete the LOCAL registration migration instead of creating an
+        # empty row: this instance's pending key holds its secret share.
+        from app.repositories.user_keys_pending_repository import UserKeysPendingRepository
+        moved = UserKeysPendingRepository().move_pending_to_user_keys(
+            client_public_key, user_identity_id
+        )
+        if moved:
+            row_present = True
+            logger.info(
+                f"Migrated local pending key (with secret share) for "
+                f"{client_public_key[:16]}... from replicated result"
+            )
+        else:
+            logger.debug(
+                f"No local pending key for {client_public_key[:16]}... - "
+                f"no user_keys row created (row creation belongs to this "
+                f"instance's own registration flow)"
+            )
 
     # Sync per-device state (valid range 0-3 enforced by the repository)
-    if isinstance(verification_state, int) and isinstance(sequence_no, int) and \
+    if row_present and isinstance(verification_state, int) and isinstance(sequence_no, int) and \
             0 <= verification_state <= 3 and 0 <= sequence_no <= 3:
         user_key_repo.update_state_and_sequence(client_public_key, verification_state, sequence_no)

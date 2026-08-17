@@ -469,16 +469,20 @@ class JobManager:
 
         # Replicate a shadow copy of the job record to peers (fire-and-forget).
         # Peers store it unprocessed and finalize it when the result is pushed.
-        try:
-            job_broadcast_service.broadcast_job_created(
-                job_id=job_id,
-                request_data_stripped=self.job_repo._strip_large_fields(request_data),
-                client_public_key=request_data.get('client_public_key'),
-                user_identity_id=user_identity_id,
-                callback_url=callback_url
-            )
-        except Exception as e:
-            self.logger.warning(f"Failed to broadcast job_created for {job_id}: {e}")
+        # ONLY LLM-dependent document jobs participate in replication: selfie
+        # and key-recovery jobs are processed locally wherever the client
+        # submits them and are never replicated.
+        if self._request_requires_vision_llm(job_request):
+            try:
+                job_broadcast_service.broadcast_job_created(
+                    job_id=job_id,
+                    request_data_stripped=self.job_repo._strip_large_fields(request_data),
+                    client_public_key=request_data.get('client_public_key'),
+                    user_identity_id=user_identity_id,
+                    callback_url=callback_url
+                )
+            except Exception as e:
+                self.logger.warning(f"Failed to broadcast job_created for {job_id}: {e}")
 
         # Calculate expected completion time based on queue position
         expected_time = self._calculate_expected_completion_time(
@@ -684,13 +688,16 @@ class JobManager:
             self.logger.error(f"Job {job_id} failed after {job_record.retry_count} retries: {error_message}")
             result = self.update_job_status(job_id, JobStatus.FAILED, error_message)
 
-            # Notify peers so they mark their shadow rows failed
-            try:
-                job_broadcast_service.broadcast_job_failed(
-                    job_id, error_message or "Job failed after max retries"
-                )
-            except Exception as e:
-                self.logger.warning(f"Failed to broadcast job_failed for {job_id}: {e}")
+            # Notify peers so they mark their shadow rows failed.
+            # Non-LLM jobs (selfie, key recovery) are never replicated - each
+            # instance owns its own local copy and failure state.
+            if self._request_data_requires_vision_llm(job_record.request_data):
+                try:
+                    job_broadcast_service.broadcast_job_failed(
+                        job_id, error_message or "Job failed after max retries"
+                    )
+                except Exception as e:
+                    self.logger.warning(f"Failed to broadcast job_failed for {job_id}: {e}")
 
             return result
 
